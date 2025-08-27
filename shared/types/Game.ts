@@ -36,6 +36,7 @@
     | "snek"
     | "colourclash"
     | "reversi"
+    | "teamsnek"
 
   export interface Session {
     latestGameID: string | null
@@ -113,6 +114,9 @@
     clashes: Clash[] // Array of clashes
     moves: { [playerID: string]: number }
     winners: Winner[] // Updated to an array of winner objects
+    teamScores?: { [teamID: string]: number } // Optional: only for team games
+    eliminatedTeams?: string[] // Optional: only for team games
+    turnNumber?: number // Optional: only for team games
   }
 
   export interface Clash {

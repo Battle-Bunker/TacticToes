@@ -4,6 +4,8 @@ import { arrayRemove, arrayUnion, doc, updateDoc } from "firebase/firestore"
 import React, { useEffect, useState } from "react"
 import { useUser } from "../../context/UserContext"
 import { db } from "../../firebaseConfig"
+import { TeamConfiguration } from "../../components/TeamConfiguration"
+import { PlayerConfiguration } from "../../components/PlayerConfiguration"
 
 import {
   Box,
@@ -22,7 +24,7 @@ import {
   TableRow,
   Typography,
 } from "@mui/material"
-import { GamePlayer, GameType } from "@shared/types/Game"
+import { GamePlayer, GameType, Team } from "@shared/types/Game"
 import { useGameStateContext } from "../../context/GameStateContext"
 import { getRulesComponent } from "./RulesDialog"
 
@@ -51,6 +53,8 @@ const GameSetup: React.FC = () => {
   const [secondsPerTurn, setSecondsPerTurn] = useState<string>("10")
   const [RulesComponent, setRulesComponent] = useState<React.FC | null>(null)
   const [boardSize, setBoardSize] = useState<BoardSize>("medium")
+  const [teams, setTeams] = useState<Team[]>(gameSetup?.teams || [])
+  const [maxTurns, setMaxTurns] = useState<number>(gameSetup?.maxTurns || 100)
 
   const gameDocRef = doc(db, "sessions", sessionName, "setups", gameID)
 
@@ -111,8 +115,37 @@ const GameSetup: React.FC = () => {
     })
   }
 
+  // Handle team assignment for a player
+  const handleTeamChange = async (playerID: string, teamID: string) => {
+    if (!gameSetup) return
+    const updatedGamePlayers = gameSetup.gamePlayers.map((player) =>
+      player.id === playerID ? { ...player, teamID } : player
+    )
+    
+    await updateDoc(gameDocRef, {
+      gamePlayers: updatedGamePlayers,
+    })
+  }
+
+  // Handle team configuration changes
+  const handleTeamsChange = async (newTeams: Team[]) => {
+    await updateDoc(gameDocRef, {
+      teams: newTeams,
+    })
+    setTeams(newTeams)
+  }
+
+  // Handle max turns configuration
+  const handleMaxTurnsChange = async (newMaxTurns: number) => {
+    await updateDoc(gameDocRef, {
+      maxTurns: newMaxTurns,
+    })
+    setMaxTurns(newMaxTurns)
+  }
+
   // Handler for selecting game type
   const handleGameTypeChange = async (event: SelectChangeEvent<GameType>) => {
+    console.log("handleGameTypeChange", event.target.value)
     const selectedGameType = event.target.value as GameType
     setGameType(selectedGameType)
 
@@ -140,7 +173,7 @@ const GameSetup: React.FC = () => {
 
   useEffect(() => {
     setRulesComponent(() => getRulesComponent(gameSetup?.gameType))
-  }, [gameSetup?.gameType])
+  }, [gameSetup?.gameType, gameSetup])
 
   if (gameState || !gameSetup) return null
 
@@ -204,6 +237,7 @@ const GameSetup: React.FC = () => {
             label="Game Type"
           >
             <MenuItem value="snek">Snek</MenuItem>
+            <MenuItem value="teamsnek">Team Snek</MenuItem>
             <MenuItem value="connect4">Connect 4</MenuItem>
             <MenuItem value="tactictoes">Tactic Toes</MenuItem>
             <MenuItem value="longboi">Long Boi</MenuItem>
@@ -285,46 +319,95 @@ const GameSetup: React.FC = () => {
         </FormControl>
       )}
 
+      {/* Team Configuration - Only show for team games */}
+      {(gameType === "teamsnek" ) && (
+        <FormControl fullWidth variant="outlined" sx={{ mt: 2 }}>
+          <InputLabel shrink sx={{ backgroundColor: "white", px: 1 }}>
+            Team Configuration
+          </InputLabel>
+          <Box
+            sx={{
+              border: "2px solid black",
+              padding: 2,
+              borderRadius: "0px",
+              minHeight: "56px",
+            }}
+          >
+            <TeamConfiguration
+              teams={teams}
+              onTeamsChange={handleTeamsChange}
+              maxTurns={maxTurns}
+              onMaxTurnsChange={handleMaxTurnsChange}
+            />
+          </Box>
+        </FormControl>
+      )}
+
       {/* Players Table */}
-      <TableContainer>
-        <Table size="small">
-          <TableHead>
-            <TableRow>
-              <TableCell>Player</TableCell>
-              <TableCell align="right">Ready</TableCell>
-              <TableCell align="right">Remove?</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {gameSetup.gamePlayers.map((gamePlayer) => {
-              const player = players.find(
-                (player) => player.id === gamePlayer.id,
-              )
-              if (!player) return null
-              return (
-                <TableRow key={player.id}>
-                  <TableCell sx={{ backgroundColor: player.colour }}>
-                    {player.name} {player.emoji}
-                  </TableCell>
-                  <TableCell
-                    align="right"
-                    sx={{ backgroundColor: player.colour }}
-                  >
-                    {playersReady.includes(player.id) ? "Yeah" : "Nah"}
-                  </TableCell>
-                  <TableCell
-                    align="right"
-                    sx={{ backgroundColor: player.colour }}
-                    onClick={() => handleKick(player.id, gamePlayer.type)}
-                  >
-                    ❌
-                  </TableCell>
-                </TableRow>
-              )
-            })}
-          </TableBody>
-        </Table>
-      </TableContainer>
+      {(gameType === "teamsnek" || gameType === "snek") && teams.length > 0 ? (
+        <FormControl fullWidth variant="outlined" sx={{ mt: 2 }}>
+          <InputLabel shrink sx={{ backgroundColor: "white", px: 1 }}>
+            Player Configuration
+          </InputLabel>
+          <Box
+            sx={{
+              border: "2px solid black",
+              padding: 2,
+              borderRadius: "0px",
+              minHeight: "56px",
+            }}
+          >
+            <PlayerConfiguration
+              teams={teams}
+              players={players}
+              gamePlayers={gameSetup.gamePlayers}
+              onTeamChange={handleTeamChange}
+              onKick={handleKick}
+              playersReady={playersReady}
+            />
+          </Box>
+        </FormControl>
+      ) : (
+        <TableContainer>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Player</TableCell>
+                <TableCell align="right">Ready</TableCell>
+                <TableCell align="right">Remove?</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {gameSetup.gamePlayers.map((gamePlayer) => {
+                const player = players.find(
+                  (player) => player.id === gamePlayer.id,
+                )
+                if (!player) return null
+                return (
+                  <TableRow key={player.id}>
+                    <TableCell sx={{ backgroundColor: player.colour }}>
+                      {player.name} {player.emoji}
+                    </TableCell>
+                    <TableCell
+                      align="right"
+                      sx={{ backgroundColor: player.colour }}
+                    >
+                      {playersReady.includes(player.id) ? "Yeah" : "Nah"}
+                    </TableCell>
+                    <TableCell
+                      align="right"
+                      sx={{ backgroundColor: player.colour }}
+                      onClick={() => handleKick(player.id, gamePlayer.type)}
+                    >
+                      ❌
+                    </TableCell>
+                  </TableRow>
+                )
+              })}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      )}
     </Stack>
   )
 }
