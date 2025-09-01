@@ -1,6 +1,18 @@
-modules = ["web", "nodejs-20"]
-[agent]
-expertMode = true
+modules = ["nodejs-20", "web"]
+run = "cd frontend && npm install && npm run dev -- --host 0.0.0.0 --port 5173"
 
 [nix]
-channel = "stable-25_05"
+channel = "stable-24_05"
+
+[deployment]
+# For “Deployments” (prod). Builds then serves the static dist on Replit’s PORT.
+run = [
+  "sh",
+  "-c",
+  "cd frontend && npm ci && npm run build && npx serve -s dist -l tcp://0.0.0.0:$PORT",
+]
+
+[[ports]]
+localPort = 5173
+externalPort = 80
+exposeLocalhost = true
