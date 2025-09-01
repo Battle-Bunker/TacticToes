@@ -1,6 +1,6 @@
 import { Timestamp } from "firebase-admin/firestore";
 import {TeamSnekProcessor} from "./TeamSnekProcessor"
-import { GamePlayer, GameSetup, GameState, GameType, Player, Team, Turn } from "@shared/types/Game"
+import { GamePlayer, GameSetup, GameState, GameType, Player, Team } from "@shared/types/Game"
 import {expect, describe, it} from "@jest/globals"
 
 
@@ -78,15 +78,15 @@ const mkGameState = (overrides?: {
 }
 
 // Utility: choose a move that will collide with a wall (guaranteed on 3x3 board).
-const chooseWallMoveFor = (turn: Turn, playerId: string): number => {
-    const walls = new Set<number>(turn.walls)
-    const options = turn.allowedMoves[playerId]
-    const wallMove = options.find((o) => walls.has(o))
-    if (wallMove == null) {
-      throw new Error("No wall-adjacent move found — use a 3x3 board for this test.")
-    }
-    return wallMove
-  }
+// const chooseWallMoveFor = (turn: Turn, playerId: string): number => {
+//     const walls = new Set<number>(turn.walls)
+//     const options = turn.allowedMoves[playerId]
+//     const wallMove = options.find((o) => walls.has(o))
+//     if (wallMove == null) {
+//       throw new Error("No wall-adjacent move found — use a 3x3 board for this test.")
+//     }
+//     return wallMove
+//   }
   
   // Freeze Math.random so food spawning (0.5 chance) is deterministic.
   let realRandom: () => number
