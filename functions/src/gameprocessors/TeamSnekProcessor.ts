@@ -29,6 +29,25 @@ export class TeamSnekProcessor extends SnekProcessor {
   }
 
   applyMoves(currentTurn: Turn, moves: Move[]): Turn {
+    const currentTurnNumber = (currentTurn.turnNumber || 0) + 1;
+    
+    // Check if we've exceeded max turns before processing moves
+    if (currentTurnNumber > this.maxTurns) {
+      logger.info(`TeamSnek: Max turns (${this.maxTurns}) exceeded. Game ending.`);
+      
+      // Calculate final team scores and determine winners
+      const teamScores = this.calculateTeamScores(currentTurn.playerPieces);
+      const eliminatedTeams = this.getEliminatedTeams(currentTurn.alivePlayers);
+      const winners = this.determineTeamWinners(teamScores, eliminatedTeams, currentTurnNumber);
+      
+      return {
+        ...currentTurn,
+        teamScores,
+        eliminatedTeams,
+        winners,
+        turnNumber: currentTurnNumber,
+      };
+    }
     
     const baseTurn = super.applyMoves(currentTurn, moves);
 
@@ -48,7 +67,7 @@ export class TeamSnekProcessor extends SnekProcessor {
     const winners = this.determineTeamWinners(
       teamScores,
       eliminatedTeams,
-      baseTurn.turnNumber || 0,
+      currentTurnNumber,
     );
     logger.info(`TeamSnek: Winners determined. ${winners}`);
 
@@ -57,7 +76,7 @@ export class TeamSnekProcessor extends SnekProcessor {
       teamScores,
       eliminatedTeams,
       winners,
-      turnNumber: (baseTurn.turnNumber || 0) + 1,
+      turnNumber: currentTurnNumber,
     };
   }
   private calculateTeamScores(playerPieces: { [playerID: string]: number[] }): {
@@ -123,6 +142,21 @@ export class TeamSnekProcessor extends SnekProcessor {
 
     // Game ends when only one team remains or max turns reached
     if (remainingTeams.length <= 1 || turnNumber >= this.maxTurns) {
+      // If max turns reached, determine winners by highest team score
+      if (turnNumber >= this.maxTurns && remainingTeams.length > 1) {
+        const maxScore = Math.max(...remainingTeams.map(team => teamScores[team.id] || 0));
+        const winningTeams = remainingTeams.filter(team => (teamScores[team.id] || 0) === maxScore);
+        
+        return winningTeams.map((team) => ({
+          playerID: team.playerIDs[0], // Representative player
+          teamID: team.id,
+          score: teamScores[team.id] || 0,
+          teamScore: teamScores[team.id] || 0,
+          winningSquares: [], // Could include all team snake positions
+        }));
+      }
+      
+      // If only one team remains, they win
       return remainingTeams.map((team) => ({
         playerID: team.playerIDs[0], // Representative player
         teamID: team.id,
