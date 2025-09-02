@@ -38,17 +38,17 @@ export class TeamSnekProcessor extends SnekProcessor {
 
       // Calculate final team scores and determine winners
       const teamScores = this.calculateTeamScores(currentTurn.playerPieces);
-      const eliminatedTeams = this.getEliminatedTeams(currentTurn.alivePlayers);
+      const remainingTeams = this.getRemainingTeams(currentTurn.alivePlayers);
       const winners = this.determineTeamWinners(
         teamScores,
-        eliminatedTeams,
+        remainingTeams,
         currentTurnNumber,
       );
 
       return {
         ...currentTurn,
         teamScores,
-        eliminatedTeams,
+        eliminatedTeams: [],
         winners,
         turnNumber: currentTurnNumber,
       };
@@ -63,15 +63,15 @@ export class TeamSnekProcessor extends SnekProcessor {
 
     logger.info(`TeamSnek: Team scores calculated. ${teamScores}`);
 
-    // Check for elimited teams
-    const eliminatedTeams = this.getEliminatedTeams(baseTurn.alivePlayers);
+    // Check for remaining teams
+    const remainingTeams = this.getRemainingTeams(baseTurn.alivePlayers);
 
-    logger.info(`TeamSnek: Eliminated teams calculated. ${eliminatedTeams}`);
+    logger.info(`TeamSnek: Remaining teams calculated. ${remainingTeams.map(t => t.id)}`);
 
     // Check win conditions
     const winners = this.determineTeamWinners(
       teamScores,
-      eliminatedTeams,
+      remainingTeams,
       currentTurnNumber,
     );
     logger.info(`TeamSnek: Winners determined. ${winners}`);
@@ -79,7 +79,7 @@ export class TeamSnekProcessor extends SnekProcessor {
     return {
       ...baseTurn,
       teamScores,
-      eliminatedTeams,
+      eliminatedTeams: [],
       winners,
       turnNumber: currentTurnNumber,
     };
@@ -124,26 +124,19 @@ export class TeamSnekProcessor extends SnekProcessor {
     return teamScores;
   }
 
-  private getEliminatedTeams(alivePlayers: string[]): string[] {
+  private getRemainingTeams(alivePlayers: string[]) {
     return (
-      this.gameSetup.teams
-        ?.filter(
-          (team) =>
-            !team.playerIDs.some((playerID) => alivePlayers.includes(playerID)),
-        )
-        .map((team) => team.id) || []
+      this.gameSetup.teams?.filter((team) =>
+        team.playerIDs.some((playerID) => alivePlayers.includes(playerID)),
+      ) || []
     );
   }
 
   private determineTeamWinners(
     teamScores: { [teamID: string]: number },
-    eliminatedTeams: string[],
+    remainingTeams: { id: string; playerIDs: string[] }[],
     turnNumber: number,
   ): Winner[] {
-    const remainingTeams =
-      this.gameSetup.teams?.filter(
-        (team) => !eliminatedTeams.includes(team.id),
-      ) || [];
 
     // Game ends when only one team remains or max turns reached
     if (remainingTeams.length <= 1 || turnNumber >= this.maxTurns) {
