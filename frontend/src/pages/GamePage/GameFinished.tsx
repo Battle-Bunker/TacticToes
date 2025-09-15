@@ -37,11 +37,13 @@ const GameFinished: React.FC = () => {
     // Build a list of all players with their scores
     const playersWithScores = winners.map((player) => {
       const winner = players.find((w) => w.id === player.playerID)
+      const playerScore = latestTurn.scores[player.playerID]
+
       return {
         playerID: player.playerID,
         name: winner?.name,
         emoji: winner?.emoji,
-        score: player.score,
+        score: playerScore,
         mmr: player.newMMR,
         mmrBump: player.mmrChange,
       }
