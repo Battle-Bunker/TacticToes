@@ -416,43 +416,21 @@ export class SnekProcessor extends GameProcessor {
   }
 
   protected calculateSurvivalWinners(gameState: SnakeGameState): Winner[] {
-        // Create a map to track survival turns for each player
-        const survivalTurns = new Map<string, number>()
+        // Get the latest turn scores (game-specific scores like snake lengths) instead of counting survival turns
+        const latestTurn = this.gameState.turns[this.gameState.turns.length - 1]
+        const latestScores = latestTurn?.scores || {}
 
-        // Initialize all players with 0 turns
-        this.gameSetup.gamePlayers.forEach(player => {
-          survivalTurns.set(player.id, 0)
-        })
-
-        // Count how many turns each player survived in historical turns
-        this.gameState.turns.forEach(turn => {
-          turn.alivePlayers.forEach(playerId => {
-            survivalTurns.set(
-              playerId,
-              (survivalTurns.get(playerId) || 0) + 1
-            )
-          })
-        })
-
-        // Add the current/final state
-    gameState.newAlivePlayers.forEach(playerId => {
-          survivalTurns.set(
-            playerId,
-            (survivalTurns.get(playerId) || 0) + 1
-          )
-        })
-
-        // Create winners array with all players
-    const winners = this.gameSetup.gamePlayers.map(player => ({
+        // Create winners array using actual game scores from turn data
+        const winners = this.gameSetup.gamePlayers.map(player => ({
           playerID: player.id,
-          score: survivalTurns.get(player.id) || 0,
-      winningSquares: gameState.newSnakes[player.id] ?? []
+          score: latestScores[player.id] || 0,  // Use game-specific score (snake length)
+          winningSquares: gameState.newSnakes[player.id] ?? []
         }))
 
-        // Sort winners by survival turns in descending order
+        // Sort winners by actual game scores in descending order
         winners.sort((a, b) => b.score - a.score)
     
-    return winners
+        return winners
   }
 
   protected createNewTurn(currentTurn: Turn, gameState: SnakeGameState, winners: Winner[]): Turn {
