@@ -26,3 +26,4 @@ go.work.sum
 
 firebase-debug.log
 firestore-debug.log
+attached_assets/
