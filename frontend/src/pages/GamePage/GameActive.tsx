@@ -123,15 +123,9 @@ const GameActive: React.FC = () => {
                     {player.name} {player.emoji}
                   </TableCell>
                   <TableCell align="right">
-                    {(() => {
-                      // If game is over, use filteredPlayers logic
-                      if (isGameOver) {
-                        return filteredPlayers.includes(player) ? "yeah" : "nah"
-                      }
-                      
-                      // If game is not over, check if player has moved
-                      return latestMoveStatus?.movedPlayerIDs.includes(player.id) ? "yeah" : "nah"
-                    })()}
+                    {latestMoveStatus?.movedPlayerIDs.includes(player.id)
+                      ? "yeah"
+                      : "nah"}
                   </TableCell>
                   <TableCell align="right">
                     {currentTurn.scores[player.id]}
