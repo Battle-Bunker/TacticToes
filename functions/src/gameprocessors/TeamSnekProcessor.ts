@@ -1,4 +1,4 @@
-import { GameState, Winner } from "@shared/types/Game";
+import { GameState, Winner, GameSetup, GamePlayer } from "@shared/types/Game";
 import { SnekProcessor } from "./SnekProcessor";
 
 export class TeamSnekProcessor extends SnekProcessor {
@@ -7,6 +7,14 @@ export class TeamSnekProcessor extends SnekProcessor {
   constructor(gameState: GameState) {
     super(gameState);
     this.maxTurns = gameState.setup.maxTurns || 100;
+  }
+
+  /**
+   * Team snek: only players assigned to teams are active players.
+   * Unassigned players become observers.
+   */
+  static filterActivePlayers(setup: GameSetup): GamePlayer[] {
+    return setup.gamePlayers.filter(player => player.teamID);
   }
 
   // Override calculateWinners to end game when maxTurns is reached

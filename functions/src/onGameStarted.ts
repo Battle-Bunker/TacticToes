@@ -3,7 +3,7 @@
 import * as functions from "firebase-functions"
 import * as admin from "firebase-admin"
 import { GameSetup, GameState, MoveStatus } from "@shared/types/Game" // Adjust the path as necessary
-import { getGameProcessor } from "./gameprocessors/ProcessorFactory"
+import { getGameProcessor, getProcessorClass } from "./gameprocessors/ProcessorFactory"
 import { logger } from "./logger" // Adjust the path as necessary
 import { FieldValue, Timestamp } from "firebase-admin/firestore"
 
@@ -50,14 +50,21 @@ export const onGameStarted = functions.firestore
       return
     }
 
-    // For team snek games, only include players assigned to teams
-    // Unassigned players become observers
-    const filteredSetup = afterData.gameType === 'teamsnek' 
-      ? {
-          ...afterData,
-          gamePlayers: afterData.gamePlayers.filter(player => player.teamID)
-        }
-      : afterData;
+    // Get the processor class to determine which players should be active
+    const ProcessorClass = getProcessorClass(afterData.gameType)
+    if (!ProcessorClass) {
+      logger.error(
+        `No processor class found for gameType: ${afterData.gameType} in game ${gameID}`,
+      )
+      return
+    }
+
+    // Filter players using the processor's logic
+    // Players not returned become observers
+    const filteredSetup = {
+      ...afterData,
+      gamePlayers: ProcessorClass.filterActivePlayers(afterData)
+    }
 
     // gameprocessor needs gamestate due to needing all turns.
     // construct a new object with empty fields
