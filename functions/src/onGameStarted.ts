@@ -3,7 +3,7 @@
 import * as functions from "firebase-functions"
 import * as admin from "firebase-admin"
 import { GameSetup, GameState, MoveStatus } from "@shared/types/Game" // Adjust the path as necessary
-import { getGameProcessor } from "./gameprocessors/ProcessorFactory"
+import { getGameProcessor, getProcessorClass } from "./gameprocessors/ProcessorFactory"
 import { logger } from "./logger" // Adjust the path as necessary
 import { FieldValue, Timestamp } from "firebase-admin/firestore"
 
@@ -50,11 +50,27 @@ export const onGameStarted = functions.firestore
       return
     }
 
+    // Get the processor class to determine which players should be active
+    const ProcessorClass = getProcessorClass(afterData.gameType)
+    if (!ProcessorClass) {
+      logger.error(
+        `No processor class found for gameType: ${afterData.gameType} in game ${gameID}`,
+      )
+      return
+    }
+
+    // Filter players using the processor's logic
+    // Players not returned become observers
+    const filteredSetup = {
+      ...afterData,
+      gamePlayers: ProcessorClass.filterActivePlayers(afterData)
+    }
+
     // gameprocessor needs gamestate due to needing all turns.
     // construct a new object with empty fields
     const gameState: GameState = {
       turns: [],
-      setup: afterData,
+      setup: filteredSetup,
       // these are not used, don't want to change to optional fields though
       timeCreated: Timestamp.fromMillis(0),
       timeFinished: Timestamp.fromMillis(0),
@@ -91,7 +107,7 @@ export const onGameStarted = functions.firestore
         .collection(`sessions/${sessionID}/games`)
         .doc(gameID)
       const newGame: GameState = {
-        setup: afterData,
+        setup: filteredSetup,
         turns: [firstTurn],
         timeCreated: FieldValue.serverTimestamp(),
         timeFinished: null,

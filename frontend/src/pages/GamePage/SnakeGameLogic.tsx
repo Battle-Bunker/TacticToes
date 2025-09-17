@@ -162,6 +162,18 @@ const GameLogic = ({
   // Collect snake segments
   Object.entries(playerPieces).forEach(([playerID, positions]) => {
     const playerInfo = players.find((p) => p.id === playerID)
+    
+    // Determine the color to use - team color in team mode, otherwise player color
+    let snakeColor = playerInfo?.colour || "white"
+    if (gameState.setup.gameType === 'teamsnek' && gameState.setup.teams) {
+      const gamePlayer = gameState.setup.gamePlayers.find(gp => gp.id === playerID)
+      if (gamePlayer?.teamID) {
+        const team = gameState.setup.teams.find(t => t.id === gamePlayer.teamID)
+        if (team) {
+          snakeColor = team.color
+        }
+      }
+    }
 
     // Iterate through positions in reverse order
     for (let index = positions.length - 1; index >= 0; index--) {
@@ -187,7 +199,7 @@ const GameLogic = ({
         }
       }
 
-      cellBackgroundMap[position] = playerInfo?.colour || "white"
+      cellBackgroundMap[position] = snakeColor
     }
   })
 
@@ -208,13 +220,25 @@ const GameLogic = ({
       )
 
       let content: JSX.Element | null = null
+      
+      // Determine the color to use - team color in team mode, otherwise player color
+      let snakeColor = playerInfo?.colour || "white"
+      if (gameState.setup.gameType === 'teamsnek' && gameState.setup.teams) {
+        const gamePlayer = gameState.setup.gamePlayers.find(gp => gp.id === playerID)
+        if (gamePlayer?.teamID) {
+          const team = gameState.setup.teams.find(t => t.id === gamePlayer.teamID)
+          if (team) {
+            snakeColor = team.color
+          }
+        }
+      }
 
       const commonBoxStyle: SxProps<Theme> = {
         ...borders,
         display: "flex",
         justifyContent: "center",
         alignItems: "center",
-        backgroundColor: playerInfo?.colour || "white",
+        backgroundColor: snakeColor,
         padding: 0,
         margin: 0,
       }

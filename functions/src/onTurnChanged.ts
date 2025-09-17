@@ -47,6 +47,22 @@ const processTurn = async (
     return { x: x - 1, y: gameData.setup.boardHeight - y - 2 } // Shift x inward and flip y-axis
   }
 
+  // Helper function to determine snake color - team color in team mode, otherwise bot color
+  const getSnakeColor = (playerID: string): string => {
+    if (gameData.setup.gameType === 'teamsnek' && gameData.setup.teams) {
+      const gamePlayer = gameData.setup.gamePlayers.find(gp => gp.id === playerID)
+      if (gamePlayer?.teamID) {
+        const team = gameData.setup.teams.find(t => t.id === gamePlayer.teamID)
+        if (team) {
+          return team.color
+        }
+      }
+    }
+    // Fall back to bot color if not in team mode or team not found
+    const botInfo = allBots.find(b => b.id === playerID)
+    return botInfo?.colour || "#FF0000"
+  }
+
   // Prepare the Battlesnake API request for each bot
   const requests = botsToQuery.map(async (bot) => {
     // Build the request body based on Battlesnake API format, excluding the perimeter and flipping the y-axis
@@ -55,6 +71,8 @@ const processTurn = async (
       const y = Math.floor(pos / gameData.setup.boardWidth)
       return adjustPosition(x, y) // Adjust the position inward and flip y-axis
     })
+    
+    const botColor = getSnakeColor(bot.id)
     const botRequestBody = {
       game: {
         id: gameID,
@@ -102,7 +120,7 @@ const processTurn = async (
             latency: "111", // Placeholder value, replace with actual latency if available
             shout: "", // Optional, replace with actual shout data if available
             customizations: {
-              color: "#FF0000", // Default color, you can get actual customization from your bot data
+              color: getSnakeColor(player),
               head: "default", // Placeholder, customize if needed
               tail: "default", // Placeholder, customize if needed
             },
@@ -119,7 +137,7 @@ const processTurn = async (
         latency: "111", // Placeholder latency value, replace if you track latency
         shout: "", // Placeholder for shout, adjust if needed
         customizations: {
-          color: "#FF0000", // Default color, customize if needed
+          color: botColor,
           head: "default", // Placeholder for head customization
           tail: "default", // Placeholder for tail customization
         },

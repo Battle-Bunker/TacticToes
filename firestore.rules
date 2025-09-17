@@ -14,7 +14,7 @@ service cloud.firestore {
 
     function isValidGameType(type) {
       // This function is still fine and can be used elsewhere if needed.
-      return type in ['connect4', 'longboi', 'tactictoes', 'snek', 'colourclash', 'reversi'];
+      return type in ['connect4', 'longboi', 'tactictoes', 'snek', 'colourclash', 'reversi','teamsnek'];
     }
 
     function isValidGamePlayers(players) {

@@ -1,6 +1,6 @@
 // functions/src/gameprocessors/ProcessorFactory.ts
 
-import { GameState } from "@shared/types/Game"
+import { GameState, GameType, GameSetup, GamePlayer } from "@shared/types/Game"
 import { ColorClashProcessor } from "./ColourClash"
 import { Connect4Processor } from "./Connect4Processor"
 import { GameProcessor } from "./GameProcessor"
@@ -8,23 +8,47 @@ import { LongboiProcessor } from "./LongboiProcessor"
 import { ReversiProcessor } from "./Reversi"
 import { SnekProcessor } from "./SnekProcessor"
 import { TacticToesProcessor } from "./TacticToesProcessor"
+import { TeamSnekProcessor } from "./TeamSnekProcessor"
 
-export function getGameProcessor(gameState: GameState): GameProcessor | null {
-  switch (gameState.setup.gameType) {
+/**
+ * Interface that defines the shape of a GameProcessor constructor.
+ * This includes both the constructor signature and required static methods.
+ */
+interface GameProcessorConstructor {
+  new (gameState: GameState): GameProcessor;
+  filterActivePlayers(setup: GameSetup): GamePlayer[];
+}
+
+/**
+ * Get the processor class for a given game type.
+ * This returns the class constructor, not an instance.
+ */
+export function getProcessorClass(gameType: GameType): GameProcessorConstructor | null {
+  switch (gameType) {
     case "connect4":
-      return new Connect4Processor(gameState)
+      return Connect4Processor
     case "longboi":
-      return new LongboiProcessor(gameState)
+      return LongboiProcessor
     case "tactictoes":
-      return new TacticToesProcessor(gameState)
+      return TacticToesProcessor
     case "snek":
-      return new SnekProcessor(gameState)
+      return SnekProcessor
     case "colourclash":
-      return new ColorClashProcessor(gameState)
+      return ColorClashProcessor
     case "reversi":
-      return new ReversiProcessor(gameState)
+      return ReversiProcessor
+    case "teamsnek":
+      return TeamSnekProcessor
     default:
-      console.error(`Unsupported game type: ${gameState.setup.gameType}`)
+      console.error(`Unsupported game type: ${gameType}`)
       return null
   }
+}
+
+export function getGameProcessor(gameState: GameState): GameProcessor | null {
+  const ProcessorClass = getProcessorClass(gameState.setup.gameType)
+  if (!ProcessorClass) {
+    return null
+  }
+  return new ProcessorClass(gameState)
 }

@@ -3,6 +3,28 @@ import { Timestamp } from "firebase-admin/firestore"
 import { logger } from "../logger"
 import { GameProcessor } from "./GameProcessor"
 
+interface SnakeGameState {
+  // Input data
+  boardWidth: number
+  boardHeight: number
+  
+  // Mutable game state
+  newSnakes: { [playerID: string]: number[] }
+  newFood: number[]
+  newHazards: number[]
+  newPlayerHealth: { [playerID: string]: number }
+  newAlivePlayers: string[]
+  
+  // Processing data
+  playerMoves: { [playerID: string]: number }
+  deadPlayers: Set<string>
+  clashes: Clash[]
+  
+  // Computed data
+  newAllowedMoves: { [playerID: string]: number[] }
+  newScores: { [playerID: string]: number }
+}
+
 export class SnekProcessor extends GameProcessor {
   private foodSpawnChance: number = 0.5 // 50% chance to spawn food
 
@@ -85,9 +107,35 @@ export class SnekProcessor extends GameProcessor {
 
   applyMoves(currentTurn: Turn, moves: Move[]): Turn {
     try {
-      const { playerPieces, food, hazards, walls, alivePlayers, playerHealth } =
-        currentTurn
+      // 1. Setup
+      const gameState = this.initializeGameState(currentTurn)
+      
+      // 2. Process moves
+      this.processPlayerMoves(gameState, moves)
+      
+      // 3. Handle collisions
+      this.detectAndHandleCollisions(gameState)
+      
+      // 4. Process food and health
+      this.processFoodAndHealth(gameState)
+      
+      // 5. Generate new food
+      this.generateNewFood(gameState)
+      
+      // 6. Calculate winners
+      const winners = this.calculateWinners(gameState)
+      
+      // 7. Create new turn
+      return this.createNewTurn(currentTurn, gameState, winners)
+      
+    } catch (error) {
+      logger.error(`Snek: Error applying moves:`, error)
+      throw error
+    }
+  }
 
+  private initializeGameState(currentTurn: Turn): SnakeGameState {
+    const { playerPieces, food, hazards, alivePlayers, playerHealth } = currentTurn
       const { boardWidth, boardHeight } = this.gameSetup
 
       // Deep copy playerPieces and other mutable objects
@@ -96,100 +144,148 @@ export class SnekProcessor extends GameProcessor {
         newSnakes[playerID] = [...playerPieces[playerID]]
       })
 
-      const newFood = [...food]
-      const newHazards = [...hazards]
-      const newPlayerHealth = { ...playerHealth }
-      const newAlivePlayers = [...alivePlayers]
+    return {
+      boardWidth,
+      boardHeight,
+      newSnakes,
+      newFood: [...food],
+      newHazards: [...hazards],
+      newPlayerHealth: { ...playerHealth },
+      newAlivePlayers: [...alivePlayers],
+      playerMoves: {},
+      deadPlayers: new Set(),
+      clashes: [],
+      newAllowedMoves: {},
+      newScores: {}
+    }
+  }
 
-      const playerMoves: { [playerID: string]: number } = {}
-      const deadPlayers: Set<string> = new Set()
-      const clashes: Clash[] = []
-
+  private processPlayerMoves(gameState: SnakeGameState, moves: Move[]): void {
       // Process latest moves
       moves.forEach((move) => {
-        playerMoves[move.playerID] = move.move
-      })
+      gameState.playerMoves[move.playerID] = move.move
+    })
 
-      // Apply moves
-      newAlivePlayers.forEach((playerID) => {
-        let moveIndex = playerMoves[playerID]
-        const snake = newSnakes[playerID]
+    // Apply moves to each player
+    gameState.newAlivePlayers.forEach((playerID) => {
+      this.processSinglePlayerMove(gameState, playerID)
+    })
+  }
+
+  private processSinglePlayerMove(gameState: SnakeGameState, playerID: string): void {
+    let moveIndex = gameState.playerMoves[playerID]
+    const snake = gameState.newSnakes[playerID]
         const headIndex = snake[0]
         const allowedMoves = this.getAdjacentIndices(
           headIndex,
-          boardWidth,
-          boardHeight,
+      gameState.boardWidth,
+      gameState.boardHeight,
         )
 
         // Player didn't submit a valid move or move is invalid
         if (!moveIndex || !allowedMoves.includes(moveIndex)) {
+      moveIndex = this.getDefaultMove(snake, allowedMoves, gameState.boardWidth, playerID)
+    }
+
+    // Move the snake
+    this.moveSnake(snake, moveIndex)
+  }
+
+  private getDefaultMove(snake: number[], allowedMoves: number[], boardWidth: number, playerID: string): number {
           const direction = this.getLastDirection(snake, boardWidth)
 
           if (direction) {
+      const headIndex = snake[0]
             const newX = (headIndex % boardWidth) + direction.dx
             const newY = Math.floor(headIndex / boardWidth) + direction.dy
-            moveIndex = newY * boardWidth + newX
+      return newY * boardWidth + newX
           } else {
             // No previous direction, choose a default move
             if (allowedMoves.length > 0) {
-              moveIndex = allowedMoves[0]
+        return allowedMoves[0]
             } else {
               // No valid moves, eliminate the player
-              moveIndex = headIndex + 1
-            }
             logger.warn(
               `Snek: Player ${playerID} did not submit a move and has no previous direction.`,
             )
-          }
-        }
+        return snake[0] + 1
+      }
+    }
+  }
 
-        // Check for collision with walls
-        if (walls.includes(moveIndex)) {
-          deadPlayers.add(playerID)
+  private moveSnake(snake: number[], moveIndex: number): void {
+    // Remove the last element of the snake (tail)
+    snake.pop()
+    // Add the latest move index to the start of the snake (new head position)
+    snake.unshift(moveIndex)
+  }
+
+  private detectAndHandleCollisions(gameState: SnakeGameState): void {
+    // Wall collisions
+    this.checkWallCollisions(gameState)
+    
+    // Self collisions
+    this.checkSelfCollisions(gameState)
+    
+    // Snake-to-snake collisions
+    this.checkSnakeCollisions(gameState)
+    
+    // Remove dead players
+    this.removeDeadPlayers(gameState)
+  }
+
+  private checkWallCollisions(gameState: SnakeGameState): void {
+    const walls = this.getWallPositions(gameState.boardWidth, gameState.boardHeight)
+    
+    gameState.newAlivePlayers.forEach((playerID) => {
+      const snake = gameState.newSnakes[playerID]
+      const headIndex = snake[0]
+      
+      if (walls.includes(headIndex)) {
+        gameState.deadPlayers.add(playerID)
           snake.forEach((position) => {
-            clashes.push({
+          gameState.clashes.push({
               index: position,
               playerIDs: [playerID],
               reason: "Collided with wall",
             })
           })
           logger.info(
-            `Snek: Player ${playerID} collided with a wall at position ${moveIndex}.`,
-          )
-          return
-        }
+          `Snek: Player ${playerID} collided with a wall at position ${headIndex}.`,
+        )
+      }
+    })
+  }
 
-        // Remove the last element of the snake (tail)
-        snake.pop()
-
-        // Self-collision check (before applying the move)
-        if (snake.includes(moveIndex)) {
-          // Snake collides with its own body
-          deadPlayers.add(playerID)
+  private checkSelfCollisions(gameState: SnakeGameState): void {
+    gameState.newAlivePlayers.forEach((playerID) => {
+      const snake = gameState.newSnakes[playerID]
+      const headIndex = snake[0]
+      
+      // Self-collision check (snake hits its own body)
+      if (snake.slice(1).includes(headIndex)) {
+        gameState.deadPlayers.add(playerID)
           snake.forEach((position) => {
-            clashes.push({
+          gameState.clashes.push({
               index: position,
               playerIDs: [playerID],
               reason: "Collided with own body",
             })
           })
           logger.info(
-            `Snek: Player ${playerID} collided with its own body at position ${moveIndex}.`,
-          )
-          return
-        }
+          `Snek: Player ${playerID} collided with its own body at position ${headIndex}.`,
+        )
+      }
+    })
+  }
 
-        // Add the latest move index to the start of the snake (new head position)
-        snake.unshift(moveIndex)
-      })
-
-      // After all moves, check for collisions between snakes
+  private checkSnakeCollisions(gameState: SnakeGameState): void {
+    // Build occupied positions and head positions
       const newOccupiedPositions: { [position: number]: string[] } = {}
       const headPositions: { [position: number]: string[] } = {}
 
-      // Build occupied positions and head positions
-      Object.keys(newSnakes).forEach((playerID) => {
-        const snake = newSnakes[playerID]
+    Object.keys(gameState.newSnakes).forEach((playerID) => {
+      const snake = gameState.newSnakes[playerID]
         snake.forEach((pos, index) => {
           if (!newOccupiedPositions[pos]) {
             newOccupiedPositions[pos] = []
@@ -215,14 +311,14 @@ export class SnekProcessor extends GameProcessor {
           // Head-on collision
           let minLength = Infinity
           playersAtHead.forEach((playerID) => {
-            minLength = Math.min(minLength, newSnakes[playerID].length)
+          minLength = Math.min(minLength, gameState.newSnakes[playerID].length)
           })
 
           playersAtHead.forEach((playerID) => {
-            if (newSnakes[playerID].length === minLength) {
-              deadPlayers.add(playerID)
-              newSnakes[playerID].forEach((pos) => {
-                clashes.push({
+          if (gameState.newSnakes[playerID].length === minLength) {
+            gameState.deadPlayers.add(playerID)
+            gameState.newSnakes[playerID].forEach((pos) => {
+              gameState.clashes.push({
                   index: pos,
                   playerIDs: playersAtHead,
                   reason: "Head-on collision (shortest snake(s) died)",
@@ -237,9 +333,9 @@ export class SnekProcessor extends GameProcessor {
           )
 
           if (otherPlayersAtPosition.length > 0) {
-            deadPlayers.add(playerID)
-            newSnakes[playerID].forEach((pos) => {
-              clashes.push({
+          gameState.deadPlayers.add(playerID)
+          gameState.newSnakes[playerID].forEach((pos) => {
+            gameState.clashes.push({
                 index: pos,
                 playerIDs: [playerID, ...otherPlayersAtPosition],
                 reason: "Collided with another snake's body",
@@ -248,33 +344,45 @@ export class SnekProcessor extends GameProcessor {
           }
         }
       })
+  }
 
-      // Remove dead players from alive list and track their elimination
-      deadPlayers.forEach((playerID) => {
-        const index = newAlivePlayers.indexOf(playerID)
+  private removeDeadPlayers(gameState: SnakeGameState): void {
+    gameState.deadPlayers.forEach((playerID) => {
+      const index = gameState.newAlivePlayers.indexOf(playerID)
         if (index !== -1) {
-          newAlivePlayers.splice(index, 1)
-        }
-        delete newSnakes[playerID]
-        delete newPlayerHealth[playerID]
-      })
+        gameState.newAlivePlayers.splice(index, 1)
+      }
+      delete gameState.newSnakes[playerID]
+      delete gameState.newPlayerHealth[playerID]
+    })
+  }
 
-      // Food Processing
-      Object.keys(newSnakes).forEach((playerID) => {
-        const snake = newSnakes[playerID]
+  private processFoodAndHealth(gameState: SnakeGameState): void {
+    Object.keys(gameState.newSnakes).forEach((playerID) => {
+      this.processPlayerFoodAndHealth(gameState, playerID)
+    })
+    
+    // Remove players who died from starvation
+    this.removeDeadPlayers(gameState)
+  }
+
+  private processPlayerFoodAndHealth(gameState: SnakeGameState, playerID: string): void {
+    const snake = gameState.newSnakes[playerID]
         const headPosition = snake[0]
 
-        const foodIndex = newFood.indexOf(headPosition)
+    const foodIndex = gameState.newFood.indexOf(headPosition)
         if (foodIndex !== -1) {
-          newFood.splice(foodIndex, 1)
-          snake.push(snake[snake.length - 1])
-          newPlayerHealth[playerID] = 100
+      // Player ate food
+      gameState.newFood.splice(foodIndex, 1)
+      snake.push(snake[snake.length - 1]) // Grow snake (duplicate tail)
+      gameState.newPlayerHealth[playerID] = 100 // Restore health
         } else {
-          newPlayerHealth[playerID] -= 1
-          if (newPlayerHealth[playerID] <= 0) {
-            deadPlayers.add(playerID)
+      // Player didn't eat food, lose health
+      gameState.newPlayerHealth[playerID] -= 1
+      if (gameState.newPlayerHealth[playerID] <= 0) {
+        gameState.deadPlayers.add(playerID)
             snake.forEach((pos) => {
-              clashes.push({
+          gameState.clashes.push({
                 index: pos,
                 playerIDs: [playerID],
                 reason: "Died due to zero health",
@@ -282,286 +390,99 @@ export class SnekProcessor extends GameProcessor {
             })
           }
         }
-      })
+  }
 
-      // Remove players who died due to zero health
-      deadPlayers.forEach((playerID) => {
-        const index = newAlivePlayers.indexOf(playerID)
-        if (index !== -1) {
-          newAlivePlayers.splice(index, 1)
-        }
-        delete newSnakes[playerID]
-        delete newPlayerHealth[playerID]
-      })
-
-      // Generate new food
+  private generateNewFood(gameState: SnakeGameState): void {
       if (Math.random() < this.foodSpawnChance) {
         const freePositions = this.getFreePositions(
-          this.gameSetup.boardWidth,
-          this.gameSetup.boardHeight,
-          newSnakes,
-          newFood,
-          newHazards,
+        gameState.boardWidth,
+        gameState.boardHeight,
+        gameState.newSnakes,
+        gameState.newFood,
+        gameState.newHazards,
         )
         if (freePositions.length > 0) {
           const randomIndex = Math.floor(Math.random() * freePositions.length)
-          newFood.push(freePositions[randomIndex])
-        }
+        gameState.newFood.push(freePositions[randomIndex])
       }
-
-      // Update allowed moves
-      const newAllowedMoves = this.calculateAllowedMoves(
-        newSnakes,
-        this.gameSetup.boardWidth,
-        this.gameSetup.boardHeight,
-      )
-
-      // Update scores based on current snake lengths
-      const newScores: { [playerID: string]: number } = {}
-      Object.keys(newSnakes).forEach((playerID) => {
-        newScores[playerID] = newSnakes[playerID].length
-      })
-
-      // Determine winners if game is over
-      let winners: Winner[] = []
-      if (newAlivePlayers.length <= 1) {
-        // Create a map to track survival turns for each player
-        const survivalTurns = new Map<string, number>()
-
-        // Initialize all players with 0 turns
-        this.gameSetup.gamePlayers.forEach(player => {
-          survivalTurns.set(player.id, 0)
-        })
-
-        // Count how many turns each player survived in historical turns
-        this.gameState.turns.forEach(turn => {
-          turn.alivePlayers.forEach(playerId => {
-            survivalTurns.set(
-              playerId,
-              (survivalTurns.get(playerId) || 0) + 1
-            )
-          })
-        })
-
-        // Add the current/final state
-        newAlivePlayers.forEach(playerId => {
-          survivalTurns.set(
-            playerId,
-            (survivalTurns.get(playerId) || 0) + 1
-          )
-        })
-
-        // Create winners array with all players
-        winners = this.gameSetup.gamePlayers.map(player => ({
-          playerID: player.id,
-          score: survivalTurns.get(player.id) || 0,
-          winningSquares: newSnakes[player.id] ?? []
-        }))
-
-        // Sort winners by survival turns in descending order
-        winners.sort((a, b) => b.score - a.score)
-      }
-
-      // Create the new turn
-      const now = Date.now()
-      const newTurn: Turn = {
-        ...currentTurn,
-        playerHealth: newPlayerHealth,
-        startTime: Timestamp.fromMillis(now),
-        endTime: Timestamp.fromMillis(now + this.gameSetup.maxTurnTime * 1000),
-        scores: newScores,
-        alivePlayers: newAlivePlayers,
-        food: newFood,
-        hazards: newHazards,
-        playerPieces: newSnakes,
-        allowedMoves: newAllowedMoves,
-        clashes: clashes,
-        moves: playerMoves,
-        winners: winners,
-      }
-
-      return newTurn
-    } catch (error) {
-      logger.error(`Snek: Error applying moves:`, error)
-      throw error
     }
   }
 
-  private initializeSnakes(): {
-    [playerID: string]: number[]
-  } {
+  protected calculateWinners(gameState: SnakeGameState): Winner[] {
+    if (gameState.newAlivePlayers.length <= 1) {
+      return this.calculateSurvivalWinners(gameState)
+    }
+    return []
+  }
+
+  protected calculateSurvivalWinners(gameState: SnakeGameState): Winner[] {
+        // Get the latest turn scores (game-specific scores like snake lengths) instead of counting survival turns
+        const latestTurn = this.gameState.turns[this.gameState.turns.length - 1]
+        const latestScores = latestTurn?.scores || {}
+
+        // Create winners array using actual game scores from turn data
+        const winners = this.gameSetup.gamePlayers.map(player => ({
+          playerID: player.id,
+          score: latestScores[player.id] || 0,  // Use game-specific score (snake length)
+          winningSquares: gameState.newSnakes[player.id] ?? []
+        }))
+
+        // Sort winners by actual game scores in descending order
+        winners.sort((a, b) => b.score - a.score)
+    
+        return winners
+  }
+
+  protected createNewTurn(currentTurn: Turn, gameState: SnakeGameState, winners: Winner[]): Turn {
+    // Update allowed moves
+    gameState.newAllowedMoves = this.calculateAllowedMoves(
+      gameState.newSnakes,
+      gameState.boardWidth,
+      gameState.boardHeight,
+    )
+
+    // Update scores based on current snake lengths
+    Object.keys(gameState.newSnakes).forEach((playerID) => {
+      gameState.newScores[playerID] = gameState.newSnakes[playerID].length
+    })
+
+    // Ensure alivePlayers only contains players who actually have snakes
+    const validAlivePlayers = gameState.newAlivePlayers.filter(playerID => {
+      return gameState.newSnakes[playerID] && gameState.newSnakes[playerID].length > 0;
+    });
+
+    const now = Date.now()
+    return {
+      ...currentTurn,
+      playerHealth: gameState.newPlayerHealth,
+      startTime: Timestamp.fromMillis(now),
+      endTime: Timestamp.fromMillis(now + this.gameSetup.maxTurnTime * 1000),
+      scores: gameState.newScores,
+      alivePlayers: validAlivePlayers,
+      food: gameState.newFood,
+      hazards: gameState.newHazards,
+      playerPieces: gameState.newSnakes,
+      allowedMoves: gameState.newAllowedMoves,
+      clashes: gameState.clashes,
+      moves: gameState.playerMoves,
+      winners: winners,
+    }
+  }
+
+  // Helper methods that were in the original implementation
+  private initializeSnakes(): { [playerID: string]: number[] } {
     const { boardWidth, gamePlayers } = this.gameSetup
-
     const positions = this.generateStartingPositions()
-
     const playerPieces: { [playerID: string]: number[] } = {}
 
     gamePlayers.forEach((player, index) => {
       const { x, y } = positions[index]
       const startIndex = y * boardWidth + x
-
-      // Snake starts with length 3, all segments at the same position
       const snake = [startIndex, startIndex, startIndex]
       playerPieces[player.id] = snake
     })
 
     return playerPieces
-  }
-
-  private generateStartingPositions(): { x: number; y: number }[] {
-    const { boardWidth, boardHeight, gamePlayers } = this.gameSetup
-    const positions: { x: number; y: number }[] = []
-
-    // Calculate the outermost position that allows odd spacing
-    const startX = (boardWidth - 1) % 4 === 0 ? 2 : 1
-    const startY = (boardHeight - 1) % 4 === 0 ? 2 : 1
-    const endX = boardWidth - startX - 1
-    const endY = boardHeight - startY - 1
-
-    // Define edges
-    const edges = [
-      { start: { x: startX, y: startY }, end: { x: endX, y: startY } }, // Top
-      { start: { x: endX, y: startY }, end: { x: endX, y: endY } }, // Right
-      { start: { x: endX, y: endY }, end: { x: startX, y: endY } }, // Bottom
-      { start: { x: startX, y: endY }, end: { x: startX, y: startY } }, // Left
-    ]
-
-    // Add corner positions
-    positions.push(
-      { x: startX, y: startY },
-      { x: endX, y: startY },
-      { x: startX, y: endY },
-      { x: endX, y: endY },
-    )
-
-    let depth = 0
-    while (positions.length < gamePlayers.length) {
-      const newPositions: { x: number; y: number }[] = []
-      for (const edge of edges) {
-        const midpoints = this.getMidpoints(edge.start, edge.end, depth)
-        newPositions.push(...midpoints)
-      }
-
-      // Filter out duplicates and add new positions
-      newPositions.forEach((pos) => {
-        if (!positions.some((p) => p.x === pos.x && p.y === pos.y)) {
-          positions.push(pos)
-        }
-      })
-
-      depth++
-
-      // If we can't add more positions on the edges, break the loop
-      if (newPositions.length === 0) break
-    }
-
-    // If we still need more positions, fill the inner part
-    if (positions.length < gamePlayers.length) {
-      this.fillInnerPositions(positions)
-    }
-
-    return positions.slice(0, gamePlayers.length)
-  }
-
-  private getMidpoints(
-    start: { x: number; y: number },
-    end: { x: number; y: number },
-    depth: number,
-  ): { x: number; y: number }[] {
-    const positions: { x: number; y: number }[] = []
-    const segments = Math.pow(2, depth + 1)
-    for (let i = 1; i < segments; i += 2) {
-      const x = Math.round(start.x + ((end.x - start.x) * i) / segments)
-      const y = Math.round(start.y + ((end.y - start.y) * i) / segments)
-      positions.push({ x, y })
-    }
-    return positions
-  }
-
-  private fillInnerPositions(positions: { x: number; y: number }[]): void {
-    const { boardWidth, boardHeight, gamePlayers } = this.gameSetup
-    let innerStartX = 3
-    let innerStartY = 3
-    let innerEndX = boardWidth - 4
-    let innerEndY = boardHeight - 4
-
-    while (
-      positions.length < gamePlayers.length &&
-      innerStartX < innerEndX &&
-      innerStartY < innerEndY
-    ) {
-      // Add corner positions for this inner layer
-      const innerPositions = [
-        { x: innerStartX, y: innerStartY },
-        { x: innerEndX, y: innerStartY },
-        { x: innerStartX, y: innerEndY },
-        { x: innerEndX, y: innerEndY },
-      ]
-
-      // Add midpoints for this inner layer
-      if (innerEndX - innerStartX > 2) {
-        innerPositions.push({
-          x: Math.floor((innerStartX + innerEndX) / 2),
-          y: innerStartY,
-        })
-        innerPositions.push({
-          x: Math.floor((innerStartX + innerEndX) / 2),
-          y: innerEndY,
-        })
-      }
-      if (innerEndY - innerStartY > 2) {
-        innerPositions.push({
-          x: innerStartX,
-          y: Math.floor((innerStartY + innerEndY) / 2),
-        })
-        innerPositions.push({
-          x: innerEndX,
-          y: Math.floor((innerStartY + innerEndY) / 2),
-        })
-      }
-
-      // Add new positions if they don't already exist
-      innerPositions.forEach((pos) => {
-        if (!positions.some((p) => p.x === pos.x && p.y === pos.y)) {
-          positions.push(pos)
-        }
-      })
-
-      // Move to the next inner layer
-      innerStartX += 2
-      innerStartY += 2
-      innerEndX -= 2
-      innerEndY -= 2
-    }
-  }
-
-  public visualizeBoard(turn: Turn): string {
-    const { boardWidth, boardHeight } = this.gameSetup
-
-    const board = Array(boardHeight)
-      .fill(null)
-      .map(() => Array(boardWidth).fill("."))
-
-    // Add walls
-    for (let i = 0; i < boardWidth; i++) {
-      board[0][i] = "#"
-      board[boardHeight - 1][i] = "#"
-    }
-    for (let i = 0; i < boardHeight; i++) {
-      board[i][0] = "#"
-      board[i][boardWidth - 1] = "#"
-    }
-
-    // Add snakes
-    Object.entries(turn.playerPieces).forEach(([playerId, snake], index) => {
-      const headPos = snake[0]
-      const x = headPos % boardWidth
-      const y = Math.floor(headPos / boardWidth)
-      board[y][x] = (index + 1).toString()
-    })
-
-    // Convert to string
-    return board.map((row) => row.join(" ")).join("\n")
   }
 
   private initializeFood(
@@ -693,6 +614,25 @@ export class SnekProcessor extends GameProcessor {
     return indices
   }
 
+  private getLastDirection(
+    snake: number[],
+    boardWidth: number,
+  ): { dx: number; dy: number } | null {
+    if (snake.length < 2) return null
+    const head = snake[0]
+    const neck = snake[1]
+
+    const headX = head % boardWidth
+    const headY = Math.floor(head / boardWidth)
+    const neckX = neck % boardWidth
+    const neckY = Math.floor(neck / boardWidth)
+
+    const dx = headX - neckX
+    const dy = headY - neckY
+
+    return { dx, dy }
+  }
+
   private getFreePositions(
     boardWidth: number,
     boardHeight: number,
@@ -728,22 +668,163 @@ export class SnekProcessor extends GameProcessor {
     return freePositions
   }
 
-  private getLastDirection(
-    snake: number[],
-    boardWidth: number,
-  ): { dx: number; dy: number } | null {
-    if (snake.length < 2) return null
-    const head = snake[0]
-    const neck = snake[1]
+  private generateStartingPositions(): { x: number; y: number }[] {
+    const { boardWidth, boardHeight, gamePlayers } = this.gameSetup
+    const positions: { x: number; y: number }[] = []
 
-    const headX = head % boardWidth
-    const headY = Math.floor(head / boardWidth)
-    const neckX = neck % boardWidth
-    const neckY = Math.floor(neck / boardWidth)
+    // Calculate the outermost position that allows odd spacing
+    const startX = (boardWidth - 1) % 4 === 0 ? 2 : 1
+    const startY = (boardHeight - 1) % 4 === 0 ? 2 : 1
+    const endX = boardWidth - startX - 1
+    const endY = boardHeight - startY - 1
 
-    const dx = headX - neckX
-    const dy = headY - neckY
+    // Define edges
+    const edges = [
+      { start: { x: startX, y: startY }, end: { x: endX, y: startY } }, // Top
+      { start: { x: endX, y: startY }, end: { x: endX, y: endY } }, // Right
+      { start: { x: endX, y: endY }, end: { x: startX, y: endY } }, // Bottom
+      { start: { x: startX, y: endY }, end: { x: startX, y: startY } }, // Left
+    ]
 
-    return { dx, dy }
+    // Add corner positions
+    positions.push(
+      { x: startX, y: startY },
+      { x: endX, y: startY },
+      { x: startX, y: endY },
+      { x: endX, y: endY },
+    )
+
+    let depth = 0
+    while (positions.length < gamePlayers.length) {
+      const newPositions: { x: number; y: number }[] = []
+      for (const edge of edges) {
+        const midpoints = this.getMidpoints(edge.start, edge.end, depth)
+        newPositions.push(...midpoints)
+      }
+
+      // Filter out duplicates and add new positions
+      newPositions.forEach((pos) => {
+        if (!positions.some((p) => p.x === pos.x && p.y === pos.y)) {
+          positions.push(pos)
+        }
+      })
+
+      depth++
+
+      // If we can't add more positions on the edges, break the loop
+      if (newPositions.length === 0) break
+    }
+
+    // If we still need more positions, fill the inner part
+    if (positions.length < gamePlayers.length) {
+      this.fillInnerPositions(positions)
+    }
+
+    return positions.slice(0, gamePlayers.length)
+  }
+
+  private getMidpoints(
+    start: { x: number; y: number },
+    end: { x: number; y: number },
+    depth: number,
+  ): { x: number; y: number }[] {
+    const positions: { x: number; y: number }[] = []
+    const segments = Math.pow(2, depth + 1)
+    for (let i = 1; i < segments; i += 2) {
+      const x = Math.round(start.x + ((end.x - start.x) * i) / segments)
+      const y = Math.round(start.y + ((end.y - start.y) * i) / segments)
+      positions.push({ x, y })
+    }
+    return positions
+  }
+
+  private fillInnerPositions(positions: { x: number; y: number }[]): void {
+    const { boardWidth, boardHeight, gamePlayers } = this.gameSetup
+    let innerStartX = 3
+    let innerStartY = 3
+    let innerEndX = boardWidth - 4
+    let innerEndY = boardHeight - 4
+
+    while (
+      positions.length < gamePlayers.length &&
+      innerStartX < innerEndX &&
+      innerStartY < innerEndY
+    ) {
+      // Add corner positions for this inner layer
+      const innerPositions = [
+        { x: innerStartX, y: innerStartY },
+        { x: innerEndX, y: innerStartY },
+        { x: innerStartX, y: innerEndY },
+        { x: innerEndX, y: innerEndY },
+      ]
+
+      // Add midpoints for this inner layer
+      if (innerEndX - innerStartX > 2) {
+        innerPositions.push({
+          x: Math.floor((innerStartX + innerEndX) / 2),
+          y: innerStartY,
+        })
+        innerPositions.push({
+          x: Math.floor((innerStartX + innerEndX) / 2),
+          y: innerEndY,
+        })
+      }
+      if (innerEndY - innerStartY > 2) {
+        innerPositions.push({
+          x: innerStartX,
+          y: Math.floor((innerStartY + innerEndY) / 2),
+        })
+        innerPositions.push({
+          x: innerEndX,
+          y: Math.floor((innerStartY + innerEndY) / 2),
+        })
+      }
+
+      // Add new positions if they don't already exist
+      innerPositions.forEach((pos) => {
+        if (!positions.some((p) => p.x === pos.x && p.y === pos.y)) {
+          positions.push(pos)
+        }
+      })
+
+      // Move to the next inner layer
+      innerStartX += 2
+      innerStartY += 2
+      innerEndX -= 2
+      innerEndY -= 2
+    }
+  }
+
+  // Method for testing/visualization
+  visualizeBoard(turn: Turn): string {
+    const { boardWidth, boardHeight } = this.gameSetup
+    const board: string[][] = Array(boardHeight).fill(null).map(() => Array(boardWidth).fill("."))
+    
+    // Add walls
+    const walls = this.getWallPositions(boardWidth, boardHeight)
+    walls.forEach(pos => {
+      const x = pos % boardWidth
+      const y = Math.floor(pos / boardWidth)
+      board[y][x] = "#"
+    })
+    
+    // Add food
+    turn.food.forEach(pos => {
+      const x = pos % boardWidth
+      const y = Math.floor(pos / boardWidth)
+      board[y][x] = "F"
+    })
+    
+    // Add snakes
+    Object.entries(turn.playerPieces).forEach(([playerID, snake]) => {
+      const playerNumber = this.gameSetup.gamePlayers.findIndex(p => p.id === playerID) + 1
+      snake.forEach(pos => {
+        const x = pos % boardWidth
+        const y = Math.floor(pos / boardWidth)
+        board[y][x] = playerNumber.toString()
+      })
+    })
+    
+    return board.map(row => row.join(" ")).join("\n")
   }
 }

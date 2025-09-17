@@ -1,6 +1,6 @@
 // Bots.tsx
 
-import React, { useEffect, useState } from "react"
+import React, { useEffect, useState } from "react";
 import {
   Box,
   Button,
@@ -22,15 +22,15 @@ import {
   DialogContent,
   DialogContentText,
   DialogActions,
-} from "@mui/material"
-import { useTheme } from "@mui/material/styles"
-import { Refresh } from "@mui/icons-material"
-import { ColorResult, HuePicker } from "react-color"
-import { useUser } from "../context/UserContext"
-import { db } from "../firebaseConfig"
-import { generateColor } from "../utils/colourUtils"
-import { emojiList } from "@shared/types/Emojis"
-import { Bot, GameType } from "@shared/types/Game"
+} from "@mui/material";
+import { useTheme } from "@mui/material/styles";
+import { Refresh } from "@mui/icons-material";
+import { ColorResult, HuePicker } from "react-color";
+import { useUser } from "../context/UserContext";
+import { db } from "../firebaseConfig";
+import { generateColor } from "../utils/colourUtils";
+import { emojiList } from "@shared/types/Emojis";
+import { Bot, GameType } from "@shared/types/Game";
 import {
   doc,
   setDoc,
@@ -40,7 +40,7 @@ import {
   query,
   where,
   onSnapshot,
-} from "firebase/firestore"
+} from "firebase/firestore";
 
 const availableGameTypes: GameType[] = [
   "connect4",
@@ -49,103 +49,104 @@ const availableGameTypes: GameType[] = [
   "snek",
   "colourclash",
   "reversi",
-]
+  "teamsnek",
+];
 
 const Bots: React.FC = () => {
-  const { userID } = useUser()
-  const theme = useTheme()
+  const { userID } = useUser();
+  const theme = useTheme();
 
   // — My Bots subscription —
-  const [bots, setBots] = useState<Bot[]>([])
+  const [bots, setBots] = useState<Bot[]>([]);
   useEffect(() => {
-    if (!userID) return
-    const q = query(collection(db, "bots"), where("owner", "==", userID))
+    if (!userID) return;
+    const q = query(collection(db, "bots"), where("owner", "==", userID));
     return onSnapshot(q, (snap) => {
       setBots(
-        snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Bot, "id">) }))
-      )
-    })
-  }, [userID])
+        snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Bot, "id">) })),
+      );
+    });
+  }, [userID]);
 
   // existing delete function
   const deleteBot = async (id: string) => {
-    await deleteDoc(doc(db, "bots", id))
-  }
+    await deleteDoc(doc(db, "bots", id));
+  };
 
   // deletion dialog state
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
-  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
   const openDeleteDialog = (id: string) => {
-    setPendingDeleteId(id)
-    setDeleteDialogOpen(true)
-  }
+    setPendingDeleteId(id);
+    setDeleteDialogOpen(true);
+  };
 
   const handleCancelDelete = () => {
-    setPendingDeleteId(null)
-    setDeleteDialogOpen(false)
-  }
+    setPendingDeleteId(null);
+    setDeleteDialogOpen(false);
+  };
 
   const handleConfirmDelete = async () => {
     if (pendingDeleteId) {
-      await deleteBot(pendingDeleteId)
+      await deleteBot(pendingDeleteId);
     }
-    setPendingDeleteId(null)
-    setDeleteDialogOpen(false)
-  }
+    setPendingDeleteId(null);
+    setDeleteDialogOpen(false);
+  };
 
   // — Add form state —
-  const [botName, setBotName] = useState("")
-  const [botUrl, setBotUrl] = useState("")
-  const [botCaps, setBotCaps] = useState<GameType[]>([])
-  const [isPublic, setIsPublic] = useState(false)
-  const [hue, setHue] = useState(Math.random() * 360)
-  const [colour, setColour] = useState(generateColor(hue))
-  const [emoji, setEmoji] = useState(emojiList[0] || "🐍")
-  const [showEmojis, setShowEmojis] = useState<string[]>([])
-  const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
+  const [botName, setBotName] = useState("");
+  const [botUrl, setBotUrl] = useState("");
+  const [botCaps, setBotCaps] = useState<GameType[]>([]);
+  const [isPublic, setIsPublic] = useState(false);
+  const [hue, setHue] = useState(Math.random() * 360);
+  const [colour, setColour] = useState(generateColor(hue));
+  const [emoji, setEmoji] = useState(emojiList[0] || "🐍");
+  const [showEmojis, setShowEmojis] = useState<string[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  const contrast = theme.palette.getContrastText(colour)
+  const contrast = theme.palette.getContrastText(colour);
 
   const randomizeEmojis = () => {
-    const shuffled = [...emojiList].sort(() => 0.5 - Math.random())
-    const pick = shuffled.includes(emoji) ? emoji : shuffled[0]
-    setShowEmojis([pick, ...shuffled.filter((e) => e !== pick).slice(0, 11)])
-    setEmoji(pick)
-  }
+    const shuffled = [...emojiList].sort(() => 0.5 - Math.random());
+    const pick = shuffled.includes(emoji) ? emoji : shuffled[0];
+    setShowEmojis([pick, ...shuffled.filter((e) => e !== pick).slice(0, 11)]);
+    setEmoji(pick);
+  };
 
-  useEffect(randomizeEmojis, [])
-  useEffect(() => setColour(generateColor(hue)), [hue])
+  useEffect(randomizeEmojis, []);
+  useEffect(() => setColour(generateColor(hue)), [hue]);
 
   const handleAdd = async () => {
     if (!userID) {
-      setError("Login required")
-      return
+      setError("Login required");
+      return;
     }
     if (!botName.trim()) {
-      setError("Name required")
-      return
+      setError("Name required");
+      return;
     }
 
     // normalize URL: strip trailing slashes
-    const normalizedUrl = botUrl.trim().replace(/\/+$/, "")
+    const normalizedUrl = botUrl.trim().replace(/\/+$/, "");
     try {
-      new URL(normalizedUrl)
+      new URL(normalizedUrl);
     } catch {
-      setError("Invalid URL")
-      return
+      setError("Invalid URL");
+      return;
     }
 
     if (!botCaps.length) {
-      setError("Choose at least one skill")
-      return
+      setError("Choose at least one skill");
+      return;
     }
 
-    setBusy(true)
-    setError(null)
+    setBusy(true);
+    setError(null);
 
-    const ref = doc(collection(db, "bots"))
+    const ref = doc(collection(db, "bots"));
     const newBot: Bot = {
       id: ref.id,
       owner: userID,
@@ -156,21 +157,21 @@ const Bots: React.FC = () => {
       colour,
       public: isPublic,
       createdAt: serverTimestamp() as any,
-    }
+    };
 
     try {
-      await setDoc(ref, newBot)
+      await setDoc(ref, newBot);
       // reset form
-      setBotName("")
-      setBotUrl("")
-      setBotCaps([])
-      setIsPublic(false)
-      setHue(Math.random() * 360)
-      randomizeEmojis()
+      setBotName("");
+      setBotUrl("");
+      setBotCaps([]);
+      setIsPublic(false);
+      setHue(Math.random() * 360);
+      randomizeEmojis();
     } finally {
-      setBusy(false)
+      setBusy(false);
     }
-  }
+  };
 
   return (
     <Container sx={{ py: 3 }}>
@@ -200,23 +201,25 @@ const Bots: React.FC = () => {
                 {bots.map((b) => (
                   <TableRow key={b.id} sx={{ backgroundColor: b.colour }}>
                     <TableCell
-                      padding="none"            // zero out the TD padding
+                      padding="none" // zero out the TD padding
                     >
                       <Box
                         sx={{
                           display: "flex",
                           alignItems: "center",
                           justifyContent: "space-between",
-                          height: "100%",        // so px applies top/bottom too
-                          p: 1,                 // now you control horizontal padding
+                          height: "100%", // so px applies top/bottom too
+                          p: 1, // now you control horizontal padding
                         }}
                       >
                         {/* left side */}
                         <Box sx={{ display: "flex", alignItems: "center" }}>
-                          <Typography>{b.emoji}{" "}
+                          <Typography>
+                            {b.emoji}{" "}
                             <Box component="span" sx={{ ml: 1 }}>
                               {b.name} {b.public && "(public 👀)"}
-                            </Box></Typography>
+                            </Box>
+                          </Typography>
                         </Box>
 
                         {/* right side */}
@@ -230,7 +233,6 @@ const Bots: React.FC = () => {
                       </Box>
                     </TableCell>
                     <TableCell>{b.capabilities.join(", ")}</TableCell>
-
                   </TableRow>
                 ))}
               </TableBody>
@@ -243,8 +245,8 @@ const Bots: React.FC = () => {
       <Box
         component="form"
         onSubmit={(e) => {
-          e.preventDefault()
-          handleAdd()
+          e.preventDefault();
+          handleAdd();
         }}
         sx={{ mt: 4 }}
       >
@@ -272,7 +274,6 @@ const Bots: React.FC = () => {
           size="small"
           sx={{ mb: 2 }}
           placeholder="e.g. https://mybot.com"
-
         />
 
         <Box
@@ -325,7 +326,7 @@ const Bots: React.FC = () => {
                     setBotCaps((prev) =>
                       prev.includes(g)
                         ? prev.filter((x) => x !== g)
-                        : [...prev, g]
+                        : [...prev, g],
                     )
                   }
                   size="small"
@@ -386,13 +387,17 @@ const Bots: React.FC = () => {
         </DialogContent>
         <DialogActions>
           <Button onClick={handleCancelDelete}>Cancel</Button>
-          <Button onClick={handleConfirmDelete} color="error" variant="contained">
+          <Button
+            onClick={handleConfirmDelete}
+            color="error"
+            variant="contained"
+          >
             Delete
           </Button>
         </DialogActions>
       </Dialog>
     </Container>
-  )
-}
+  );
+};
 
-export default Bots
+export default Bots;

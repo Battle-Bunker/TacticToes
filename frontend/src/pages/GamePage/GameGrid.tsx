@@ -163,7 +163,7 @@ const GameGrid: React.FC = () => {
       }
 
       setGameLogicReturn(
-        gameState.setup.gameType === "snek"
+        gameState.setup.gameType === "snek" || gameState.setup.gameType === "teamsnek"
           ? SnakeGameLogic(gameLogicProps)
           : OtherGameLogic(gameLogicProps),
       )
