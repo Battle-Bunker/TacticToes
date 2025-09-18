@@ -2,10 +2,9 @@ import React, { useState } from "react";
 import {
   Button,
   TextField,
-
   FormControl,
-
 } from "@mui/material";
+import { ColorPicker } from "./ColorPicker";
 
 interface Team {
   id: string;
@@ -24,10 +23,11 @@ interface TeamConfigurationProps {
 export const TeamConfiguration: React.FC<TeamConfigurationProps> = ({
   teams,
   onTeamsChange,
-  maxTurns,onMaxTurnsChange,
+  maxTurns,
+  onMaxTurnsChange,
 }) => {
   const [newTeamName, setNewTeamName] = useState("");
-  const [newTeamColor, setNewTeamColor] = useState("#000000");
+  const [newTeamColor, setNewTeamColor] = useState("#FF6B6B");
 
   const addTeam = () => {
     if (newTeamName.trim()) {
@@ -61,17 +61,17 @@ export const TeamConfiguration: React.FC<TeamConfigurationProps> = ({
       </FormControl>
 
       {/* Team Creation */}
-      <div style={{ display: "flex", gap: "10px", marginBottom: "20px" }}>
+      <div style={{ display: "flex", gap: "15px", marginBottom: "20px", alignItems: "flex-start" }}>
         <TextField
           label="Team Name"
           value={newTeamName}
           onChange={(e) => setNewTeamName(e.target.value)}
+          sx={{ flex: 1 }}
         />
-        <input
-          type="color"
-          value={newTeamColor}
-          onChange={(e) => setNewTeamColor(e.target.value)}
-          style={{ width: "50px", height: "40px" }}
+        <ColorPicker
+          selectedColor={newTeamColor}
+          onColorChange={setNewTeamColor}
+          label="Team Color"
         />
         <Button 
           variant="contained" 
@@ -80,7 +80,9 @@ export const TeamConfiguration: React.FC<TeamConfigurationProps> = ({
             backgroundColor: '#1976d2',
             '&:hover': {
               backgroundColor: '#1565c0'
-            }
+            },
+            height: '56px',
+            px: 3
           }}
         >
           Add Team
@@ -103,13 +105,29 @@ export const TeamConfiguration: React.FC<TeamConfigurationProps> = ({
           >
             <div
               style={{
-                width: "20px",
-                height: "20px",
+                width: "32px",
+                height: "32px",
                 backgroundColor: team.color,
                 borderRadius: "50%",
+                border: "2px solid #fff",
+                boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                position: "relative",
               }}
-            />
-            <span>{team.name}</span>
+            >
+              <div
+                style={{
+                  position: "absolute",
+                  width: "100%",
+                  height: "100%",
+                  borderRadius: "50%",
+                  border: "1px solid rgba(0,0,0,0.1)",
+                }}
+              />
+            </div>
+            <span style={{ fontWeight: 500, fontSize: "16px" }}>{team.name}</span>
             <Button
               variant="outlined"
               color="error"
