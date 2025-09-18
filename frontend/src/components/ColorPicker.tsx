@@ -7,7 +7,6 @@ import {
   DialogActions,
   Box,
   Typography,
-  IconButton,
   Tooltip,
 } from "@mui/material";
 import { Palette, ColorLens } from "@mui/icons-material";
