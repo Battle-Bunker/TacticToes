@@ -118,15 +118,16 @@ export class TeamSnekProcessor extends SnekProcessor {
         if (!teamScores[player.teamID]) {
           teamScores[player.teamID] = 0;
         }
-        const snakeLength = gameState.newSnakes[player.id]?.length || 0;
-        teamScores[player.teamID] += snakeLength;
+        // If player is dead, they contribute 0 to team score
+        const playerScore = gameState.deadPlayers.has(player.id) ? 0 : (gameState.newSnakes[player.id]?.length || 0);
+        teamScores[player.teamID] += playerScore;
       }
     });
     
     // Second pass: assign individual scores to each player
     this.gameSetup.gamePlayers.forEach(player => {
-      // Each player gets their individual snake length
-      playerScores[player.id] = gameState.newSnakes[player.id]?.length || 0;
+      // Dead players get score 0, alive players get their snake length
+      playerScores[player.id] = gameState.deadPlayers.has(player.id) ? 0 : (gameState.newSnakes[player.id]?.length || 0);
     });
     
     // Update the turn with new scores

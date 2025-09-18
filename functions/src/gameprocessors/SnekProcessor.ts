@@ -443,7 +443,12 @@ export class SnekProcessor extends GameProcessor {
 
     // Update scores based on current snake lengths
     Object.keys(gameState.newSnakes).forEach((playerID) => {
-      gameState.newScores[playerID] = gameState.newSnakes[playerID].length
+      // If player is dead, score should be 0
+      if (gameState.deadPlayers.has(playerID)) {
+        gameState.newScores[playerID] = 0;
+      } else {
+        gameState.newScores[playerID] = gameState.newSnakes[playerID].length;
+      }
     })
 
     // Ensure alivePlayers only contains players who actually have snakes
