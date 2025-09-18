@@ -227,6 +227,33 @@ const GameSetup: React.FC = () => {
         players.find((player) => player.id === notReadyPlayer.id)?.name,
     )
 
+  // Validation for Team Snek games
+  const canStartGame = () => {
+    if (gameType !== 'teamsnek') return true;
+    
+    const populatedTeams = teams.filter(team => 
+      gameSetup.gamePlayers.some(player => player.teamID === team.id)
+    );
+    
+    return populatedTeams.length >= 2;
+  };
+
+  const getTeamValidationMessage = () => {
+    if (gameType !== 'teamsnek') return '';
+    
+    const populatedTeams = teams.filter(team => 
+      gameSetup.gamePlayers.some(player => player.teamID === team.id)
+    );
+    
+    if (populatedTeams.length === 0) {
+      return 'Assign players to teams before starting the game';
+    } else if (populatedTeams.length === 1) {
+      return 'At least 2 teams must have players before starting the game';
+    }
+    
+    return '';
+  };
+
   return (
     <Stack spacing={2} pt={2}>
       {/* Ready Section */}
@@ -234,31 +261,51 @@ const GameSetup: React.FC = () => {
         .filter((gamePlayer) => gamePlayer.type === "human")
         .map((human) => human.id)
         .every((player) => gameSetup.playersReady.includes(player)) ? (
-        <Button
-          disabled={
-            started ||
-            gameSetup.boardWidth < 5 ||
-            gameSetup.boardWidth > 20 ||
-            parseInt(secondsPerTurn) <= 0 ||
-            gameSetup.playersReady.includes(userID)
-          }
-          onClick={handleReady}
-          sx={{ backgroundColor: colour, height: "70px", fontSize: "32px" }}
-          fullWidth
-        >
-          {gameSetup.playersReady.includes(userID) ? `Waiting` : "I'm ready!"}
-
-        </Button>
+        <>
+          <Button
+            disabled={
+              started ||
+              gameSetup.boardWidth < 5 ||
+              gameSetup.boardWidth > 20 ||
+              parseInt(secondsPerTurn) <= 0 ||
+              gameSetup.playersReady.includes(userID)
+            }
+            onClick={handleReady}
+            sx={{ backgroundColor: colour, height: "70px", fontSize: "32px" }}
+            fullWidth
+          >
+            {gameSetup.playersReady.includes(userID) ? `Waiting` : "I'm ready!"}
+          </Button>
+          {gameType === 'teamsnek' && !canStartGame() && getTeamValidationMessage() && (
+            <Typography color="error" sx={{ textAlign: 'center', mt: 1 }}>
+              {getTeamValidationMessage()}
+            </Typography>
+          )}
+        </>
       ) : (
-        <Button
-          disabled={gameSetup.startRequested}
-          onClick={handleStart}
-          sx={{ backgroundColor: colour, height: "70px", fontSize: "32px" }}
-          className="shake"
-          fullWidth
-        >
-          {gameSetup.startRequested ? "Game starting" : "Start game"}
-        </Button>
+        <>
+          <Button
+            disabled={gameSetup.startRequested || !canStartGame()}
+            onClick={handleStart}
+            sx={{ 
+              backgroundColor: canStartGame() ? colour : '#ccc', 
+              height: "70px", 
+              fontSize: "32px",
+              '&:hover': {
+                backgroundColor: canStartGame() ? colour : '#ccc'
+              }
+            }}
+            className={canStartGame() ? "shake" : ""}
+            fullWidth
+          >
+            {gameSetup.startRequested ? "Game starting" : "Start game"}
+          </Button>
+          {!canStartGame() && getTeamValidationMessage() && (
+            <Typography color="error" sx={{ textAlign: 'center', mt: 1 }}>
+              {getTeamValidationMessage()}
+            </Typography>
+          )}
+        </>
       )}
       {gameSetup.playersReady.includes(userID) &&
         notReadyPlayers.length > 0 && (

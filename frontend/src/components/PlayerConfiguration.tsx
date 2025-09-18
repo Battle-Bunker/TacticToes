@@ -148,11 +148,11 @@ export const PlayerConfiguration: React.FC<PlayerConfigurationProps> = ({
         </Box>
       ))}
 
-      {/* Unassigned Players Section */}
+      {/* Spectators Section */}
       {unassignedPlayers.length > 0 && (
         <Box sx={{ mb: 3 }}>
-          <Typography variant="h6" sx={{ mb: 1, color: "#666" }}>
-            Unassigned Players
+          <Typography variant="h6" sx={{ mb: 1, color: "#666", fontWeight: "bold" }}>
+            Spectators
           </Typography>
           <TableContainer>
             <Table size="small">

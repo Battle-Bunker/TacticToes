@@ -29,6 +29,17 @@ export const TeamConfiguration: React.FC<TeamConfigurationProps> = ({
   const [newTeamName, setNewTeamName] = useState("");
   const [newTeamColor, setNewTeamColor] = useState("#FF6B6B");
 
+  // Initialize default teams if none exist
+  React.useEffect(() => {
+    if (teams.length === 0) {
+      const defaultTeams: Team[] = [
+        { id: 'team_red', name: 'Red Team', color: '#FF6B6B' },
+        { id: 'team_blue', name: 'Blue Team', color: '#4ECDC4' }
+      ];
+      onTeamsChange(defaultTeams);
+    }
+  }, [teams.length, onTeamsChange]);
+
   const addTeam = () => {
     if (newTeamName.trim()) {
       const newTeam: Team = {
