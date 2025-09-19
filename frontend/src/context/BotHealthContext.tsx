@@ -38,11 +38,21 @@ export const BotHealthProvider: React.FC<BotHealthProviderProps> = ({
   const [botHealthStatus, setBotHealthStatus] = useState<BotHealthStatus>({});
   const [isCheckingBots, setIsCheckingBots] = useState(false);
 
-  // Bot health check function with retry logic for wake-up
+  // Bot health check function with retry logic and proxy support
   const checkBotHealth = useCallback(
     async (bot: Bot, retryCount = 0): Promise<void> => {
       const maxRetries = 3;
       const retryDelay = 2000; // 2 seconds between retries
+
+      // Validate URL
+      if (!bot.url || !bot.url.startsWith("http")) {
+        console.error(`Invalid URL for bot ${bot.name}: ${bot.url}`);
+        setBotHealthStatus((prev) => ({
+          ...prev,
+          [bot.id]: "error",
+        }));
+        return;
+      }
 
       // Don't check if already checking or recently checked
       const currentStatus = botHealthStatus[bot.id];
@@ -65,7 +75,9 @@ export const BotHealthProvider: React.FC<BotHealthProviderProps> = ({
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
 
-        const response = await fetch(bot.url, {
+        // Use proxy by replacing the full URL with a relative path
+        const proxyUrl = `/api${bot.url.replace("https://cyphid-snake-jamie-fox-cyphid.replit.app", "")}`;
+        const response = await fetch(proxyUrl, {
           method: "GET",
           signal: controller.signal,
           headers: {
@@ -76,7 +88,9 @@ export const BotHealthProvider: React.FC<BotHealthProviderProps> = ({
 
         clearTimeout(timeoutId);
 
-        console.log(`Bot ${bot.name} response status: ${response.status} (${response.statusText})`);
+        console.log(
+          `Bot ${bot.name} response status: ${response.status} (${response.statusText})`,
+        );
 
         // Handle 503 Service Unavailable (service starting up)
         if (response.status === 503 && retryCount < maxRetries) {
@@ -113,6 +127,19 @@ export const BotHealthProvider: React.FC<BotHealthProviderProps> = ({
         }
       } catch (error) {
         console.error(`Bot ${bot.name} health check failed:`, error);
+
+        // Handle CORS or network errors
+        if (
+          error.name === "TypeError" &&
+          error.message.includes("Failed to fetch")
+        ) {
+          console.error(`Possible CORS or network issue for bot ${bot.name}`);
+          setBotHealthStatus((prev) => ({
+            ...prev,
+            [bot.id]: "error",
+          }));
+          return;
+        }
 
         if (retryCount < maxRetries) {
           console.log(
