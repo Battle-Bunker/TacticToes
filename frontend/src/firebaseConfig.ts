@@ -3,6 +3,7 @@ import { initializeApp } from "firebase/app"
 import { getAnalytics } from "firebase/analytics"
 import { getFirestore, connectFirestoreEmulator } from "firebase/firestore" // Import correct methods for Firestore
 import { connectAuthEmulator, getAuth, GoogleAuthProvider } from "firebase/auth"
+import { getFunctions, connectFunctionsEmulator } from "firebase/functions"
 // TODO: Add SDKs for Firebase products that you want to use
 // https://firebase.google.com/docs/web/setup#available-libraries
 
@@ -36,6 +37,7 @@ export const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig)
 export const db = getFirestore(app)
+export const functions = getFunctions(app)
 // Connect to Firestore emulator in development
 export const analytics = getAnalytics(app)
 export const auth = getAuth(app)
@@ -45,7 +47,7 @@ provider.addScope("profile")
 provider.addScope("email")
 
 if (window.location.hostname === "localhost") {
-
   connectFirestoreEmulator(db, "localhost", 8080) // Use connectFirestoreEmulator for local Firestore
   connectAuthEmulator(auth, "http://localhost:9099") // Authentication emulator
+  connectFunctionsEmulator(functions, "localhost", 5001) // Functions emulator
 }
