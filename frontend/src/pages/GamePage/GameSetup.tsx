@@ -6,6 +6,7 @@ import { useUser } from "../../context/UserContext"
 import { db } from "../../firebaseConfig"
 import { TeamConfiguration } from "../../components/TeamConfiguration"
 import { PlayerConfiguration } from "../../components/PlayerConfiguration"
+import { BotHealthProvider } from "../../context/BotHealthContext"
 
 import {
   Box,
@@ -421,12 +422,16 @@ const GameSetup: React.FC = () => {
               minHeight: "56px",
             }}
           >
-            <TeamConfiguration
-              teams={teams}
-              onTeamsChange={handleTeamsChange}
-              maxTurns={maxTurns}
-              onMaxTurnsChange={handleMaxTurnsChange}
-            />
+            <BotHealthProvider>
+              <TeamConfiguration
+                teams={teams}
+                onTeamsChange={handleTeamsChange}
+                maxTurns={maxTurns}
+                onMaxTurnsChange={handleMaxTurnsChange}
+                bots={bots}
+                gamePlayers={gameSetup?.gamePlayers || []}
+              />
+            </BotHealthProvider>
           </Box>
         </FormControl>
       )}

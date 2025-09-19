@@ -17,28 +17,37 @@ interface ColorPickerProps {
   label?: string;
 }
 
-// Beautiful predefined color palette
+// Curated color palette - organized by hue families with good contrast
 const COLOR_PALETTE = [
-  "#FF6B6B", // Red
-  "#4ECDC4", // Teal
-  "#45B7D1", // Blue
-  "#96CEB4", // Mint
-  "#FFEAA7", // Yellow
-  "#DDA0DD", // Plum
-  "#98D8C8", // Seafoam
-  "#F7DC6F", // Gold
-  "#BB8FCE", // Lavender
-  "#85C1E9", // Sky Blue
-  "#F8C471", // Peach
-  "#82E0AA", // Light Green
-  "#F1948A", // Coral
-  "#85C1E9", // Light Blue
-  "#D7BDE2", // Light Purple
-  "#A9DFBF", // Light Mint
-  "#F9E79F", // Light Yellow
-  "#E8DAEF", // Very Light Purple
-  "#D5DBDB", // Silver
-  "#FADBD8", // Rose
+  // Reds & Pinks
+  "#E53E3E", // Red
+  "#FC8181", // Light Red
+  "#F56565", // Rose Red
+  
+  // Oranges & Yellows
+  "#DD6B20", // Orange
+  "#F6AD55", // Light Orange
+  "#ECC94B", // Yellow
+  
+  // Greens
+  "#38A169", // Green
+  "#68D391", // Light Green
+  "#48BB78", // Emerald
+  
+  // Blues & Cyans
+  "#3182CE", // Blue
+  "#63B3ED", // Light Blue
+  "#38B2AC", // Teal
+  
+  // Purples & Violets
+  "#805AD5", // Purple
+  "#B794F6", // Light Purple
+  "#9F7AEA", // Violet
+  
+  // Grays & Neutrals
+  "#4A5568", // Dark Gray
+  "#A0AEC0", // Light Gray
+  "#2D3748", // Charcoal
 ];
 
 export const ColorPicker: React.FC<ColorPickerProps> = ({
@@ -139,7 +148,7 @@ export const ColorPicker: React.FC<ColorPickerProps> = ({
           <Box
             sx={{
               display: "grid",
-              gridTemplateColumns: "repeat(5, 1fr)",
+              gridTemplateColumns: "repeat(6, 1fr)",
               gap: 1.5,
               mb: 3,
             }}
@@ -196,59 +205,28 @@ export const ColorPicker: React.FC<ColorPickerProps> = ({
             Custom Color
           </Typography>
           <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
-            <Box
-              sx={{
-                width: 48,
-                height: 48,
-                borderRadius: "50%",
-                backgroundColor: customColor,
-                border: selectedColor === customColor ? "3px solid #1976d2" : "3px solid #e0e0e0",
-                cursor: "pointer",
-                position: "relative",
-                transition: "all 0.2s ease-in-out",
-                "&:hover": {
-                  transform: "scale(1.05)",
-                  border: "3px solid #1976d2",
-                },
-                "&::after": {
-                  content: '""',
-                  position: "absolute",
-                  width: "100%",
-                  height: "100%",
-                  borderRadius: "50%",
-                  border: "1px solid rgba(0,0,0,0.1)",
-                },
-              }}
-              onClick={() => handleColorSelect(customColor)}
-            >
-              {selectedColor === customColor && (
-                <Box
-                  sx={{
-                    color: "#fff",
-                    fontSize: "20px",
-                    filter: "drop-shadow(0 1px 2px rgba(0,0,0,0.3))",
-                  }}
-                >
-                  ✓
-                </Box>
-              )}
-            </Box>
             <input
               type="color"
               value={customColor}
               onChange={(e) => handleCustomColorChange(e.target.value)}
               style={{
-                width: 40,
-                height: 40,
+                width: 60,
+                height: 60,
                 border: "none",
-                borderRadius: "50%",
+                borderRadius: "8px",
                 cursor: "pointer",
                 outline: "none",
+                boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
               }}
             />
-            <Typography variant="body2" sx={{ color: "#666", fontStyle: "italic" }}>
-              Click to select custom color
-            </Typography>
+            <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
+              <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                {customColor.toUpperCase()}
+              </Typography>
+              <Typography variant="caption" sx={{ color: "#666" }}>
+                Click to open full color picker
+              </Typography>
+            </Box>
           </Box>
         </DialogContent>
 

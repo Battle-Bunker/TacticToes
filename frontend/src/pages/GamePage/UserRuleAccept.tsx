@@ -49,8 +49,9 @@ const UserRulesAccept: React.FC<RulesDialogProps> = ({
       <DialogTitle>Rules for {rules}</DialogTitle>
       <DialogContent>
         <DialogContentText sx={{ mb: 2 }}>
-          <RulesComponent />
+          Please read the rules below:
         </DialogContentText>
+        <RulesComponent />
         <FormControlLabel
           control={
             <Checkbox
