@@ -65,37 +65,18 @@ export const BotHealthProvider: React.FC<BotHealthProviderProps> = ({
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
 
-        // Try direct fetch first, fall back to proxy if CORS issues
-        let response: Response;
-        let usedProxy = false;
-
-        try {
-          response = await fetch(bot.url, {
-            method: "GET",
-            signal: controller.signal,
-            headers: {
-              Accept:
-                "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            },
-          });
-        } catch (corsError) {
-          console.log(`Bot ${bot.name} CORS error, trying proxy...`);
-          // If CORS fails, use proxy as fallback
-          const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(bot.url)}`;
-          response = await fetch(proxyUrl, {
-            method: "GET",
-            signal: controller.signal,
-            headers: {
-              Accept:
-                "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            },
-          });
-          usedProxy = true;
-        }
+        const response = await fetch(bot.url, {
+          method: "GET",
+          signal: controller.signal,
+          headers: {
+            Accept:
+              "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          },
+        });
 
         clearTimeout(timeoutId);
 
-        console.log(`Bot ${bot.name} response status: ${response.status} (${response.statusText}) - Used proxy: ${usedProxy}`);
+        console.log(`Bot ${bot.name} response status: ${response.status} (${response.statusText})`);
 
         // Handle 503 Service Unavailable (service starting up)
         if (response.status === 503 && retryCount < maxRetries) {
@@ -108,49 +89,12 @@ export const BotHealthProvider: React.FC<BotHealthProviderProps> = ({
           return;
         }
 
-        if (response.ok || response.type === "opaque") {
-          // For no-cors requests, we get opaque responses which we can't read the status from,
-          // but we can still infer health from the fetch success itself.
-          // The 'opaque' type means we can't read the body or status directly.
-          // If the fetch itself didn't throw an error, we consider it 'alive'.
-          if (response.type === "opaque") {
-            console.log(`Bot ${bot.name} response is opaque, assuming alive.`);
-            setBotHealthStatus((prev) => ({
-              ...prev,
-              [bot.id]: "alive",
-            }));
-          } else {
-            // For non-opaque responses, try to read the text.
-            let text = "";
-            try {
-              text = await response.text();
-            } catch (e) {
-              console.error(`Bot ${bot.name} failed to read response text:`, e);
-              // If reading text fails but status is ok, still consider it alive
-            }
-
-            console.log(`Bot ${bot.name} response length: ${text.length}`);
-
-            // Check if the response contains typical bot error indicators
-            if (
-              text.includes("error") ||
-              text.includes("dead") ||
-              text.includes("not found") ||
-              (text.length > 0 && text.length < 10)
-            ) {
-              console.log(`Bot ${bot.name} marked as DEAD (error content)`);
-              setBotHealthStatus((prev) => ({
-                ...prev,
-                [bot.id]: "dead",
-              }));
-            } else {
-              console.log(`Bot ${bot.name} marked as ALIVE`);
-              setBotHealthStatus((prev) => ({
-                ...prev,
-                [bot.id]: "alive",
-              }));
-            }
-          }
+        if (response.ok) {
+          console.log(`Bot ${bot.name} marked as ALIVE`);
+          setBotHealthStatus((prev) => ({
+            ...prev,
+            [bot.id]: "alive",
+          }));
         } else if (response.status >= 500 && retryCount < maxRetries) {
           // Retry on server errors
           console.log(
