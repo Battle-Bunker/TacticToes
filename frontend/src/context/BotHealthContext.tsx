@@ -58,8 +58,10 @@ export const BotHealthProvider: React.FC<BotHealthProviderProps> = ({
       }));
 
       try {
-        console.log(`Checking bot ${bot.name} health at: ${bot.url} (attempt ${retryCount + 1})`);
-        
+        console.log(
+          `Checking bot ${bot.name} health at: ${bot.url} (attempt ${retryCount + 1})`,
+        );
+
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
 
@@ -71,7 +73,8 @@ export const BotHealthProvider: React.FC<BotHealthProviderProps> = ({
             signal: controller.signal,
             mode: "no-cors", // This will prevent CORS issues but limits response access
             headers: {
-              Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+              Accept:
+                "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             },
           });
         } catch (corsError) {
@@ -81,18 +84,21 @@ export const BotHealthProvider: React.FC<BotHealthProviderProps> = ({
             method: "GET",
             signal: controller.signal,
             headers: {
-              Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+              Accept:
+                "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             },
           });
         }
 
         clearTimeout(timeoutId);
 
-        console.log(`Bot ${bot.name} response status: ${response.status}`);
+        console.log(`Bot ${bot.name} response: ${JSON.stringify(response)}`);
 
         // Handle 503 Service Unavailable (service starting up)
         if (response.status === 503 && retryCount < maxRetries) {
-          console.log(`Bot ${bot.name} returned 503, retrying in ${retryDelay}ms...`);
+          console.log(
+            `Bot ${bot.name} returned 503, retrying in ${retryDelay}ms...`,
+          );
           setTimeout(() => {
             checkBotHealth(bot, retryCount + 1);
           }, retryDelay);
@@ -133,7 +139,9 @@ export const BotHealthProvider: React.FC<BotHealthProviderProps> = ({
           }
         } else if (response.status >= 500 && retryCount < maxRetries) {
           // Retry on server errors
-          console.log(`Bot ${bot.name} server error ${response.status}, retrying in ${retryDelay}ms...`);
+          console.log(
+            `Bot ${bot.name} server error ${response.status}, retrying in ${retryDelay}ms...`,
+          );
           setTimeout(() => {
             checkBotHealth(bot, retryCount + 1);
           }, retryDelay);
@@ -147,15 +155,17 @@ export const BotHealthProvider: React.FC<BotHealthProviderProps> = ({
         }
       } catch (error) {
         console.error(`Bot ${bot.name} health check failed:`, error);
-        
+
         if (retryCount < maxRetries) {
-          console.log(`Bot ${bot.name} network error, retrying in ${retryDelay}ms...`);
+          console.log(
+            `Bot ${bot.name} network error, retrying in ${retryDelay}ms...`,
+          );
           setTimeout(() => {
             checkBotHealth(bot, retryCount + 1);
           }, retryDelay);
           return;
         }
-        
+
         setBotHealthStatus((prev) => ({
           ...prev,
           [bot.id]: "error",
