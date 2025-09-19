@@ -3,6 +3,7 @@ import { onMoveCreated } from "./onMoveCreated"
 import { onTurnChanged } from "./onTurnChanged"
 import { onSessionCreated } from "./onSessionCreated"
 import { onTurnExpirationRequest } from "./onTurnExpirationRequest"
+import { wakeBot } from "./wakeBot"
 import * as admin from "firebase-admin"
 
 admin.initializeApp()
@@ -22,4 +23,5 @@ export {
   onTurnExpirationRequest,
   onTurnChanged,
   onSessionCreated,
+  wakeBot,
 }

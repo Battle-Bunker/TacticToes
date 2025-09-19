@@ -6,7 +6,7 @@ import { useUser } from "../../context/UserContext"
 import { db } from "../../firebaseConfig"
 import { TeamConfiguration } from "../../components/TeamConfiguration"
 import { PlayerConfiguration } from "../../components/PlayerConfiguration"
-import { BotHealthProvider } from "../../context/BotHealthContext"
+import { BotHealthProvider, useBotHealth } from "../../context/BotHealthContext"
 
 import {
   Box,
@@ -56,6 +56,8 @@ const GameSetup: React.FC = () => {
   const [boardSize, setBoardSize] = useState<BoardSize>("medium")
   const [teams, setTeams] = useState<Team[]>(gameSetup?.teams || [])
   const [maxTurns, setMaxTurns] = useState<number>(gameSetup?.maxTurns || 100)
+  
+  const { getBotStatus } = useBotHealth()
 
   const gameDocRef = doc(db, "sessions", sessionName, "setups", gameID)
 
@@ -105,6 +107,13 @@ const GameSetup: React.FC = () => {
   }
 
   const handleAddBot = async (botID: string) => {
+    // Check if bot is dead before adding to game
+    const botHealthStatus = getBotStatus(botID);
+    if (botHealthStatus === 'dead') {
+      console.log(`Cannot add bot ${botID} to game - bot is dead`);
+      return;
+    }
+
     const bot: GamePlayer = {
       id: botID,
       type: "bot",
@@ -136,6 +145,17 @@ const GameSetup: React.FC = () => {
   // Handle team assignment for a player
   const handleTeamChange = async (playerID: string, teamID: string) => {
     if (!gameSetup) return
+    
+    // Check if this is a dead bot trying to be assigned to a team
+    const player = gameSetup.gamePlayers.find(p => p.id === playerID);
+    if (player?.type === 'bot') {
+      const botStatus = getBotStatus(playerID);
+      if (botStatus === 'dead') {
+        console.log(`Cannot assign dead bot ${playerID} to team`);
+        return;
+      }
+    }
+    
     const updatedGamePlayers = gameSetup.gamePlayers.map((player) =>
       player.id === playerID ? { ...player, teamID } : player
     )
@@ -390,19 +410,28 @@ const GameSetup: React.FC = () => {
             }}
           >
             <Box sx={{ display: "flex", flexWrap: "wrap", gap: 2 }}>
-              {bots.map((bot) => (
-                <Button
-                  key={bot.name}
-                  sx={{
-                    backgroundColor: bot.colour,
-                  }}
-                  onClick={() => handleAddBot(bot.id)}
-                >
-                  {bot.emoji}   {bot.name.length > 10
-                    ? `${bot.name.slice(0, 10)}…`
-                    : bot.name}
-                </Button>
-              ))}
+              {bots.map((bot) => {
+                const botStatus = getBotStatus(bot.id);
+                const isDead = botStatus === 'dead';
+                
+                return (
+                  <Button
+                    key={bot.name}
+                    disabled={isDead}
+                    sx={{
+                      backgroundColor: isDead ? '#ccc' : bot.colour,
+                      opacity: isDead ? 0.6 : 1,
+                    }}
+                    onClick={() => handleAddBot(bot.id)}
+                    title={isDead ? 'Bot is dead and cannot be added to game' : ''}
+                  >
+                    {bot.emoji}   {bot.name.length > 10
+                      ? `${bot.name.slice(0, 10)}…`
+                      : bot.name}
+                    {isDead && ' (DEAD)'}
+                  </Button>
+                );
+              })}
             </Box>
           </Box>
         </FormControl>
@@ -422,16 +451,14 @@ const GameSetup: React.FC = () => {
               minHeight: "56px",
             }}
           >
-            <BotHealthProvider>
-              <TeamConfiguration
-                teams={teams}
-                onTeamsChange={handleTeamsChange}
-                maxTurns={maxTurns}
-                onMaxTurnsChange={handleMaxTurnsChange}
-                bots={bots}
-                gamePlayers={gameSetup?.gamePlayers || []}
-              />
-            </BotHealthProvider>
+            <TeamConfiguration
+              teams={teams}
+              onTeamsChange={handleTeamsChange}
+              maxTurns={maxTurns}
+              onMaxTurnsChange={handleMaxTurnsChange}
+              bots={bots}
+              gamePlayers={gameSetup?.gamePlayers || []}
+            />
           </Box>
         </FormControl>
       )}
@@ -458,6 +485,7 @@ const GameSetup: React.FC = () => {
               onPlayerKick={handlePlayerKick}
               playersReady={playersReady}
               onPlayerTeamKick={handlePlayerTeamKick}
+              getBotStatus={getBotStatus}
             />
           </Box>
         </FormControl>
@@ -506,7 +534,15 @@ const GameSetup: React.FC = () => {
   )
 }
 
-export default GameSetup
+const GameSetupWithProvider: React.FC = () => {
+  return (
+    <BotHealthProvider>
+      <GameSetup />
+    </BotHealthProvider>
+  );
+};
+
+export default GameSetupWithProvider
 
 // Function to insert keyframe and class rules separately
 const addStyles = () => {

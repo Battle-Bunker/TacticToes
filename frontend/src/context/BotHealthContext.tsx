@@ -6,6 +6,8 @@ import React, {
   ReactNode,
 } from "react";
 import { Bot } from "@shared/types/Game";
+import { httpsCallable } from "firebase/functions";
+import { functions } from "../firebaseConfig";
 
 export type BotStatus = "unknown" | "loading" | "alive" | "dead" | "error";
 
@@ -20,6 +22,7 @@ interface BotHealthContextType {
     bots: Bot[],
     gamePlayers: Array<{ id: string; type: "bot" | "human" }>,
   ) => Promise<void>;
+  wakeBot: (bot: Bot) => Promise<void>;
   isCheckingBots: boolean;
   getBotStatus: (botId: string) => BotStatus;
 }
@@ -38,7 +41,7 @@ export const BotHealthProvider: React.FC<BotHealthProviderProps> = ({
   const [botHealthStatus, setBotHealthStatus] = useState<BotHealthStatus>({});
   const [isCheckingBots, setIsCheckingBots] = useState(false);
 
-  // Bot health check function with retry logic and proxy support
+  // Bot health check function using Firebase wakeBot function
   const checkBotHealth = useCallback(
     async (bot: Bot, retryCount = 0): Promise<void> => {
       const maxRetries = 3;
@@ -72,54 +75,57 @@ export const BotHealthProvider: React.FC<BotHealthProviderProps> = ({
           `Checking bot ${bot.name} health at: ${bot.url} (attempt ${retryCount + 1})`,
         );
 
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
+        const wakeBotFunction = httpsCallable(functions, "wakeBot");
 
-        // Use proxy by replacing the full URL with a relative path
-        const proxyUrl = `/api${bot.url.replace("https://cyphid-snake-jamie-fox-cyphid.replit.app", "")}`;
-        const response = await fetch(proxyUrl, {
-          method: "GET",
-          signal: controller.signal,
-          headers: {
-            Accept:
-              "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-          },
-        });
+        const result = await wakeBotFunction({ botUrl: bot.url });
+        const data = result.data as {
+          success: boolean;
+          status: number;
+          statusText: string;
+          message: string;
+        };
 
-        clearTimeout(timeoutId);
-
-        console.log(
-          `Bot ${bot.name} response status: ${response.status} (${response.statusText})`,
-        );
+        console.log(`Bot ${bot.name} health check result:`, data);
 
         // Handle 503 Service Unavailable (service starting up)
-        if (response.status === 503 && retryCount < maxRetries) {
-          console.log(
-            `Bot ${bot.name} returned 503, retrying in ${retryDelay}ms...`,
-          );
-          setTimeout(() => {
-            checkBotHealth(bot, retryCount + 1);
-          }, retryDelay);
-          return;
+        if (data.status === 503) {
+          if (retryCount < maxRetries) {
+            console.log(
+              `Bot ${bot.name} returned 503, retrying in ${retryDelay}ms... (attempt ${retryCount + 1}/${maxRetries})`,
+            );
+            setTimeout(() => {
+              checkBotHealth(bot, retryCount + 1);
+            }, retryDelay);
+            return;
+          } else {
+            // Max retries reached for 503 - mark as dead
+            console.log(`Bot ${bot.name} still returning 503 after ${maxRetries} retries - marking as DEAD`);
+            setBotHealthStatus((prev) => ({
+              ...prev,
+              [bot.id]: "dead",
+            }));
+            return;
+          }
         }
 
-        if (response.ok) {
+        // Check if bot is actually alive (200-299 status codes)
+        if (data.success && data.status >= 200 && data.status < 300) {
           console.log(`Bot ${bot.name} marked as ALIVE`);
           setBotHealthStatus((prev) => ({
             ...prev,
             [bot.id]: "alive",
           }));
-        } else if (response.status >= 500 && retryCount < maxRetries) {
+        } else if (data.status >= 500 && retryCount < maxRetries) {
           // Retry on server errors
           console.log(
-            `Bot ${bot.name} server error ${response.status}, retrying in ${retryDelay}ms...`,
+            `Bot ${bot.name} server error ${data.status}, retrying in ${retryDelay}ms...`,
           );
           setTimeout(() => {
             checkBotHealth(bot, retryCount + 1);
           }, retryDelay);
           return;
         } else {
-          console.log(`Bot ${bot.name} HTTP error: ${response.status}`);
+          console.log(`Bot ${bot.name} HTTP error: ${data.status}`);
           setBotHealthStatus((prev) => ({
             ...prev,
             [bot.id]: "dead",
@@ -127,19 +133,6 @@ export const BotHealthProvider: React.FC<BotHealthProviderProps> = ({
         }
       } catch (error) {
         console.error(`Bot ${bot.name} health check failed:`, error);
-
-        // Handle CORS or network errors
-        if (
-          error.name === "TypeError" &&
-          error.message.includes("Failed to fetch")
-        ) {
-          console.error(`Possible CORS or network issue for bot ${bot.name}`);
-          setBotHealthStatus((prev) => ({
-            ...prev,
-            [bot.id]: "error",
-          }));
-          return;
-        }
 
         if (retryCount < maxRetries) {
           console.log(
@@ -183,6 +176,72 @@ export const BotHealthProvider: React.FC<BotHealthProviderProps> = ({
     [checkBotHealth],
   );
 
+  // Wake bot function using Firebase function
+  const wakeBot = useCallback(
+    async (bot: Bot): Promise<void> => {
+      // Validate URL
+      if (!bot.url || !bot.url.startsWith("http")) {
+        console.error(`Invalid URL for bot ${bot.name}: ${bot.url}`);
+        setBotHealthStatus((prev) => ({
+          ...prev,
+          [bot.id]: "error",
+        }));
+        return;
+      }
+
+      // Set loading state
+      setBotHealthStatus((prev) => ({
+        ...prev,
+        [bot.id]: "loading",
+      }));
+
+      try {
+        console.log(`Waking bot ${bot.name} at: ${bot.url}`);
+
+        const wakeBotFunction = httpsCallable(functions, "wakeBot");
+
+        const result = await wakeBotFunction({ botUrl: bot.url });
+        const data = result.data as {
+          success: boolean;
+          status: number;
+          statusText: string;
+          message: string;
+        };
+
+        console.log(`Bot ${bot.name} wake result:`, data);
+
+        // Check if bot is actually alive (200-299 status codes)
+        if (data.success && data.status >= 200 && data.status < 300) {
+          console.log(`Bot ${bot.name} successfully woken up`);
+          setBotHealthStatus((prev) => ({
+            ...prev,
+            [bot.id]: "alive",
+          }));
+        } else if (data.status === 503) {
+          // Bot is starting up (503) - mark as loading/starting
+          console.log(`Bot ${bot.name} is starting up (503)`);
+          setBotHealthStatus((prev) => ({
+            ...prev,
+            [bot.id]: "loading",
+          }));
+        } else {
+          console.log(`Bot ${bot.name} wake failed: ${data.message}`);
+          setBotHealthStatus((prev) => ({
+            ...prev,
+            [bot.id]: "dead",
+          }));
+        }
+      } catch (error) {
+        console.error(`Failed to wake bot ${bot.name}:`, error);
+        setBotHealthStatus((prev) => ({
+          ...prev,
+          [bot.id]: "error",
+        }));
+      }
+    },
+    [],
+  );
+
   // Get bot status
   const getBotStatus = useCallback(
     (botId: string): BotStatus => {
@@ -195,6 +254,7 @@ export const BotHealthProvider: React.FC<BotHealthProviderProps> = ({
     botHealthStatus,
     checkBotHealth,
     checkAllBotsHealth,
+    wakeBot,
     isCheckingBots,
     getBotStatus,
   };

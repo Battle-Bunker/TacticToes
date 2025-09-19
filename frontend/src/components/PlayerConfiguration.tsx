@@ -22,6 +22,7 @@ interface PlayerConfigurationProps {
   onPlayerKick: (playerID: string, type: "bot" | "human") => void;
   onPlayerTeamKick: (playerID: string, teamID: string) => void;
   playersReady: string[];
+  getBotStatus?: (botId: string) => "unknown" | "loading" | "alive" | "dead" | "error";
 }
 
 export const PlayerConfiguration: React.FC<PlayerConfigurationProps> = ({
@@ -32,6 +33,7 @@ export const PlayerConfiguration: React.FC<PlayerConfigurationProps> = ({
   onPlayerKick,
   onPlayerTeamKick,
   playersReady,
+  getBotStatus,
 }) => {
   // Group players by team
   const playersByTeam = teams.map((team) => ({
@@ -91,6 +93,7 @@ export const PlayerConfiguration: React.FC<PlayerConfigurationProps> = ({
                     <TableRow key={player.id}>
                       <TableCell sx={{ backgroundColor: player.colour }}>
                         {player.name} {player.emoji}
+                        {gamePlayer.type === 'bot' && getBotStatus?.(player.id) === 'dead' && ' (DEAD)'}
                       </TableCell>
                       <TableCell sx={{ backgroundColor: player.colour }}>
                         <FormControl size="small" fullWidth>
@@ -99,6 +102,7 @@ export const PlayerConfiguration: React.FC<PlayerConfigurationProps> = ({
                             onChange={(e) =>
                               onTeamChange(player.id, e.target.value)
                             }
+                            disabled={gamePlayer.type === 'bot' && getBotStatus?.(player.id) === 'dead'}
                             sx={{ minWidth: 120 }}
                           >
                             {teams.map((team) => (
@@ -174,6 +178,7 @@ export const PlayerConfiguration: React.FC<PlayerConfigurationProps> = ({
                     <TableRow key={player.id}>
                       <TableCell sx={{ backgroundColor: player.colour }}>
                         {player.name} {player.emoji}
+                        {gamePlayer.type === 'bot' && getBotStatus?.(player.id) === 'dead' && ' (DEAD)'}
                       </TableCell>
                       <TableCell sx={{ backgroundColor: player.colour }}>
                         <FormControl size="small" fullWidth>
@@ -182,6 +187,7 @@ export const PlayerConfiguration: React.FC<PlayerConfigurationProps> = ({
                             onChange={(e) =>
                               onTeamChange(player.id, e.target.value)
                             }
+                            disabled={gamePlayer.type === 'bot' && getBotStatus?.(player.id) === 'dead'}
                             sx={{ minWidth: 120 }}
                           >
                             <MenuItem value="">
