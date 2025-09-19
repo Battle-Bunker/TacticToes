@@ -5,6 +5,8 @@ import {
   FormControl,
 } from "@mui/material";
 import { ColorPicker } from "./ColorPicker";
+import { Bot } from "@shared/types/Game";
+import { BotHealthCheck } from "./BotHealthCheck";
 
 interface Team {
   id: string;
@@ -18,13 +20,18 @@ interface TeamConfigurationProps {
   onTeamsChange: (teams: Team[]) => void;
   maxTurns: number;
   onMaxTurnsChange: (turns: number) => void;
+  bots?: Bot[];
+  gamePlayers?: Array<{ id: string; type: "bot" | "human"; teamID?: string }>;
 }
+
 
 export const TeamConfiguration: React.FC<TeamConfigurationProps> = ({
   teams,
   onTeamsChange,
   maxTurns,
   onMaxTurnsChange,
+  bots = [],
+  gamePlayers = [],
 }) => {
   const [newTeamName, setNewTeamName] = useState("");
   const [newTeamColor, setNewTeamColor] = useState("#FF6B6B");
@@ -56,6 +63,7 @@ export const TeamConfiguration: React.FC<TeamConfigurationProps> = ({
   const removeTeam = (teamId: string) => {
     onTeamsChange(teams.filter((team) => team.id !== teamId));
   };
+
 
   return (
     <div>
@@ -99,6 +107,15 @@ export const TeamConfiguration: React.FC<TeamConfigurationProps> = ({
           Add Team
         </Button>
       </div>
+
+      {/* Bot Health Check Section */}
+      <BotHealthCheck 
+        bots={bots}
+        gamePlayers={gamePlayers}
+        autoCheck={true}
+        showTitle={true}
+        compact={false}
+      />
 
       {/* Team List */}
       <div>
