@@ -1,11 +1,5 @@
 import React, { useEffect, useRef } from "react";
-import {
-  Box,
-  Typography,
-  Chip,
-  CircularProgress,
-  Button,
-} from "@mui/material";
+import { Box, Typography, Chip, CircularProgress, Button } from "@mui/material";
 import { Bot } from "@shared/types/Game";
 import { useBotHealth, BotStatus } from "../context/BotHealthContext";
 
@@ -24,24 +18,25 @@ export const BotHealthCheck: React.FC<BotHealthCheckProps> = ({
   showTitle = true,
   compact = false,
 }) => {
-  const { botHealthStatus, checkBotHealth, checkAllBotsHealth, isCheckingBots, getBotStatus } = useBotHealth();
+  const { checkBotHealth, checkAllBotsHealth, isCheckingBots, getBotStatus } =
+    useBotHealth();
   const checkedBotsRef = useRef<Set<string>>(new Set());
 
   // Automatically check bot health when bots are added to the game
   useEffect(() => {
     if (!autoCheck) return;
-    
-    const botsInGame = bots.filter(bot => 
-      gamePlayers.some(gp => gp.id === bot.id && gp.type === 'bot')
+
+    const botsInGame = bots.filter((bot) =>
+      gamePlayers.some((gp) => gp.id === bot.id && gp.type === "bot"),
     );
-    
+
     if (botsInGame.length > 0) {
       // Check each bot individually when added (only once)
-      botsInGame.forEach(bot => {
+      botsInGame.forEach((bot) => {
         const currentStatus = getBotStatus(bot.id);
         const hasBeenChecked = checkedBotsRef.current.has(bot.id);
-        
-        if (currentStatus === 'unknown' && !hasBeenChecked) {
+
+        if (currentStatus === "unknown" && !hasBeenChecked) {
           console.log(`Auto-checking bot ${bot.name} for the first time`);
           checkedBotsRef.current.add(bot.id);
           checkBotHealth(bot);
@@ -53,29 +48,41 @@ export const BotHealthCheck: React.FC<BotHealthCheckProps> = ({
   // Get bot status chip color
   const getBotStatusColor = (status: BotStatus) => {
     switch (status) {
-      case 'alive': return 'success';
-      case 'dead': return 'error';
-      case 'error': return 'warning';
-      case 'loading': return 'info';
-      case 'unknown': return 'default';
-      default: return 'default';
+      case "alive":
+        return "success";
+      case "dead":
+        return "error";
+      case "error":
+        return "warning";
+      case "loading":
+        return "info";
+      case "unknown":
+        return "default";
+      default:
+        return "default";
     }
   };
 
   // Get bot status text
   const getBotStatusText = (status: BotStatus) => {
     switch (status) {
-      case 'alive': return 'Alive';
-      case 'dead': return 'Dead';
-      case 'error': return 'Error';
-      case 'loading': return 'Loading...';
-      case 'unknown': return 'Unknown';
-      default: return 'Unknown';
+      case "alive":
+        return "Alive";
+      case "dead":
+        return "Dead";
+      case "error":
+        return "Error";
+      case "loading":
+        return "Loading...";
+      case "unknown":
+        return "Unknown";
+      default:
+        return "Unknown";
     }
   };
 
-  const botsInGame = bots.filter(bot => 
-    gamePlayers.some(gp => gp.id === bot.id && gp.type === 'bot')
+  const botsInGame = bots.filter((bot) =>
+    gamePlayers.some((gp) => gp.id === bot.id && gp.type === "bot"),
   );
 
   if (botsInGame.length === 0) {
@@ -89,7 +96,7 @@ export const BotHealthCheck: React.FC<BotHealthCheckProps> = ({
           Bot Health Check
         </Typography>
       )}
-      
+
       {!compact && (
         <Box sx={{ display: "flex", alignItems: "center", gap: 2, mb: 2 }}>
           <Button
@@ -97,10 +104,10 @@ export const BotHealthCheck: React.FC<BotHealthCheckProps> = ({
             onClick={() => checkAllBotsHealth(bots, gamePlayers)}
             disabled={isCheckingBots}
             sx={{
-              backgroundColor: '#1976d2',
-              '&:hover': {
-                backgroundColor: '#1565c0'
-              }
+              backgroundColor: "#1976d2",
+              "&:hover": {
+                backgroundColor: "#1565c0",
+              },
             }}
           >
             {isCheckingBots ? (
@@ -109,10 +116,10 @@ export const BotHealthCheck: React.FC<BotHealthCheckProps> = ({
                 Checking...
               </>
             ) : (
-              'Check Bot Health'
+              "Check Bot Health"
             )}
           </Button>
-          
+
           {isCheckingBots && (
             <Typography variant="body2" color="text.secondary">
               Checking bot health...
@@ -145,7 +152,11 @@ export const BotHealthCheck: React.FC<BotHealthCheckProps> = ({
                 label={getBotStatusText(status)}
                 color={getBotStatusColor(status)}
                 size="small"
-                icon={status === 'loading' ? <CircularProgress size={16} /> : undefined}
+                icon={
+                  status === "loading" ? (
+                    <CircularProgress size={16} />
+                  ) : undefined
+                }
               />
             </Box>
           );
