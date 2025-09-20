@@ -1,15 +1,19 @@
-
-import React, { useRef, useState } from "react";
+// npm i react-colorful
+import React, { useState } from "react";
 import {
   Box,
   Typography,
   Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  Button,
+  ButtonBase,
+  IconButton,
+  useMediaQuery,
+  useTheme,
 } from "@mui/material";
-import { ColorLens, Palette } from "@mui/icons-material";
+import {
+  Palette as PaletteIcon,
+  Close as CloseIcon,
+} from "@mui/icons-material";
+import { HexColorPicker } from "react-colorful";
 
 interface ColorPickerProps {
   selectedColor: string;
@@ -20,133 +24,147 @@ interface ColorPickerProps {
 export const ColorPicker: React.FC<ColorPickerProps> = ({
   selectedColor,
   onColorChange,
-  label = "Color",
+  label = "Team Color",
 }) => {
   const [open, setOpen] = useState(false);
-  const [tempColor, setTempColor] = useState(selectedColor);
+  const [temp, setTemp] = useState(selectedColor);
 
-  const handleOpenDialog = () => {
-    setTempColor(selectedColor);
+  const theme = useTheme();
+  const isXs = useMediaQuery(theme.breakpoints.down("sm"));
+
+  const handleOpen = () => {
+    setTemp(selectedColor);
     setOpen(true);
   };
-
-  const handleColorChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    setTempColor(event.target.value);
-  };
-
-  const handleApply = () => {
-    onColorChange(tempColor);
-    setOpen(false);
-  };
-
-  const handleCancel = () => {
-    setTempColor(selectedColor);
-    setOpen(false);
-  };
+  const handleClose = () => setOpen(false);
 
   return (
     <>
-      <Box
+      {/* Trigger */}
+      <ButtonBase
+        onClick={handleOpen}
         sx={{
           display: "flex",
           alignItems: "center",
           gap: 1,
-          cursor: "pointer",
-          padding: 1,
+          px: 1,
+          py: 0.75,
           borderRadius: 1,
           border: "2px solid transparent",
           "&:hover": {
             border: "2px solid #1976d2",
-            backgroundColor: "rgba(25, 118, 210, 0.04)",
+            bgcolor: "rgba(25,118,210,.04)",
           },
-          transition: "all 0.2s ease-in-out",
         }}
-        onClick={handleOpenDialog}
       >
         <Box
           sx={{
             width: 32,
             height: 32,
             borderRadius: "50%",
-            backgroundColor: selectedColor,
+            bgcolor: selectedColor,
             border: "2px solid #fff",
-            boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            position: "relative",
-            "&::after": {
-              content: '""',
-              position: "absolute",
-              width: "100%",
-              height: "100%",
-              borderRadius: "50%",
-              border: "1px solid rgba(0,0,0,0.1)",
-            },
+            boxShadow: "0 2px 8px rgba(0,0,0,.15)",
+            display: "grid",
+            placeItems: "center",
           }}
         >
-          <ColorLens sx={{ fontSize: 16, color: "#fff", filter: "drop-shadow(0 1px 2px rgba(0,0,0,0.3))" }} />
+          <PaletteIcon sx={{ fontSize: 16, color: "#fff" }} />
         </Box>
-        <Typography variant="body2" sx={{ fontWeight: 500, color: "#666" }}>
+        <Typography
+          variant="body2"
+          sx={{
+            fontWeight: 500,
+            color: "#666",
+            lineHeight: 1,
+            flex: "0 1 auto",
+            minWidth: 0,
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            maxWidth: 160,
+          }}
+        >
           {label}
         </Typography>
-      </Box>
+      </ButtonBase>
 
+      {/* Dialog */}
       <Dialog
         open={open}
-        onClose={handleCancel}
-        maxWidth="sm"
+        onClose={handleClose}
+        maxWidth="xs"
         fullWidth
+        BackdropProps={{ sx: { background: "transparent" } }}
         PaperProps={{
           sx: {
-            borderRadius: 2,
-            boxShadow: "0 8px 32px rgba(0,0,0,0.12)",
-            border: "2px solid #000",
+            background: "transparent",
+            boxShadow: "none",
+            overflow: "visible",
+            // Let backdrop get clicks; we’ll re-enable only on our inner card.
+            pointerEvents: "none",
           },
         }}
       >
-        <DialogTitle sx={{ pb: 1 }}>
-          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-            <Palette color="primary" />
-            <Typography variant="h6">Choose Color</Typography>
-          </Box>
-        </DialogTitle>
+        {/* Mobile-only close button (some mobiles don’t close on backdrop click) */}
+        {isXs && (
+          <IconButton
+            aria-label="close"
+            onClick={handleClose}
+            sx={{
+              position: "fixed",
+              top: "calc(env(safe-area-inset-top, 0px) + 12px)",
+              right: "calc(env(safe-area-inset-right, 0px) + 12px)",
+              bgcolor: "rgba(0,0,0,.6)",
+              color: "#fff",
+              zIndex: 3,
+              "&:hover": { bgcolor: "rgba(0,0,0,.8)" },
+            }}
+          >
+            <CloseIcon />
+          </IconButton>
+        )}
 
-        <DialogContent sx={{ pt: 2 }}>
-          <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
-            <input
-              type="color"
-              value={tempColor}
-              onChange={handleColorChange}
+        {/* Center area — clicking anywhere here (outside the card) closes */}
+        <Box
+          // When Paper has pointerEvents:none, this Box won’t intercept clicks unless we set auto.
+          // We DO set auto so we can decide: outside card => close, inside card => keep open.
+          sx={{
+            height: { xs: "90vh", sm: "60vh" },
+            display: "grid",
+            placeItems: "center",
+            px: 2,
+            pointerEvents: "auto",
+          }}
+          onClick={handleClose} // background tap closes
+        >
+          {/* Picker card — stop clicks from bubbling so it doesn’t close */}
+          <Box
+            onClick={(e) => e.stopPropagation()}
+            sx={{
+              p: 2,
+              borderRadius: 3,
+              bgcolor: "rgba(255,255,255,0.95)",
+              boxShadow: "0 12px 32px rgba(0,0,0,.25)",
+              pointerEvents: "auto",
+            }}
+          >
+            <HexColorPicker
+              color={temp}
+              onChange={(c) => {
+                setTemp(c);
+                onColorChange(c); // live update
+              }}
               style={{
-                width: 120,
-                height: 120,
-                border: "none",
-                borderRadius: "12px",
-                cursor: "pointer",
-                outline: "none",
-                boxShadow: "0 4px 16px rgba(0,0,0,0.2)",
+                width: 280,
+                height: 280,
+                maxWidth: "80vw",
+                maxHeight: "80vw",
+                touchAction: "none", // smoother drag on mobile
               }}
             />
-            <Box sx={{ textAlign: "center" }}>
-              <Typography variant="h6" sx={{ fontWeight: 600 }}>
-                {tempColor.toUpperCase()}
-              </Typography>
-              <Typography variant="body2" sx={{ color: "#666" }}>
-                Selected Color
-              </Typography>
-            </Box>
           </Box>
-        </DialogContent>
-
-        <DialogActions sx={{ p: 2, gap: 1 }}>
-          <Button onClick={handleCancel} color="inherit">
-            Cancel
-          </Button>
-          <Button onClick={handleApply} variant="contained" color="primary">
-            Apply
-          </Button>
-        </DialogActions>
+        </Box>
       </Dialog>
     </>
   );
