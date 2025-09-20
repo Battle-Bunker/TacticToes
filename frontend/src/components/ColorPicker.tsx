@@ -141,6 +141,35 @@ export const ColorPicker: React.FC<ColorPickerProps> = ({
         </DialogTitle>
 
         <DialogContent sx={{ pt: 2 }}>
+          {/* Custom Color Picker */}
+          <Typography variant="subtitle2" sx={{ mb: 2, fontWeight: 600 }}>
+            Custom Color
+          </Typography>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 2, mb: 3 }}>
+            <input
+              type="color"
+              value={customColor}
+              onChange={(e) => handleCustomColorChange(e.target.value)}
+              style={{
+                width: 60,
+                height: 60,
+                border: "none",
+                borderRadius: "8px",
+                cursor: "pointer",
+                outline: "none",
+                boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+              }}
+            />
+            <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
+              <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                {customColor.toUpperCase()}
+              </Typography>
+              <Typography variant="caption" sx={{ color: "#666" }}>
+                Click to open full color picker
+              </Typography>
+            </Box>
+          </Box>
+
           {/* Predefined Color Palette */}
           <Typography variant="subtitle2" sx={{ mb: 2, fontWeight: 600 }}>
             Quick Colors
@@ -198,35 +227,6 @@ export const ColorPicker: React.FC<ColorPickerProps> = ({
                 </Box>
               </Tooltip>
             ))}
-          </Box>
-
-          {/* Custom Color Picker */}
-          <Typography variant="subtitle2" sx={{ mb: 2, fontWeight: 600 }}>
-            Custom Color
-          </Typography>
-          <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
-            <input
-              type="color"
-              value={customColor}
-              onChange={(e) => handleCustomColorChange(e.target.value)}
-              style={{
-                width: 60,
-                height: 60,
-                border: "none",
-                borderRadius: "8px",
-                cursor: "pointer",
-                outline: "none",
-                boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
-              }}
-            />
-            <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
-              <Typography variant="body2" sx={{ fontWeight: 500 }}>
-                {customColor.toUpperCase()}
-              </Typography>
-              <Typography variant="caption" sx={{ color: "#666" }}>
-                Click to open full color picker
-              </Typography>
-            </Box>
           </Box>
         </DialogContent>
 
