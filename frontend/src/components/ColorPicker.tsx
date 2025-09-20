@@ -1,9 +1,15 @@
-import React, { useRef } from "react";
+
+import React, { useRef, useState } from "react";
 import {
   Box,
   Typography,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Button,
 } from "@mui/material";
-import { ColorLens } from "@mui/icons-material";
+import { ColorLens, Palette } from "@mui/icons-material";
 
 interface ColorPickerProps {
   selectedColor: string;
@@ -16,14 +22,26 @@ export const ColorPicker: React.FC<ColorPickerProps> = ({
   onColorChange,
   label = "Color",
 }) => {
-  const hiddenInputRef = useRef<HTMLInputElement>(null);
+  const [open, setOpen] = useState(false);
+  const [tempColor, setTempColor] = useState(selectedColor);
 
-  const handleColorChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    onColorChange(event.target.value);
+  const handleOpenDialog = () => {
+    setTempColor(selectedColor);
+    setOpen(true);
   };
 
-  const handleOpenColorPicker = () => {
-    hiddenInputRef.current?.click();
+  const handleColorChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setTempColor(event.target.value);
+  };
+
+  const handleApply = () => {
+    onColorChange(tempColor);
+    setOpen(false);
+  };
+
+  const handleCancel = () => {
+    setTempColor(selectedColor);
+    setOpen(false);
   };
 
   return (
@@ -43,7 +61,7 @@ export const ColorPicker: React.FC<ColorPickerProps> = ({
           },
           transition: "all 0.2s ease-in-out",
         }}
-        onClick={handleOpenColorPicker}
+        onClick={handleOpenDialog}
       >
         <Box
           sx={{
@@ -74,13 +92,62 @@ export const ColorPicker: React.FC<ColorPickerProps> = ({
         </Typography>
       </Box>
 
-      <input
-        ref={hiddenInputRef}
-        type="color"
-        value={selectedColor}
-        onChange={handleColorChange}
-        style={{ display: "none" }}
-      />
+      <Dialog
+        open={open}
+        onClose={handleCancel}
+        maxWidth="sm"
+        fullWidth
+        PaperProps={{
+          sx: {
+            borderRadius: 2,
+            boxShadow: "0 8px 32px rgba(0,0,0,0.12)",
+            border: "2px solid #000",
+          },
+        }}
+      >
+        <DialogTitle sx={{ pb: 1 }}>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            <Palette color="primary" />
+            <Typography variant="h6">Choose Color</Typography>
+          </Box>
+        </DialogTitle>
+
+        <DialogContent sx={{ pt: 2 }}>
+          <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
+            <input
+              type="color"
+              value={tempColor}
+              onChange={handleColorChange}
+              style={{
+                width: 120,
+                height: 120,
+                border: "none",
+                borderRadius: "12px",
+                cursor: "pointer",
+                outline: "none",
+                boxShadow: "0 4px 16px rgba(0,0,0,0.2)",
+              }}
+            />
+            <Box sx={{ textAlign: "center" }}>
+              <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                {tempColor.toUpperCase()}
+              </Typography>
+              <Typography variant="body2" sx={{ color: "#666" }}>
+                Selected Color
+              </Typography>
+            </Box>
+          </Box>
+        </DialogContent>
+
+        <DialogActions sx={{ p: 2, gap: 1 }}>
+          <Button onClick={handleCancel} color="inherit">
+            Cancel
+          </Button>
+          <Button onClick={handleApply} variant="contained" color="primary">
+            Apply
+          </Button>
+        </DialogActions>
+      </Dialog>
     </>
   );
 };
