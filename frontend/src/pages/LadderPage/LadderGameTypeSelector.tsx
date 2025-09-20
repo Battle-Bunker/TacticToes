@@ -18,11 +18,13 @@ interface Props {
 
 const gameTypes: GameType[] = [
   'snek',
+  'teamsnek',
   'connect4',
   'tactictoes',
   'longboi',
   'reversi',
   'colourclash',
+
 ]
 
 export const LadderGameTypeSelector: React.FC<Props> = ({
