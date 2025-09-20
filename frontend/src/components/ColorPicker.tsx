@@ -7,7 +7,6 @@ import {
   DialogActions,
   Box,
   Typography,
-  Tooltip,
 } from "@mui/material";
 import { Palette, ColorLens } from "@mui/icons-material";
 
@@ -17,39 +16,6 @@ interface ColorPickerProps {
   label?: string;
 }
 
-// Curated color palette - organized by hue families with good contrast
-const COLOR_PALETTE = [
-  // Reds & Pinks
-  "#E53E3E", // Red
-  "#FC8181", // Light Red
-  "#F56565", // Rose Red
-  
-  // Oranges & Yellows
-  "#DD6B20", // Orange
-  "#F6AD55", // Light Orange
-  "#ECC94B", // Yellow
-  
-  // Greens
-  "#38A169", // Green
-  "#68D391", // Light Green
-  "#48BB78", // Emerald
-  
-  // Blues & Cyans
-  "#3182CE", // Blue
-  "#63B3ED", // Light Blue
-  "#38B2AC", // Teal
-  
-  // Purples & Violets
-  "#805AD5", // Purple
-  "#B794F6", // Light Purple
-  "#9F7AEA", // Violet
-  
-  // Grays & Neutrals
-  "#4A5568", // Dark Gray
-  "#A0AEC0", // Light Gray
-  "#2D3748", // Charcoal
-];
-
 export const ColorPicker: React.FC<ColorPickerProps> = ({
   selectedColor,
   onColorChange,
@@ -57,11 +23,6 @@ export const ColorPicker: React.FC<ColorPickerProps> = ({
 }) => {
   const [open, setOpen] = useState(false);
   const [customColor, setCustomColor] = useState("#000000");
-
-  const handleColorSelect = (color: string) => {
-    onColorChange(color);
-    setOpen(false);
-  };
 
   const handleCustomColorChange = (color: string) => {
     setCustomColor(color);
@@ -141,9 +102,9 @@ export const ColorPicker: React.FC<ColorPickerProps> = ({
         </DialogTitle>
 
         <DialogContent sx={{ pt: 2 }}>
-          {/* Custom Color Picker */}
+          {/* Full Color Picker */}
           <Typography variant="subtitle2" sx={{ mb: 2, fontWeight: 600 }}>
-            Custom Color
+            Select Color
           </Typography>
           <Box sx={{ display: "flex", alignItems: "center", gap: 2, mb: 3 }}>
             <input
@@ -151,82 +112,23 @@ export const ColorPicker: React.FC<ColorPickerProps> = ({
               value={customColor}
               onChange={(e) => handleCustomColorChange(e.target.value)}
               style={{
-                width: 60,
-                height: 60,
+                width: 80,
+                height: 80,
                 border: "none",
-                borderRadius: "8px",
+                borderRadius: "12px",
                 cursor: "pointer",
                 outline: "none",
-                boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+                boxShadow: "0 4px 16px rgba(0,0,0,0.2)",
               }}
             />
-            <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
-              <Typography variant="body2" sx={{ fontWeight: 500 }}>
+            <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+              <Typography variant="h6" sx={{ fontWeight: 600 }}>
                 {customColor.toUpperCase()}
               </Typography>
-              <Typography variant="caption" sx={{ color: "#666" }}>
-                Click to open full color picker
+              <Typography variant="body2" sx={{ color: "#666" }}>
+                Click the color square to open the full color picker
               </Typography>
             </Box>
-          </Box>
-
-          {/* Predefined Color Palette */}
-          <Typography variant="subtitle2" sx={{ mb: 2, fontWeight: 600 }}>
-            Quick Colors
-          </Typography>
-          <Box
-            sx={{
-              display: "grid",
-              gridTemplateColumns: "repeat(6, 1fr)",
-              gap: 1.5,
-              mb: 3,
-            }}
-          >
-            {COLOR_PALETTE.map((color) => (
-              <Tooltip key={color} title={color} arrow>
-                <Box
-                  sx={{
-                    width: 48,
-                    height: 48,
-                    borderRadius: "50%",
-                    backgroundColor: color,
-                    cursor: "pointer",
-                    border: selectedColor === color ? "3px solid #1976d2" : "3px solid transparent",
-                    transition: "all 0.2s ease-in-out",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    position: "relative",
-                    "&:hover": {
-                      transform: "scale(1.1)",
-                      boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
-                      border: "3px solid #1976d2",
-                    },
-                    "&::after": {
-                      content: '""',
-                      position: "absolute",
-                      width: "100%",
-                      height: "100%",
-                      borderRadius: "50%",
-                      border: "1px solid rgba(0,0,0,0.1)",
-                    },
-                  }}
-                  onClick={() => handleColorSelect(color)}
-                >
-                  {selectedColor === color && (
-                    <Box
-                      sx={{
-                        color: "#fff",
-                        fontSize: "20px",
-                        filter: "drop-shadow(0 1px 2px rgba(0,0,0,0.3))",
-                      }}
-                    >
-                      ✓
-                    </Box>
-                  )}
-                </Box>
-              </Tooltip>
-            ))}
           </Box>
         </DialogContent>
 
