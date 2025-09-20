@@ -22,7 +22,7 @@ export const ColorPicker: React.FC<ColorPickerProps> = ({
   onColorChange,
   label = "Color",
 }) => {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true); // Start with dialog open
   const [tempColor, setTempColor] = useState(selectedColor);
 
   const handleOpenDialog = () => {
