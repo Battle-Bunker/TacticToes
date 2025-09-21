@@ -422,11 +422,7 @@ export const ColorPicker: React.FC<ColorPickerProps> = ({
             Cancel
           </Button>
           {view === "custom" ? (
-            <Button
-              onClick={() => setOpen(false)}
-              color="blue"
-              disableElevation
-            >
+            <Button onClick={() => setOpen(false)} disableElevation>
               Done
             </Button>
           ) : null}
