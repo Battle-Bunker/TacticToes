@@ -73,8 +73,8 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
     setUpdatedEmoji(emoji)
   }
 
-  const handleHueChange = (color: any) => {
-    setHue(color.hsv.h)
+  const handleHueChange = (newHue: { h: number }) => {
+    setHue(newHue.h)
   }
 
   const handleLinkGoogleAccount = async () => {

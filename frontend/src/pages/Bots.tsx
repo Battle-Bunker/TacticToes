@@ -286,7 +286,7 @@ const Bots: React.FC = () => {
         >
           <Hue
             hue={hue}
-            onChange={(color: any) => setHue(color.hsv.h)}
+            onChange={(newHue: { h: number }) => setHue(newHue.h)}
             style={{ width: "100%", height: "20px" }}
           />
         </Box>
