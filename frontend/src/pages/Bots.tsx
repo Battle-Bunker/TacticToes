@@ -25,7 +25,7 @@ import {
 } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
 import { Refresh } from "@mui/icons-material";
-import { ColorResult, HuePicker } from "react-color";
+import { Hue } from "@uiw/react-color";
 import { useUser } from "../context/UserContext";
 import { db } from "../firebaseConfig";
 import { generateColor } from "../utils/colourUtils";
@@ -282,15 +282,12 @@ const Bots: React.FC = () => {
             alignItems: "center",
             mb: 2,
             border: "2px solid #000",
-            "& .hue-horizontal": {
-              borderRadius: "0px !important",
-            },
           }}
         >
-          <HuePicker
-            color={colour}
-            onChange={(c: ColorResult) => setHue(c.hsl.h)}
-            width="100%"
+          <Hue
+            hue={hue}
+            onChange={(color: any) => setHue(color.hsv.h)}
+            style={{ width: "100%", height: "20px" }}
           />
         </Box>
 

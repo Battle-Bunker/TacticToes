@@ -2,7 +2,7 @@ import { Box, Button, Container, TextField, Typography } from "@mui/material"
 import { emojiList } from "@shared/types/Emojis"
 import { linkWithPopup, signOut } from "firebase/auth"
 import React, { useEffect, useState } from "react"
-import { ColorResult, HuePicker } from "react-color"
+import { Hue } from "@uiw/react-color"
 import { useUser } from "../context/UserContext"
 import { auth, provider } from "../firebaseConfig"
 import { generateColor } from "../utils/colourUtils"
@@ -73,8 +73,8 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
     setUpdatedEmoji(emoji)
   }
 
-  const handleHueChange = (color: ColorResult) => {
-    setHue(color.hsl.h)
+  const handleHueChange = (color: any) => {
+    setHue(color.hsv.h)
   }
 
   const handleLinkGoogleAccount = async () => {
@@ -116,15 +116,12 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
             justifyContent: "center",
             alignItems: "center",
             border: "2px solid #000",
-            "& .hue-horizontal": {
-              borderRadius: "0px !important",
-            },
           }}
         >
-          <HuePicker
-            color={selectedColour}
+          <Hue
+            hue={hue}
             onChange={handleHueChange}
-            width="100%"
+            style={{ width: "100%", height: "20px" }}
           />
         </Box>
         <Box
