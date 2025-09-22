@@ -19,6 +19,7 @@ import {
   ArrowBack as ArrowBackIcon,
   Close as CloseIcon,
 } from "@mui/icons-material";
+import { Sketch } from "@uiw/react-color";
 
 interface ColorPickerProps {
   selectedColor: string;
@@ -72,11 +73,6 @@ export const ColorPicker: React.FC<ColorPickerProps> = ({
 
   const theme = useTheme();
   const isXs = useMediaQuery(theme.breakpoints.down("sm"));
-  const colorInputRef = useRef<HTMLInputElement | null>(null);
-
-  const supportsShowPicker =
-    typeof window !== "undefined" &&
-    (HTMLInputElement.prototype as any).showPicker !== undefined;
 
   const handleOpenDialog = () => {
     setCustomColor(selectedColor);
@@ -96,21 +92,7 @@ export const ColorPicker: React.FC<ColorPickerProps> = ({
     setView("custom");
   };
 
-  // When switching to custom, try to auto-open the native picker on capable/desktop browsers
-  useEffect(() => {
-    if (open && view === "custom" && colorInputRef.current) {
-      const t = setTimeout(() => {
-        try {
-          if (supportsShowPicker && !isXs) {
-            (colorInputRef.current as any).showPicker();
-          }
-        } catch {
-          // noop; user can still interact with the visible input
-        }
-      }, 50);
-      return () => clearTimeout(t);
-    }
-  }, [open, view, supportsShowPicker, isXs]);
+  
 
   const handleCustomColorChange = (value: string) => {
     setCustomColor(value);
@@ -360,11 +342,12 @@ export const ColorPicker: React.FC<ColorPickerProps> = ({
               </Box>
             </>
           ) : (
-            // CUSTOM VIEW (native <input type="color">)
+            // CUSTOM VIEW (using @uiw/react-color)
             <Box
               sx={{
-                display: "grid",
-                placeItems: "center",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
                 py: { xs: 2, sm: 3 },
                 gap: 2,
               }}
@@ -373,23 +356,21 @@ export const ColorPicker: React.FC<ColorPickerProps> = ({
                 Pick any color
               </Typography>
 
-              {/* Big, high-visibility native input. Visible across devices. */}
-              <input
-                ref={colorInputRef}
-                type="color"
-                value={customColor}
-                onChange={(e) => handleCustomColorChange(e.target.value)}
-                style={{
-                  width: isXs ? Math.min(240, window.innerWidth - 80) : 260,
-                  height: isXs ? 120 : 140,
-                  border: "none",
-                  borderRadius: 16,
-                  cursor: "pointer",
-                  outline: "none",
-                  boxShadow:
-                    "inset 0 0 10px rgba(0,0,0,0.08), 0 8px 24px rgba(0,0,0,0.18)",
+              {/* @uiw/react-color Sketch picker */}
+              <Box
+                sx={{
+                  "& .w-color-sketch": {
+                    boxShadow: "0 8px 24px rgba(0,0,0,0.12) !important",
+                    borderRadius: "8px !important",
+                  },
                 }}
-              />
+              >
+                <Sketch
+                  color={customColor}
+                  onChange={(color) => handleCustomColorChange(color.hex)}
+                  disableAlpha={true}
+                />
+              </Box>
 
               {/* Readout */}
               <Box
