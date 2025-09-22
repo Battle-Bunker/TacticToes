@@ -1,3 +1,4 @@
+
 import React, { useState } from "react";
 import {
   Box,
@@ -14,9 +15,7 @@ import {
   ColorLens as ColorLensIcon,
   Close as CloseIcon,
 } from "@mui/icons-material";
-import { Slider, Sketch, Material, Colorful, Compact, Circle, Wheel, Block, Github, Chrome } from '@uiw/react-color';
-import { Alpha, Hue, ShadeSlider, Saturation, Interactive, hsvaToHslaString } from '@uiw/react-color';
-import { EditableInput, EditableInputRGBA, EditableInputHSLA } from '@uiw/react-color';
+import { Sketch } from '@uiw/react-color';
 
 interface ColorPickerProps {
   selectedColor: string;
