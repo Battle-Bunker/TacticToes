@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react"
 import { Box, TextField, Button, Typography, Container } from "@mui/material"
 import { Refresh } from "@mui/icons-material"
 import { emojiList } from "@shared/types/Emojis"
-import { ColorResult, HuePicker } from "react-color"
+import { Hue } from "@uiw/react-color"
 import { generateColor } from "../utils/colourUtils" // Import the new generateColor function
 import { signInWithPopup } from "firebase/auth"
 import { auth, provider } from "../firebaseConfig"
@@ -36,8 +36,8 @@ const SignupPage: React.FC<SignUpPageProps> = ({ onSave }) => {
     randomizeEmojis()
   }, [])
 
-  const handleHueChange = (color: ColorResult) => {
-    setHue(color.hsl.h)
+  const handleHueChange = (color: any) => {
+    setHue(color.hsv.h)
   }
 
   useEffect(() => {
@@ -92,15 +92,12 @@ const SignupPage: React.FC<SignUpPageProps> = ({ onSave }) => {
             justifyContent: "center",
             alignItems: "center",
             border: "2px solid #000",
-            "& .hue-horizontal": {
-              borderRadius: "0px !important",
-            },
           }}
         >
-          <HuePicker
-            color={selectedColour}
+          <Hue
+            hue={hue}
             onChange={handleHueChange}
-            width="100%"
+            style={{ width: "100%", height: "20px" }}
           />
         </Box>
 
