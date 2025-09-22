@@ -36,8 +36,8 @@ const SignupPage: React.FC<SignUpPageProps> = ({ onSave }) => {
     randomizeEmojis()
   }, [])
 
-  const handleHueChange = (color: any) => {
-    setHue(color.hsv.h)
+  const handleHueChange = (newHue: { h: number }) => {
+    setHue(newHue.h)
   }
 
   useEffect(() => {
