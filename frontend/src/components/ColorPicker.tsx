@@ -1,4 +1,3 @@
-
 import React, { useState } from "react";
 import {
   Box,
@@ -15,7 +14,7 @@ import {
   ColorLens as ColorLensIcon,
   Close as CloseIcon,
 } from "@mui/icons-material";
-import { Sketch } from '@uiw/react-color';
+import { Sketch } from "@uiw/react-color";
 
 interface ColorPickerProps {
   selectedColor: string;
@@ -37,7 +36,7 @@ export const ColorPicker: React.FC<ColorPickerProps> = ({
   };
 
   const handleClose = () => {
-    setTempColor(selectedColor); // Reset to original color
+    setTempColor(selectedColor);
     setOpen(false);
   };
 
@@ -153,9 +152,9 @@ export const ColorPicker: React.FC<ColorPickerProps> = ({
               color={tempColor}
               onChange={handleColorChange}
               style={{
-                boxShadow: 'none',
-                width: '100%',
-                maxWidth: '280px'
+                boxShadow: "none",
+                width: "100%",
+                maxWidth: "280px",
               }}
             />
           </Box>
@@ -165,7 +164,7 @@ export const ColorPicker: React.FC<ColorPickerProps> = ({
           <Button onClick={handleClose} color="inherit">
             Cancel
           </Button>
-          <Button onClick={handleApply} variant="contained" disableElevation>
+          <Button onClick={handleApply} disableElevation>
             Apply
           </Button>
         </DialogActions>
