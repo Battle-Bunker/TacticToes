@@ -70,6 +70,24 @@ export const SnekRules: React.FC = () => {
   )
 }
 
+export const KingSnekRules: React.FC = () => {
+  return (
+    <Stack spacing={2}>
+      <Typography>Team-based snake with a twist: each team has a King!</Typography>
+      <Typography>
+        👑 Select one player per team as the King. If the King dies, the entire team is eliminated.
+      </Typography>
+      <Typography>
+        Team score is determined by the King's snake length only, not the whole team.
+      </Typography>
+      <Typography>
+        Standard snake rules apply: hit walls, bodies, or lose head-to-head (shorter dies).
+      </Typography>
+      <Typography>Eat apples to grow longer. Protect your King!</Typography>
+    </Stack>
+  )
+}
+
 export const ColorClashRules: React.FC = () => {
   return (
     <Stack spacing={2}>

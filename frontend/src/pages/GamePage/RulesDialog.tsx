@@ -10,6 +10,7 @@ import {
 import {
   ColorClashRules,
   Connect4Rules,
+  KingSnekRules,
   LongBoiRules,
   ReversiRules,
   SnekRules,
@@ -33,6 +34,10 @@ export const getRulesComponent = (rules?: GameType): React.FC => {
       return TacticToesRules
     case "snek":
       return SnekRules
+    case "teamsnek":
+      return SnekRules
+    case "kingsnek":
+      return KingSnekRules
     case "colourclash":
       return ColorClashRules
     case "reversi":
