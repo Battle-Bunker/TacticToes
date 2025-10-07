@@ -9,6 +9,7 @@ import { ReversiProcessor } from "./Reversi"
 import { SnekProcessor } from "./SnekProcessor"
 import { TacticToesProcessor } from "./TacticToesProcessor"
 import { TeamSnekProcessor } from "./TeamSnekProcessor"
+import { KingSnekProcessor } from "./KingSnekProcessor"
 
 /**
  * Interface that defines the shape of a GameProcessor constructor.
@@ -39,6 +40,8 @@ export function getProcessorClass(gameType: GameType): GameProcessorConstructor 
       return ReversiProcessor
     case "teamsnek":
       return TeamSnekProcessor
+    case "kingsnek":
+      return KingSnekProcessor
     default:
       console.error(`Unsupported game type: ${gameType}`)
       return null
