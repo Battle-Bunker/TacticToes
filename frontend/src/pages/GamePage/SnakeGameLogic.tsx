@@ -165,7 +165,7 @@ const GameLogic = ({
     
     // Determine the color to use - team color in team mode, otherwise player color
     let snakeColor = playerInfo?.colour || "white"
-    if (gameState.setup.gameType === 'teamsnek' && gameState.setup.teams) {
+    if ((gameState.setup.gameType === 'teamsnek' || gameState.setup.gameType === 'kingsnek') && gameState.setup.teams) {
       const gamePlayer = gameState.setup.gamePlayers.find(gp => gp.id === playerID)
       if (gamePlayer?.teamID) {
         const team = gameState.setup.teams.find(t => t.id === gamePlayer.teamID)
@@ -223,7 +223,7 @@ const GameLogic = ({
       
       // Determine the color to use - team color in team mode, otherwise player color
       let snakeColor = playerInfo?.colour || "white"
-      if (gameState.setup.gameType === 'teamsnek' && gameState.setup.teams) {
+      if ((gameState.setup.gameType === 'teamsnek' || gameState.setup.gameType === 'kingsnek') && gameState.setup.teams) {
         const gamePlayer = gameState.setup.gamePlayers.find(gp => gp.id === playerID)
         if (gamePlayer?.teamID) {
           const team = gameState.setup.teams.find(t => t.id === gamePlayer.teamID)
@@ -244,6 +244,10 @@ const GameLogic = ({
       }
 
       if (hasHead) {
+        const gamePlayer = gameState.setup.gamePlayers.find(gp => gp.id === playerID)
+        const isKing = gameState.setup.gameType === 'kingsnek' && gamePlayer?.isKing
+        const displayEmoji = isKing ? "👑" : (playerInfo?.emoji || "⭕")
+        
         content = (
           <Cell
             key={`head-${playerID}-${position}-${selectedTurnIndex}`}
@@ -253,7 +257,7 @@ const GameLogic = ({
             <span
               style={{ fontSize: cellSize * 0.8, lineHeight: 1, zIndex: 2 }}
             >
-              {playerInfo?.emoji || "⭕"}
+              {displayEmoji}
             </span>
           </Cell>
         )
