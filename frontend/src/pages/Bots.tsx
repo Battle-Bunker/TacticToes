@@ -50,6 +50,7 @@ const availableGameTypes: GameType[] = [
   "colourclash",
   "reversi",
   "teamsnek",
+  "kingsnek",
 ];
 
 const Bots: React.FC = () => {
