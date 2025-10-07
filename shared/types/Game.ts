@@ -37,6 +37,7 @@
     | "colourclash"
     | "reversi"
     | "teamsnek"
+    | "kingsnek"
 
   export interface Session {
     latestGameID: string | null
@@ -78,6 +79,7 @@
     id: string
     type: "bot" | "human"
     teamID?: string
+    isKing?: boolean
   }
 
   export interface Player {
