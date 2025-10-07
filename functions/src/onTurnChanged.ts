@@ -141,12 +141,15 @@ const processTurn = async (
             },
           }
 
-          if (gameData.setup.gameType === 'kingsnek' && gamePlayer?.teamID) {
-            snakeData.squad = gamePlayer.teamID
-            snakeData.isKing = isKing(player)
-            const teamKingID = getTeamKingID(gamePlayer.teamID)
-            if (teamKingID) {
-              snakeData.teamKingID = teamKingID
+          if ((gameData.setup.gameType === 'teamsnek' || gameData.setup.gameType === 'kingsnek') && gamePlayer?.teamID) {
+            snakeData.teamID = gamePlayer.teamID
+            
+            if (gameData.setup.gameType === 'kingsnek') {
+              snakeData.isKing = isKing(player)
+              const teamKingID = getTeamKingID(gamePlayer.teamID)
+              if (teamKingID) {
+                snakeData.teamKingID = teamKingID
+              }
             }
           }
 

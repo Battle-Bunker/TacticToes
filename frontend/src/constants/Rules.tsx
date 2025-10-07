@@ -70,6 +70,21 @@ export const SnekRules: React.FC = () => {
   )
 }
 
+export const TeamSnekRules: React.FC = () => {
+  return (
+    <Stack spacing={2}>
+      <Typography>Team-based snake game where players work together!</Typography>
+      <Typography>
+        Team score is the combined length of all snakes on the team.
+      </Typography>
+      <Typography>
+        Standard snake rules apply: hit walls, bodies, or lose head-to-head (shorter dies).
+      </Typography>
+      <Typography>Eat apples to grow longer. Work together to maximize your team's total length!</Typography>
+    </Stack>
+  )
+}
+
 export const KingSnekRules: React.FC = () => {
   return (
     <Stack spacing={2}>

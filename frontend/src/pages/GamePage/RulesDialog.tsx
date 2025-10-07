@@ -15,6 +15,7 @@ import {
   ReversiRules,
   SnekRules,
   TacticToesRules,
+  TeamSnekRules,
 } from "../../constants/Rules"
 import { GameType } from "@shared/types/Game"
 
@@ -35,7 +36,7 @@ export const getRulesComponent = (rules?: GameType): React.FC => {
     case "snek":
       return SnekRules
     case "teamsnek":
-      return SnekRules
+      return TeamSnekRules
     case "kingsnek":
       return KingSnekRules
     case "colourclash":
