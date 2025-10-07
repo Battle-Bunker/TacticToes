@@ -49,7 +49,7 @@ const processTurn = async (
 
   // Helper function to determine snake color - team color in team mode, otherwise bot color
   const getSnakeColor = (playerID: string): string => {
-    if (gameData.setup.gameType === 'teamsnek' && gameData.setup.teams) {
+    if ((gameData.setup.gameType === 'teamsnek' || gameData.setup.gameType === 'kingsnek') && gameData.setup.teams) {
       const gamePlayer = gameData.setup.gamePlayers.find(gp => gp.id === playerID)
       if (gamePlayer?.teamID) {
         const team = gameData.setup.teams.find(t => t.id === gamePlayer.teamID)
@@ -61,6 +61,20 @@ const processTurn = async (
     // Fall back to bot color if not in team mode or team not found
     const botInfo = allBots.find(b => b.id === playerID)
     return botInfo?.colour || "#FF0000"
+  }
+
+  // Helper function to check if a player is a King
+  const isKing = (playerID: string): boolean => {
+    if (gameData.setup.gameType !== 'kingsnek') return false
+    const gamePlayer = gameData.setup.gamePlayers.find(gp => gp.id === playerID)
+    return gamePlayer?.isKing || false
+  }
+
+  // Helper function to get team's King ID
+  const getTeamKingID = (teamID: string): string | undefined => {
+    if (gameData.setup.gameType !== 'kingsnek') return undefined
+    const king = gameData.setup.gamePlayers.find(gp => gp.teamID === teamID && gp.isKing)
+    return king?.id
   }
 
   // Prepare the Battlesnake API request for each bot
@@ -110,7 +124,8 @@ const processTurn = async (
             return adjustPosition(x, y) // Adjust the position inward and flip y-axis
           })
 
-          return {
+          const gamePlayer = gameData.setup.gamePlayers.find(gp => gp.id === player)
+          const snakeData: any = {
             id: player,
             name: player, // You can modify this to get the player's name if needed
             health: turnData.playerHealth[player],
@@ -125,6 +140,17 @@ const processTurn = async (
               tail: "default", // Placeholder, customize if needed
             },
           }
+
+          if (gameData.setup.gameType === 'kingsnek' && gamePlayer?.teamID) {
+            snakeData.squad = gamePlayer.teamID
+            snakeData.isKing = isKing(player)
+            const teamKingID = getTeamKingID(gamePlayer.teamID)
+            if (teamKingID) {
+              snakeData.teamKingID = teamKingID
+            }
+          }
+
+          return snakeData
         }),
       },
       you: {
