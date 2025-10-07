@@ -11,8 +11,9 @@ import {
   FormControl,
   Typography,
   Box,
+  Checkbox,
 } from "@mui/material";
-import { GamePlayer, Player, Team } from "@shared/types/Game";
+import { GamePlayer, GameType, Player, Team } from "@shared/types/Game";
 
 interface PlayerConfigurationProps {
   teams: Team[];
@@ -23,6 +24,8 @@ interface PlayerConfigurationProps {
   onPlayerTeamKick: (playerID: string, teamID: string) => void;
   playersReady: string[];
   getBotStatus?: (botId: string) => "unknown" | "loading" | "alive" | "dead" | "error";
+  gameType?: GameType;
+  onKingToggle?: (playerID: string, teamID: string) => void;
 }
 
 export const PlayerConfiguration: React.FC<PlayerConfigurationProps> = ({
@@ -34,7 +37,10 @@ export const PlayerConfiguration: React.FC<PlayerConfigurationProps> = ({
   onPlayerTeamKick,
   playersReady,
   getBotStatus,
+  gameType,
+  onKingToggle,
 }) => {
+  const isKingSnek = gameType === 'kingsnek';
   // Group players by team
   const playersByTeam = teams.map((team) => ({
     team,
@@ -79,6 +85,7 @@ export const PlayerConfiguration: React.FC<PlayerConfigurationProps> = ({
                 <TableRow>
                   <TableCell>Player</TableCell>
                   <TableCell>Team</TableCell>
+                  {isKingSnek && <TableCell align="center">King</TableCell>}
                   <TableCell align="right">Ready</TableCell>
                   <TableCell align="right">Remove</TableCell>
                 </TableRow>
@@ -129,6 +136,20 @@ export const PlayerConfiguration: React.FC<PlayerConfigurationProps> = ({
                           </Select>
                         </FormControl>
                       </TableCell>
+                      {isKingSnek && (
+                        <TableCell
+                          align="center"
+                          sx={{ backgroundColor: player.colour }}
+                        >
+                          <Checkbox
+                            checked={gamePlayer.isKing || false}
+                            onChange={() => onKingToggle?.(player.id, gamePlayer.teamID || "")}
+                            checkedIcon={<span>👑</span>}
+                            icon={<span style={{ opacity: 0.3 }}>👑</span>}
+                            sx={{ padding: 0 }}
+                          />
+                        </TableCell>
+                      )}
                       <TableCell
                         align="right"
                         sx={{ backgroundColor: player.colour }}
@@ -164,6 +185,7 @@ export const PlayerConfiguration: React.FC<PlayerConfigurationProps> = ({
                 <TableRow>
                   <TableCell>Player</TableCell>
                   <TableCell>Team</TableCell>
+                  {isKingSnek && <TableCell align="center">King</TableCell>}
                   <TableCell align="right">Ready</TableCell>
                   <TableCell align="right">Remove</TableCell>
                 </TableRow>
@@ -217,6 +239,14 @@ export const PlayerConfiguration: React.FC<PlayerConfigurationProps> = ({
                           </Select>
                         </FormControl>
                       </TableCell>
+                      {isKingSnek && (
+                        <TableCell
+                          align="center"
+                          sx={{ backgroundColor: player.colour }}
+                        >
+                          <span style={{ opacity: 0.3 }}>👑</span>
+                        </TableCell>
+                      )}
                       <TableCell
                         align="right"
                         sx={{ backgroundColor: player.colour }}

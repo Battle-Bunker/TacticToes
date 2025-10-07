@@ -173,6 +173,33 @@ const GameSetup: React.FC = () => {
     setTeams(newTeams)
   }
 
+  // Handle King selection for a player
+  const handleKingToggle = async (playerID: string, teamID: string) => {
+    if (!gameSetup) return;
+
+    const updatedGamePlayers = gameSetup.gamePlayers.map((player) => {
+      if (player.teamID === teamID) {
+        return { ...player, isKing: player.id === playerID };
+      }
+      return player;
+    });
+
+    const teamPlayers = updatedGamePlayers.filter(p => p.teamID === teamID);
+    const kingPlayer = teamPlayers.find(p => p.isKing);
+    const otherPlayers = teamPlayers.filter(p => !p.isKing);
+    const nonTeamPlayers = updatedGamePlayers.filter(p => p.teamID !== teamID);
+
+    const reorderedPlayers = [
+      ...(kingPlayer ? [kingPlayer] : []),
+      ...otherPlayers,
+      ...nonTeamPlayers
+    ];
+
+    await updateDoc(gameDocRef, {
+      gamePlayers: reorderedPlayers,
+    });
+  }
+
   const handlePlayerTeamKick = async (playerID: string, teamID: string) => {
    if (!gameSetup) return;
 
@@ -248,19 +275,28 @@ const GameSetup: React.FC = () => {
         players.find((player) => player.id === notReadyPlayer.id)?.name,
     )
 
-  // Validation for Team Snek games
+  // Validation for Team Snek and King Snek games
   const canStartGame = () => {
-    if (gameType !== 'teamsnek') return true;
+    if (gameType !== 'teamsnek' && gameType !== 'kingsnek') return true;
     
     const populatedTeams = teams.filter(team => 
       gameSetup.gamePlayers.some(player => player.teamID === team.id)
     );
     
-    return populatedTeams.length >= 2;
+    if (populatedTeams.length < 2) return false;
+    
+    if (gameType === 'kingsnek') {
+      const teamsWithKing = populatedTeams.filter(team =>
+        gameSetup.gamePlayers.some(player => player.teamID === team.id && player.isKing)
+      );
+      return teamsWithKing.length === populatedTeams.length;
+    }
+    
+    return true;
   };
 
   const getTeamValidationMessage = () => {
-    if (gameType !== 'teamsnek') return '';
+    if (gameType !== 'teamsnek' && gameType !== 'kingsnek') return '';
     
     const populatedTeams = teams.filter(team => 
       gameSetup.gamePlayers.some(player => player.teamID === team.id)
@@ -270,6 +306,15 @@ const GameSetup: React.FC = () => {
       return 'Assign players to teams before starting the game';
     } else if (populatedTeams.length === 1) {
       return 'At least 2 teams must have players before starting the game';
+    }
+    
+    if (gameType === 'kingsnek') {
+      const teamsWithKing = populatedTeams.filter(team =>
+        gameSetup.gamePlayers.some(player => player.teamID === team.id && player.isKing)
+      );
+      if (teamsWithKing.length < populatedTeams.length) {
+        return 'Each team must have a King selected before starting the game';
+      }
     }
     
     return '';
@@ -297,7 +342,7 @@ const GameSetup: React.FC = () => {
           >
             {gameSetup.playersReady.includes(userID) ? `Waiting` : "I'm ready!"}
           </Button>
-          {gameType === 'teamsnek' && !canStartGame() && getTeamValidationMessage() && (
+          {(gameType === 'teamsnek' || gameType === 'kingsnek') && !canStartGame() && getTeamValidationMessage() && (
             <Typography color="error" sx={{ textAlign: 'center', mt: 1 }}>
               {getTeamValidationMessage()}
             </Typography>
@@ -347,6 +392,7 @@ const GameSetup: React.FC = () => {
           >
             <MenuItem value="snek">Snek</MenuItem>
             <MenuItem value="teamsnek">Team Snek</MenuItem>
+            <MenuItem value="kingsnek">King Snek</MenuItem>
             <MenuItem value="connect4">Connect 4</MenuItem>
             <MenuItem value="tactictoes">Tactic Toes</MenuItem>
             <MenuItem value="longboi">Long Boi</MenuItem>
@@ -438,7 +484,7 @@ const GameSetup: React.FC = () => {
       )}
 
       {/* Team Configuration - Only show for team games */}
-      {(gameType === "teamsnek" ) && (
+      {(gameType === "teamsnek" || gameType === "kingsnek") && (
         <FormControl fullWidth variant="outlined" sx={{ mt: 2 }}>
           <InputLabel shrink sx={{ backgroundColor: "white", px: 1 }}>
             Team Configuration
@@ -464,7 +510,7 @@ const GameSetup: React.FC = () => {
       )}
 
       {/* Players Table */}
-      {(gameType === "teamsnek" ) && teams.length > 0 ? (
+      {(gameType === "teamsnek" || gameType === "kingsnek") && teams.length > 0 ? (
         <FormControl fullWidth variant="outlined" sx={{ mt: 2 }}>
           <InputLabel shrink sx={{ backgroundColor: "white", px: 1 }}>
             Player Configuration
@@ -486,6 +532,8 @@ const GameSetup: React.FC = () => {
               playersReady={playersReady}
               onPlayerTeamKick={handlePlayerTeamKick}
               getBotStatus={getBotStatus}
+              gameType={gameType}
+              onKingToggle={handleKingToggle}
             />
           </Box>
         </FormControl>
