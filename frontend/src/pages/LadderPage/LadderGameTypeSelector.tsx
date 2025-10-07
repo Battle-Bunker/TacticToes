@@ -19,6 +19,7 @@ interface Props {
 const gameTypes: GameType[] = [
   'snek',
   'teamsnek',
+  'kingsnek',
   'connect4',
   'tactictoes',
   'longboi',
