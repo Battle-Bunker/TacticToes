@@ -1,8 +1,7 @@
 import { onGameStarted } from "./onGameStarted"
 import { onMoveCreated } from "./onMoveCreated"
-import { onBotNotificationRequest } from "./onBotNotificationRequest"
 import { onSessionCreated } from "./onSessionCreated"
-import { onTurnExpirationRequest } from "./onTurnExpirationRequest"
+import { processTurnExpirationTask } from "./processTurnExpirationTask"
 import { wakeBot } from "./wakeBot"
 import * as admin from "firebase-admin"
 
@@ -20,8 +19,7 @@ if (process.env.FIRESTORE_EMULATOR_HOST) {
 export {
   onMoveCreated,
   onGameStarted,
-  onTurnExpirationRequest,
-  onBotNotificationRequest,
   onSessionCreated,
+  processTurnExpirationTask,
   wakeBot,
 }

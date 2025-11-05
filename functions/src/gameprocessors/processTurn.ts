@@ -19,8 +19,6 @@ import {
 import { logger } from "../logger"
 import { createNewGame } from "../utils/createNewGame"
 import { getGameProcessor } from "./ProcessorFactory"
-import { getFunctions } from "firebase-admin/functions"
-import { notifyBots } from "../utils/notifyBots"
 
 interface PlayerUpdateData {
   playerID: string
@@ -40,6 +38,12 @@ interface PlayerData {
   currentMMR: number
   gamesPlayed: number
   exists: boolean // Whether the ranking document exists
+}
+
+export interface ProcessTurnResult {
+  newTurnCreated: boolean
+  newTurnNumber?: number
+  turnDurationSeconds?: number
 }
 
 const DEFAULT_MMR = 1000
@@ -249,7 +253,7 @@ export async function processTurn(
   gameID: string,
   sessionID: string,
   turnNumber: number
-): Promise<void> {
+): Promise<ProcessTurnResult> {
   try {
     logger.info(
       `processTurn transaction started for game ${gameID}, turn ${turnNumber}`,
@@ -271,12 +275,12 @@ export async function processTurn(
 
     if (!gameState) {
       logger.error("Game state not found", { gameID })
-      return
+      return { newTurnCreated: false }
     }
 
     if (gameState.turns.length === 0) {
       logger.error("No turns in game state.")
-      return
+      return { newTurnCreated: false }
     }
 
     const latestTurnNumber = gameState.turns.length - 1
@@ -286,7 +290,7 @@ export async function processTurn(
         latestTurnNumber,
         turnNumber
       )
-      return
+      return { newTurnCreated: false }
     }
     const currentTurn = gameState.turns[turnNumber]
 
@@ -301,7 +305,7 @@ export async function processTurn(
 
     if (currentTurn.winners.length > 0) {
       logger.warn("Game already finished.")
-      return
+      return { newTurnCreated: false }
     }
 
     // Process moves and get next turn
@@ -338,7 +342,7 @@ export async function processTurn(
 
     if (!currentTurn) {
       logger.info("No current turn found for the game.", { gameID })
-      return
+      return { newTurnCreated: false }
     }
 
     const processor = getGameProcessor(gameState)
@@ -379,6 +383,8 @@ export async function processTurn(
       logger.info(`Game ${gameID} finished and rankings updated.`, {
         winners: nextTurn.winners,
       })
+      
+      return { newTurnCreated: false }
     } else {
       // normal turn
       transaction.update(gameStateRef, {
@@ -396,43 +402,25 @@ export async function processTurn(
         movedPlayerIDs: [],
       })
 
-      // Schedule turn expiration using Firebase task queue
-      // This runs inside the transaction so if it fails, the transaction retries
       const turnDurationSeconds = gameState.setup.maxTurnTime
-      const queue = getFunctions().taskQueue("processTurnExpirationTask")
-      await queue.enqueue(
-        {
-          sessionID,
-          gameID,
-          turnNumber: newTurnNumber,
-        },
-        {
-          scheduleDelaySeconds: turnDurationSeconds,
-        }
-      )
 
       logger.info(
-        `Scheduled turn expiration for game ${gameID}, turn ${newTurnNumber}`,
+        `Created new turn for game ${gameID}, turn ${newTurnNumber}`,
         {
           sessionID,
           gameID,
           turnNumber: newTurnNumber,
-          delaySeconds: turnDurationSeconds,
+          turnDurationSeconds,
         }
       )
-    }
 
-    // Call bot notifications AFTER the transaction completes
-    // We do this outside the transaction to avoid blocking it with HTTP requests
-    // Use setImmediate to ensure this runs after the transaction commits
-    setImmediate(() => {
-      notifyBots(sessionID, gameID, gameState.turns.length).catch((error) => {
-        logger.error(
-          `Error notifying bots for game ${gameID}, turn ${gameState.turns.length}`,
-          error
-        )
-      })
-    })
+      // Return metadata for caller to handle task scheduling and bot notifications
+      return {
+        newTurnCreated: true,
+        newTurnNumber,
+        turnDurationSeconds,
+      }
+    }
   } catch (error) {
     logger.error(
       `Error processing turn ${turnNumber} for game ${gameID}:`,
