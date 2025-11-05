@@ -2,10 +2,12 @@
 
 import * as functions from "firebase-functions"
 import * as admin from "firebase-admin"
+import { getFunctions } from "firebase-admin/functions"
 import { GameSetup, GameState, MoveStatus } from "@shared/types/Game" // Adjust the path as necessary
 import { getGameProcessor, getProcessorClass } from "./gameprocessors/ProcessorFactory"
 import { logger } from "./logger" // Adjust the path as necessary
 import { FieldValue, Timestamp } from "firebase-admin/firestore"
+import { notifyBots } from "./utils/notifyBots"
 
 /**
  * Firestore Trigger to start the game when all players are ready.
@@ -88,7 +90,7 @@ export const onGameStarted = functions.firestore
     }
 
     // Use a transaction to ensure consistency
-    await admin.firestore().runTransaction(async (transaction) => {
+    const turnDurationSeconds = await admin.firestore().runTransaction(async (transaction) => {
       // If not all players are ready, exit early
 
       // Initialize the game using the processor's method
@@ -133,6 +135,56 @@ export const onGameStarted = functions.firestore
       }
       transaction.set(moveStatusRef, moveStatus)
 
-      logger.info(`Game ${gameID} has been initialized.`)
+      logger.info(`[onGameStarted] Game ${gameID} has been initialized.`)
+      
+      // Return turn duration for post-transaction orchestration
+      return filteredSetup.maxTurnTime
     })
+
+    // After transaction commits, schedule turn expiration and notify bots for turn 0
+    logger.info(`[onGameStarted] Starting post-transaction orchestration for game ${gameID}`, {
+      sessionID,
+      gameID,
+      turnDurationSeconds
+    })
+
+    try {
+      // Schedule turn expiration task for turn 0
+      const queue = getFunctions().taskQueue("processTurnExpirationTask")
+      logger.info(`[onGameStarted] Got task queue reference`, { gameID })
+      
+      await queue.enqueue(
+        {
+          sessionID,
+          gameID,
+          turnNumber: 0,
+        },
+        {
+          scheduleDelaySeconds: turnDurationSeconds,
+        }
+      )
+
+      logger.info(
+        `[onGameStarted] Successfully scheduled turn expiration for game ${gameID}, turn 0`,
+        {
+          sessionID,
+          gameID,
+          turnNumber: 0,
+          delaySeconds: turnDurationSeconds,
+        }
+      )
+    } catch (error) {
+      logger.error(`[onGameStarted] Error scheduling turn expiration`, { gameID, error })
+    }
+
+    try {
+      // Notify bots immediately for turn 0
+      logger.info(`[onGameStarted] Starting bot notifications for turn 0`, { gameID })
+      await notifyBots(sessionID, gameID, 0)
+      logger.info(`[onGameStarted] Bot notifications completed for turn 0`, { gameID })
+    } catch (error) {
+      logger.error(`[onGameStarted] Error notifying bots for game ${gameID}, turn 0`, error)
+    }
+
+    logger.info(`[onGameStarted] Game ${gameID} initialization complete`)
   })
