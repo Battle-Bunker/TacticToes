@@ -20,6 +20,7 @@ import { logger } from "../logger"
 import { createNewGame } from "../utils/createNewGame"
 import { getGameProcessor } from "./ProcessorFactory"
 import { scheduleTurnExpiration } from "../utils/scheduleTurnExpiration"
+import { scheduleBotNotifications } from "../utils/scheduleBotNotifications"
 
 interface PlayerUpdateData {
   playerID: string
@@ -250,6 +251,16 @@ export async function processTurn(
   turnNumber: number
 ): Promise<void> {
   try {
+    logger.info(
+      `processTurn transaction started for game ${gameID}, turn ${turnNumber}`,
+      {
+        sessionID,
+        gameID,
+        turnNumber,
+        transactionStartTime: new Date().toISOString()
+      }
+    )
+
     // Get game state
     const gameStateRef = admin
       .firestore()
@@ -389,6 +400,21 @@ export async function processTurn(
       // so if enqueue fails, the transaction will retry instead of committing
       const executeAt = new Date(nextTurn.endTime.toMillis())
       await scheduleTurnExpiration(sessionID, gameID, newTurnNumber, executeAt)
+
+      // Schedule bot notifications immediately for this turn
+      // Pass the turn end time so the task can validate it hasn't expired
+      await scheduleBotNotifications(sessionID, gameID, newTurnNumber, endTime)
+      
+      logger.info(
+        `Scheduled bot notifications for game ${gameID}, turn ${newTurnNumber}`,
+        {
+          sessionID,
+          gameID,
+          turnNumber: newTurnNumber,
+          turnEndTime: endTime.toISOString(),
+          scheduledAt: new Date().toISOString()
+        }
+      )
     }
 
   } catch (error) {
