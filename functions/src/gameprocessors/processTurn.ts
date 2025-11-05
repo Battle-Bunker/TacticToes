@@ -19,8 +19,8 @@ import {
 import { logger } from "../logger"
 import { createNewGame } from "../utils/createNewGame"
 import { getGameProcessor } from "./ProcessorFactory"
-import { scheduleTurnExpiration } from "../utils/scheduleTurnExpiration"
-import { scheduleBotNotifications } from "../utils/scheduleBotNotifications"
+import { getFunctions } from "firebase-admin/functions"
+import { notifyBots } from "../utils/notifyBots"
 
 interface PlayerUpdateData {
   playerID: string
@@ -396,27 +396,43 @@ export async function processTurn(
         movedPlayerIDs: [],
       })
 
-      // schedule the expiration *inside* this transaction callback*
-      // so if enqueue fails, the transaction will retry instead of committing
-      const executeAt = new Date(nextTurn.endTime.toMillis())
-      await scheduleTurnExpiration(sessionID, gameID, newTurnNumber, executeAt)
-
-      // Schedule bot notifications immediately for this turn
-      // Pass the turn end time so the task can validate it hasn't expired
-      await scheduleBotNotifications(sessionID, gameID, newTurnNumber, endTime)
-      
-      logger.info(
-        `Scheduled bot notifications for game ${gameID}, turn ${newTurnNumber}`,
+      // Schedule turn expiration using Firebase task queue
+      // This runs inside the transaction so if it fails, the transaction retries
+      const turnDurationSeconds = gameState.setup.maxTurnTime
+      const queue = getFunctions().taskQueue("processTurnExpirationTask")
+      await queue.enqueue(
         {
           sessionID,
           gameID,
           turnNumber: newTurnNumber,
-          turnEndTime: endTime.toISOString(),
-          scheduledAt: new Date().toISOString()
+        },
+        {
+          scheduleDelaySeconds: turnDurationSeconds,
+        }
+      )
+
+      logger.info(
+        `Scheduled turn expiration for game ${gameID}, turn ${newTurnNumber}`,
+        {
+          sessionID,
+          gameID,
+          turnNumber: newTurnNumber,
+          delaySeconds: turnDurationSeconds,
         }
       )
     }
 
+    // Call bot notifications AFTER the transaction completes
+    // We do this outside the transaction to avoid blocking it with HTTP requests
+    // Use setImmediate to ensure this runs after the transaction commits
+    setImmediate(() => {
+      notifyBots(sessionID, gameID, gameState.turns.length).catch((error) => {
+        logger.error(
+          `Error notifying bots for game ${gameID}, turn ${gameState.turns.length}`,
+          error
+        )
+      })
+    })
   } catch (error) {
     logger.error(
       `Error processing turn ${turnNumber} for game ${gameID}:`,
