@@ -4,6 +4,17 @@ Tactic Toes is a multiplayer game platform built with React/TypeScript frontend 
 
 # Recent Changes
 
+## Bot Notification Architecture Refactor (November 5, 2025)
+- **Migration to Cloud Tasks**: Replaced unreliable Firebase document triggers with Cloud Tasks for bot notifications
+- **Problem Solved**: Fixed race condition where Firebase triggers could execute out-of-order, causing bots to receive move requests for already-expired turns
+- **New Components**:
+  - `scheduleBotNotifications` utility function schedules immediate Cloud Tasks for bot notifications
+  - `onBotNotificationRequest` trigger handles bot move requests with turn expiration validation
+  - Removed `onTurnChanged` trigger that was causing the race condition
+- **Reliability Improvements**: Each bot notification task knows its exact turn number and validates the turn hasn't expired before sending requests
+- **Enhanced Logging**: Added comprehensive logging to track when processTurn transactions start and when bot notification tasks are initiated
+- **Infrastructure**: Added `bot-notifications` Cloud Tasks queue alongside existing `turn-expirations` queue
+
 ## King Snake Game Mode (October 7, 2025)
 - **New Game Type**: Added "King Snake" (kingsnek) - a team-based battlesnake variant where each team has one designated King
 - **Game Rules**: When a King dies, their entire team is eliminated and team score is set to zero; team score is based solely on the King's snake length
