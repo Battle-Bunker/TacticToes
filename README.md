@@ -204,10 +204,11 @@ gcloud services enable   cloudtasks.googleapis.com   appengine.googleapis.com   
 gcloud app create --region=us-central
 ```
 
-### 4.4 Create the Cloud Tasks queue
+### 4.4 Create the Cloud Tasks queues
 
 ```bash
 gcloud tasks queues create turn-expirations --location=us-central1
+gcloud tasks queues create bot-notifications --location=us-central1
 ```
 
 ### 4.5 Grant IAM roles to the calling Service Account
@@ -318,8 +319,9 @@ gcloud services enable cloudtasks.googleapis.com appengine.googleapis.com cloudf
 # Create App Engine (us-central)
 gcloud app create --region=us-central
 
-# Create queue (us-central1)
+# Create queues (us-central1)
 gcloud tasks queues create turn-expirations --location=us-central1
+gcloud tasks queues create bot-notifications --location=us-central1
 
 # IAM roles
 PROJECT_ID=<YOUR_PROJECT_ID>

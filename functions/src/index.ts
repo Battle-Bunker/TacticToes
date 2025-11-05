@@ -1,6 +1,6 @@
 import { onGameStarted } from "./onGameStarted"
 import { onMoveCreated } from "./onMoveCreated"
-import { onTurnChanged } from "./onTurnChanged"
+import { onBotNotificationRequest } from "./onBotNotificationRequest"
 import { onSessionCreated } from "./onSessionCreated"
 import { onTurnExpirationRequest } from "./onTurnExpirationRequest"
 import { wakeBot } from "./wakeBot"
@@ -21,7 +21,7 @@ export {
   onMoveCreated,
   onGameStarted,
   onTurnExpirationRequest,
-  onTurnChanged,
+  onBotNotificationRequest,
   onSessionCreated,
   wakeBot,
 }
