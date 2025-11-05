@@ -4,16 +4,19 @@ Tactic Toes is a multiplayer game platform built with React/TypeScript frontend 
 
 # Recent Changes
 
-## Bot Notification Architecture Refactor (November 5, 2025)
-- **Migration to Cloud Tasks**: Replaced unreliable Firebase document triggers with Cloud Tasks for bot notifications
-- **Problem Solved**: Fixed race condition where Firebase triggers could execute out-of-order, causing bots to receive move requests for already-expired turns
+## Turn Processing Architecture Refactor (November 5, 2025)
+- **Problem Solved**: Eliminated race condition where task scheduling inside Firestore transactions could create duplicate tasks on retry, and where post-transaction operations could fire before commits
+- **Architecture Pattern**: Moved from trigger-based task scheduling to caller-orchestrated post-transaction operations
 - **New Components**:
-  - `scheduleBotNotifications` utility function schedules immediate Cloud Tasks for bot notifications
-  - `onBotNotificationRequest` trigger handles bot move requests with turn expiration validation
-  - Removed `onTurnChanged` trigger that was causing the race condition
-- **Reliability Improvements**: Each bot notification task knows its exact turn number and validates the turn hasn't expired before sending requests
-- **Enhanced Logging**: Added comprehensive logging to track when processTurn transactions start and when bot notification tasks are initiated
-- **Infrastructure**: Added `bot-notifications` Cloud Tasks queue alongside existing `turn-expirations` queue
+  - `processTurnExpirationTask`: Firebase task queue function (v2/tasks) that processes turn expirations
+  - `notifyBots`: Standalone utility function for sending bot move requests via Battlesnake API
+  - `ProcessTurnResult`: Interface returned by processTurn with metadata for post-transaction orchestration
+- **Core Changes**:
+  - `processTurn` now returns metadata (newTurnCreated, turnNumber, duration) instead of scheduling tasks directly
+  - Callers (`onMoveCreated`, `processTurnExpirationTask`) schedule tasks and call bot notifications AFTER transactions commit
+  - Eliminated all Cloud Task queue utilities and their Firestore trigger wrappers
+- **Reliability Improvements**: Transaction retries no longer create duplicate scheduled tasks; bot notifications always see committed state
+- **Removed**: `scheduleTurnExpiration`, `scheduleBotNotifications`, `onTurnExpirationRequest`, `onBotNotificationRequest` triggers
 
 ## King Snake Game Mode (October 7, 2025)
 - **New Game Type**: Added "King Snake" (kingsnek) - a team-based battlesnake variant where each team has one designated King
