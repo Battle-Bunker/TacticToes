@@ -21,10 +21,30 @@ service cloud.firestore {
       return players is list && players.size() > 0; // Assuming at least one player
     }
 
+    function isValidTeam(team) {
+      return team.keys().hasAll(['id', 'name', 'color']) &&
+        team.id is string && team.id.size() > 0 &&
+        team.name is string && team.name.size() > 0 && team.name.size() < 100 &&
+        team.color is string && team.color.size() > 0;
+    }
+
+    // Validate teams array - manually check each possible index since Firestore rules don't support loops
+    // This validates up to 10 teams (our max) by checking each index individually
     function isValidTeams(teams) {
       return teams is list && 
         teams.size() >= 2 && 
-        teams.size() <= 10;
+        teams.size() <= 10 &&
+        // Validate each team based on array size
+        (teams.size() < 1 || isValidTeam(teams[0])) &&
+        (teams.size() < 2 || isValidTeam(teams[1])) &&
+        (teams.size() < 3 || isValidTeam(teams[2])) &&
+        (teams.size() < 4 || isValidTeam(teams[3])) &&
+        (teams.size() < 5 || isValidTeam(teams[4])) &&
+        (teams.size() < 6 || isValidTeam(teams[5])) &&
+        (teams.size() < 7 || isValidTeam(teams[6])) &&
+        (teams.size() < 8 || isValidTeam(teams[7])) &&
+        (teams.size() < 9 || isValidTeam(teams[8])) &&
+        (teams.size() < 10 || isValidTeam(teams[9]));
     }
 
     function isValidSetup(setup) {
