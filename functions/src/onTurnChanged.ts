@@ -175,6 +175,7 @@ const processTurn = async (
 
     try {
       // Make a POST request to the bot's URL
+      logger.info(`Sending move request to bot ${bot.id} for turn ${gameData.turns.length}`);
       const response = await axios.post(`${bot.url}/move`, botRequestBody, {
         timeout: 10000, // Timeout for the bot to respond
       })
