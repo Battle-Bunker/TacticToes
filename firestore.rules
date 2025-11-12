@@ -63,14 +63,15 @@ service cloud.firestore {
         setup.started is bool &&
         (setup.timeCreated is timestamp || setup.timeCreated == request.time);
       
-      // Additional validation for team-based games
-      let validTeamFields = (!setup.keys().hasAny(['teams', 'maxTurns', 'gameMode'])) || (
+      // Additional validation for team-based games and optional fields
+      let validOptionalFields = (!setup.keys().hasAny(['teams', 'maxTurns', 'gameMode', 'firstTurnTime'])) || (
         (!('teams' in setup.keys()) || isValidTeams(setup.teams)) &&
         (!('maxTurns' in setup.keys()) || (setup.maxTurns is int && setup.maxTurns > 0 && setup.maxTurns <= 1000)) &&
-        (!('gameMode' in setup.keys()) || (setup.gameMode is string && setup.gameMode in ['individual', 'team']))
+        (!('gameMode' in setup.keys()) || (setup.gameMode is string && setup.gameMode in ['individual', 'team'])) &&
+        (!('firstTurnTime' in setup.keys()) || (setup.firstTurnTime is int && setup.firstTurnTime > 0))
       );
       
-      return hasRequiredFields && validBaseFields && validTeamFields;
+      return hasRequiredFields && validBaseFields && validOptionalFields;
     }
 
     function isValidPrivateMove(move) {

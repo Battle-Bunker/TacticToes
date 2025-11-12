@@ -20,11 +20,13 @@ export async function createNewGame(
     let boardWidth = 11
     let boardHeight = 11
     let turnTime = 10
+    let firstTurnTime = 60
     if (previousSetup) {
       gameType = previousSetup.gameType
       boardWidth = previousSetup.boardWidth
       boardHeight = previousSetup.boardHeight
       turnTime = previousSetup.maxTurnTime
+      firstTurnTime = previousSetup.firstTurnTime ?? 60
     }
 
     // Initialize a new game state
@@ -34,6 +36,7 @@ export async function createNewGame(
       boardWidth: boardWidth,
       boardHeight: boardHeight,
       maxTurnTime: turnTime,
+      firstTurnTime: firstTurnTime,
       playersReady: [], // Reset players ready
       startRequested: false,
       timeCreated: Timestamp.now(),

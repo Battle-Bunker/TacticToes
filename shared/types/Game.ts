@@ -59,6 +59,7 @@
     boardHeight: number // The height of the board
     playersReady: string[]
     maxTurnTime: number // Time limit per turn in seconds
+    firstTurnTime?: number // Time limit for first turn (turn 0) in seconds (optional for backward compatibility, defaults to 60)
     startRequested: boolean
     started: boolean // Set true when GameState is created to avoid double handling
     timeCreated: Timestamp | FieldValue

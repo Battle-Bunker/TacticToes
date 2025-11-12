@@ -96,7 +96,8 @@ export const onGameStarted = functions.firestore
       // Initialize the game using the processor's method
       const firstTurn = processor.firstTurn()
       const now = Date.now() // Current time in milliseconds
-      const startTurnDurationMillis = 60 * 1000 // Convert maxTurnTime from seconds to milliseconds
+      const firstTurnTimeSeconds = filteredSetup.firstTurnTime ?? 60 // Default to 60 seconds for backward compatibility
+      const startTurnDurationMillis = firstTurnTimeSeconds * 1000 // Convert firstTurnTime from seconds to milliseconds
       const endTime = new Date(now + startTurnDurationMillis) // Add turn time to current time
       firstTurn.startTime = Timestamp.fromMillis(now)
       firstTurn.endTime = Timestamp.fromDate(endTime)
@@ -137,8 +138,8 @@ export const onGameStarted = functions.firestore
 
       logger.info(`[onGameStarted] Game ${gameID} has been initialized.`)
       
-      // Return turn duration for post-transaction orchestration
-      return filteredSetup.maxTurnTime
+      // Return first turn duration for post-transaction orchestration
+      return firstTurnTimeSeconds
     })
 
     // After transaction commits, schedule turn expiration and notify bots for turn 0
