@@ -1,6 +1,6 @@
 // functions/src/utils/createNewGame.ts
 
-import { GameSetup, GameType } from "@shared/types/Game"
+import { GameSetup } from "@shared/types/Game"
 import * as admin from "firebase-admin"
 import { Timestamp, Transaction } from "firebase-admin/firestore"
 import { logger } from "../logger"
@@ -16,32 +16,29 @@ export async function createNewGame(
   previousSetup: GameSetup | null,
 ): Promise<void> {
   try {
-    let gameType: GameType = "snek"
-    let boardWidth = 11
-    let boardHeight = 11
-    let turnTime = 10
-    let firstTurnTime = 60
-    if (previousSetup) {
-      gameType = previousSetup.gameType
-      boardWidth = previousSetup.boardWidth
-      boardHeight = previousSetup.boardHeight
-      turnTime = previousSetup.maxTurnTime
-      firstTurnTime = previousSetup.firstTurnTime ?? 60
-    }
-
-    // Initialize a new game state
-    const newGameSetup: GameSetup = {
-      gameType: gameType,
-      gamePlayers: [], // New game starts with no players
-      boardWidth: boardWidth,
-      boardHeight: boardHeight,
-      maxTurnTime: turnTime,
-      firstTurnTime: firstTurnTime,
-      playersReady: [], // Reset players ready
-      startRequested: false,
-      timeCreated: Timestamp.now(),
-      started: false,
-    }
+    // Copy all fields from previous setup (if exists) and override only what must be reset
+    const newGameSetup: GameSetup = previousSetup
+      ? {
+          ...previousSetup, // Copy all fields including custom ones (teams, maxTurns, etc.)
+          gamePlayers: [], // Reset players for new game
+          playersReady: [], // Reset ready state
+          startRequested: false, // Reset start flag
+          started: false, // Reset started flag
+          timeCreated: Timestamp.now(), // New timestamp
+        }
+      : {
+          // Default setup when no previous game exists
+          gameType: "snek",
+          gamePlayers: [],
+          boardWidth: 11,
+          boardHeight: 11,
+          maxTurnTime: 10,
+          firstTurnTime: 60,
+          playersReady: [],
+          startRequested: false,
+          started: false,
+          timeCreated: Timestamp.now(),
+        }
 
     // Reference to the current session document
     const sessionRef = admin.firestore().collection("sessions").doc(sessionName)
