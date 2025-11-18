@@ -19,9 +19,8 @@ export async function createNewGame(
     // Copy all fields from previous setup (if exists) and override only what must be reset
     const newGameSetup: GameSetup = previousSetup
       ? {
-          ...previousSetup, // Copy all fields including custom ones (teams, maxTurns, etc.)
-          gamePlayers: [], // Reset players for new game
-          playersReady: [], // Reset ready state
+          ...previousSetup, // Copy all fields including gamePlayers (preserves bots, kings, team assignments)
+          playersReady: [], // Reset ready state - players must re-ready
           startRequested: false, // Reset start flag
           started: false, // Reset started flag
           timeCreated: Timestamp.now(), // New timestamp
