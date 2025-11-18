@@ -8,10 +8,11 @@ Tactic Toes is a multiplayer game platform built with React/TypeScript frontend 
 - **Problem Solved**: Fixed timing mismatch where turn 0 had a hardcoded 60-second endTime but expired after 10 seconds (using maxTurnTime)
 - **New Field**: Added optional `firstTurnTime` field to GameSetup (defaults to 60 seconds)
 - **Backward Compatibility**: Field is optional with nullish coalescing (?? 60) in all read paths to handle legacy setups
-- **General Setup Cloning**: Refactored `createNewGame` to use object spreading - automatically copies ALL setup fields (including future custom fields) from previous game, only resetting per-game state (gamePlayers, playersReady, startRequested, started, timeCreated)
+- **General Setup Cloning**: Refactored `createNewGame` to use object spreading - automatically copies ALL setup fields (including future custom fields) from previous game, only resetting per-game state (playersReady, startRequested, started, timeCreated)
+- **Rematch Flow**: `gamePlayers` array is preserved between games, maintaining bots, king designations, and team assignments; players must re-ready to start new game
 - **Core Changes**:
   - `onGameStarted` now uses `firstTurnTime` for both turn 0 endTime and task scheduling
-  - `createNewGame` uses spread operator (`...previousSetup`) to preserve all configuration across game iterations
+  - `createNewGame` uses spread operator (`...previousSetup`) to preserve all configuration including player roster across game iterations
   - Firestore rules validate `firstTurnTime` as optional positive integer
 - **Deployment Safety**: Legacy GameSetup documents without firstTurnTime automatically default to 60 seconds
 - **Enhanced Logging**: Added comprehensive [onGameStarted], [onMoveCreated], [processTurnExpirationTask] log prefixes for debugging turn progression
