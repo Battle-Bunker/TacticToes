@@ -1,5 +1,7 @@
 {
   "projects": {
-    "default": "tactic-toes-tuke"
+    "default": "tactic-toes-tuke",
+    "production": "tactic-toes-tuke",
+    "staging": "tactic-toes-cyphid-dev"
   }
 }
