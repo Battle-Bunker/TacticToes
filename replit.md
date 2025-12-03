@@ -102,3 +102,53 @@ Preferred communication style: Simple, everyday language.
 ## External APIs
 - **Battlesnake API**: Integration for external bot players with standard move/game endpoints
 - **Google OAuth**: Social authentication for user accounts
+
+# Infrastructure & Deployment
+
+## GCP Project Bootstrap Script
+
+**Location**: `scripts/bootstrap-gcp-project.sh`
+
+When setting up a new Firebase/GCP project (e.g., a new staging environment), run this script to configure all required APIs and IAM permissions in one step:
+
+```bash
+./scripts/bootstrap-gcp-project.sh <PROJECT_ID>
+```
+
+**IMPORTANT: Maintaining This Script**
+
+The Firebase CLI does NOT automatically grant IAM permissions when deploying. If you add new GCP/Firebase features to this project, you MUST update the bootstrap script to include any new required permissions. Otherwise, future deployments to new environments will fail with permission errors that require time-consuming troubleshooting.
+
+**When to update the script:**
+- Adding a new Firebase service (e.g., Storage, Realtime Database)
+- Using a new Google Cloud API (e.g., Vision API, Translate API)
+- Adding new Cloud Functions that require additional permissions
+- Changing from Gen1 to Gen2 Functions (different service accounts)
+- Adding Secret Manager secrets
+- Adding new Cloud Tasks queues or Pub/Sub topics
+
+**Current GCP resources requiring permissions:**
+- Firebase Functions (Gen1 and Gen2)
+- Firestore
+- Firebase Hosting
+- Firebase Auth
+- Google Cloud Tasks (turn-expiration-queue)
+- Artifact Registry (for function container images)
+- Cloud Build (for function deployment)
+- Cloud Logging
+- Pub/Sub (for Eventarc triggers)
+- Cloud Run (for Gen2 functions)
+
+**Firebase Project Aliases** (defined in `.firebaserc`):
+- `production`: tactic-toes-tuke (live production environment)
+- `staging`: tactic-toes-cyphid-dev (development/testing environment)
+
+## Environment-Specific Configuration
+
+Frontend Firebase config is determined by environment variables. See `frontend/src/firebaseConfig.ts` for the configuration loading logic. Set the following environment variables in Replit for staging development:
+- `VITE_FIREBASE_API_KEY`
+- `VITE_FIREBASE_AUTH_DOMAIN`
+- `VITE_FIREBASE_PROJECT_ID`
+- `VITE_FIREBASE_STORAGE_BUCKET`
+- `VITE_FIREBASE_MESSAGING_SENDER_ID`
+- `VITE_FIREBASE_APP_ID`
