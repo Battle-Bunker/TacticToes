@@ -241,12 +241,23 @@ done
 
 echo ""
 echo "=========================================="
-echo "Step 8: Grant Compute SA Permission to Act As App Engine SA"
+echo "Step 8: Grant Service Account Impersonation for Cloud Tasks"
 echo "=========================================="
 
-echo "This allows Cloud Functions to schedule Cloud Tasks"
+echo "Cloud Functions need to schedule Cloud Tasks that run as the App Engine SA."
+echo "This requires 'iam.serviceAccounts.actAs' permission on the App Engine SA."
+echo ""
+
+echo "Granting Compute SA permission to act as App Engine SA..."
 gcloud iam service-accounts add-iam-policy-binding "$APPENGINE_SA" \
     --member="serviceAccount:$COMPUTE_SA" \
+    --role="roles/iam.serviceAccountUser" \
+    --project="$PROJECT_ID" \
+    --quiet 2>/dev/null || echo "    (May not exist yet - will be created on first deploy)"
+
+echo "Granting App Engine SA permission to act as itself..."
+gcloud iam service-accounts add-iam-policy-binding "$APPENGINE_SA" \
+    --member="serviceAccount:$APPENGINE_SA" \
     --role="roles/iam.serviceAccountUser" \
     --project="$PROJECT_ID" \
     --quiet 2>/dev/null || echo "    (May not exist yet - will be created on first deploy)"
