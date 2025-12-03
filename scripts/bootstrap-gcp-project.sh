@@ -228,7 +228,19 @@ done
 
 echo ""
 echo "=========================================="
-echo "Step 8: Create Cloud Tasks Queue"
+echo "Step 8: Grant Compute SA Permission to Act As App Engine SA"
+echo "=========================================="
+
+echo "This allows Cloud Functions to schedule Cloud Tasks"
+gcloud iam service-accounts add-iam-policy-binding "$APPENGINE_SA" \
+    --member="serviceAccount:$COMPUTE_SA" \
+    --role="roles/iam.serviceAccountUser" \
+    --project="$PROJECT_ID" \
+    --quiet 2>/dev/null || echo "    (May not exist yet - will be created on first deploy)"
+
+echo ""
+echo "=========================================="
+echo "Step 9: Create Cloud Tasks Queue"
 echo "=========================================="
 
 QUEUE_NAME="turn-expiration-queue"
