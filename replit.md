@@ -139,6 +139,38 @@ The Firebase CLI does NOT automatically grant IAM permissions when deploying. If
 - Pub/Sub (for Eventarc triggers)
 - Cloud Run (for Gen2 functions)
 
+## Organization Policy: Domain Restricted Sharing
+
+**Problem:** If your GCP project is under an organization with Domain Restricted Sharing enabled (`iam.allowedPolicyMemberDomains`), Firebase callable functions will fail with CORS errors. This is because:
+
+1. Firebase callable functions (like `wakeBot`) need `allUsers` to have the Cloud Functions Invoker role
+2. The organization policy blocks granting permissions to `allUsers` (anyone on the internet)
+3. GCP IAM and Firebase Auth are separate systems - even though users authenticate with Firebase, the browser request must first be allowed at the GCP IAM layer
+
+**Symptoms:**
+- CORS errors when calling callable functions from the browser
+- Error message: "User allUsers is not in permitted organization"
+- Bot health checks fail immediately
+
+**Solution:** Remove the domain restriction at the organization level:
+
+```bash
+# Find your organization ID
+gcloud organizations list
+
+# Remove the restriction (replace ORG_ID with your org number)
+gcloud org-policies delete iam.allowedPolicyMemberDomains --organization=ORG_ID
+
+# Wait up to 15 minutes for propagation, then grant public access
+gcloud functions add-iam-policy-binding wakeBot \
+  --region=us-central1 \
+  --member=allUsers \
+  --role=roles/cloudfunctions.invoker \
+  --project=PROJECT_ID
+```
+
+**Security Note:** This allows the HTTP request to reach the function, but the function code still validates Firebase Auth tokens via `context.auth`. The `allUsers` permission is at the network layer, not the application layer.
+
 **Firebase Project Aliases** (defined in `.firebaserc`):
 - `production`: tactic-toes-tuke (live production environment)
 - `staging`: tactic-toes-cyphid-dev (development/testing environment)
