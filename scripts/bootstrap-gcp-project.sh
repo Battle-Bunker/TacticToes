@@ -71,17 +71,54 @@ echo "APIs enabled successfully."
 echo ""
 
 echo "=========================================="
-echo "Step 2: Wait for Service Agents to be Created"
+echo "Step 2: Wait for Service Agents (if needed)"
 echo "=========================================="
-echo "Sleeping 30 seconds to allow GCP to create service agents..."
-sleep 30
+
+CLOUD_BUILD_SA="${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com"
+COMPUTE_SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
+GCF_SA="service-${PROJECT_NUMBER}@gcf-admin-robot.iam.gserviceaccount.com"
+SERVERLESS_SA="service-${PROJECT_NUMBER}@serverless-robot-prod.iam.gserviceaccount.com"
+APPENGINE_SA="${PROJECT_ID}@appspot.gserviceaccount.com"
+
+check_sa_exists() {
+    gcloud iam service-accounts describe "$1" --project="$PROJECT_ID" --format='value(email)' >/dev/null 2>&1
+}
+
+REQUIRED_SAS=("$CLOUD_BUILD_SA" "$COMPUTE_SA")
+
+all_exist=true
+for sa in "${REQUIRED_SAS[@]}"; do
+    if ! check_sa_exists "$sa"; then
+        all_exist=false
+        break
+    fi
+done
+
+if $all_exist; then
+    echo "All required service accounts already exist. Skipping wait."
+else
+    echo "Waiting for GCP to create service agents..."
+    for attempt in {1..6}; do
+        missing=()
+        for sa in "${REQUIRED_SAS[@]}"; do
+            if ! check_sa_exists "$sa"; then
+                missing+=("$sa")
+            fi
+        done
+        if [ ${#missing[@]} -eq 0 ]; then
+            echo "All service accounts are ready."
+            break
+        fi
+        echo "  Attempt $attempt/6: Waiting for ${#missing[@]} service account(s)..."
+        sleep 5
+    done
+fi
 
 echo ""
 echo "=========================================="
 echo "Step 3: Grant IAM Permissions to Cloud Build Service Account"
 echo "=========================================="
 
-CLOUD_BUILD_SA="${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com"
 echo "Cloud Build SA: $CLOUD_BUILD_SA"
 
 CLOUD_BUILD_ROLES=(
@@ -104,7 +141,6 @@ echo "=========================================="
 echo "Step 4: Grant IAM Permissions to Compute Service Account"
 echo "=========================================="
 
-COMPUTE_SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
 echo "Compute SA: $COMPUTE_SA"
 
 COMPUTE_ROLES=(
@@ -131,7 +167,6 @@ echo "=========================================="
 echo "Step 5: Grant IAM Permissions to Cloud Functions Service Agent"
 echo "=========================================="
 
-GCF_SA="service-${PROJECT_NUMBER}@gcf-admin-robot.iam.gserviceaccount.com"
 echo "Cloud Functions SA: $GCF_SA"
 
 GCF_ROLES=(
@@ -152,7 +187,6 @@ echo "=========================================="
 echo "Step 6: Grant IAM Permissions to Serverless Robot (Gen2 Functions)"
 echo "=========================================="
 
-SERVERLESS_SA="service-${PROJECT_NUMBER}@serverless-robot-prod.iam.gserviceaccount.com"
 echo "Serverless Robot SA: $SERVERLESS_SA"
 
 SERVERLESS_ROLES=(
@@ -174,7 +208,6 @@ echo "=========================================="
 echo "Step 7: Grant IAM Permissions to App Engine Default Service Account"
 echo "=========================================="
 
-APPENGINE_SA="${PROJECT_ID}@appspot.gserviceaccount.com"
 echo "App Engine SA: $APPENGINE_SA"
 
 APPENGINE_ROLES=(
