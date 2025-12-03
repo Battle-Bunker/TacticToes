@@ -240,7 +240,20 @@ gcloud iam service-accounts add-iam-policy-binding "$APPENGINE_SA" \
 
 echo ""
 echo "=========================================="
-echo "Step 9: Create Cloud Tasks Queue"
+echo "Step 9: Grant Public Access to Callable Functions"
+echo "=========================================="
+
+echo "Granting allUsers invoker access to wakeBot function..."
+gcloud functions add-iam-policy-binding wakeBot \
+    --region=us-central1 \
+    --member=allUsers \
+    --role=roles/cloudfunctions.invoker \
+    --project="$PROJECT_ID" \
+    --quiet 2>/dev/null || echo "    (Function may not exist yet - run after first deploy)"
+
+echo ""
+echo "=========================================="
+echo "Step 10: Create Cloud Tasks Queue"
 echo "=========================================="
 
 QUEUE_NAME="turn-expiration-queue"
