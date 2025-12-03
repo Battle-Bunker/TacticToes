@@ -1,44 +1,44 @@
-// Import the functions you need from the SDKs you need
 import { initializeApp } from "firebase/app"
 import { getAnalytics } from "firebase/analytics"
-import { getFirestore, connectFirestoreEmulator } from "firebase/firestore" // Import correct methods for Firestore
+import { getFirestore, connectFirestoreEmulator } from "firebase/firestore"
 import { connectAuthEmulator, getAuth, GoogleAuthProvider } from "firebase/auth"
 import { getFunctions, connectFunctionsEmulator } from "firebase/functions"
-// TODO: Add SDKs for Firebase products that you want to use
-// https://firebase.google.com/docs/web/setup#available-libraries
 
-// Your web app's Firebase configuration
-// For Firebase JS SDK v7.20.0 and later, measurementId is optional
+const requiredEnvVars = [
+  'VITE_FIREBASE_API_KEY',
+  'VITE_FIREBASE_AUTH_DOMAIN',
+  'VITE_FIREBASE_PROJECT_ID',
+  'VITE_FIREBASE_STORAGE_BUCKET',
+  'VITE_FIREBASE_MESSAGING_SENDER_ID',
+  'VITE_FIREBASE_APP_ID',
+] as const;
+
+const missingVars = requiredEnvVars.filter(
+  (key) => !import.meta.env[key]
+);
+
+if (missingVars.length > 0) {
+  throw new Error(
+    `Missing required Firebase environment variables:\n` +
+    `  ${missingVars.join('\n  ')}\n\n` +
+    `Please set these in your Replit Secrets or .env file.\n` +
+    `You can find these values in the Firebase Console under Project Settings > General > Your Apps.`
+  );
+}
+
 export const firebaseConfig = {
-  apiKey:
-    import.meta.env.VITE_FIREBASE_API_KEY ??
-    "AIzaSyB8_kTX7I3_VlMhfTvhsCvkFKZFQH8wySg",
-  authDomain:
-    import.meta.env.VITE_FIREBASE_AUTH_DOMAIN ??
-    "tactic-toes.firebaseapp.com",
-  projectId:
-    import.meta.env.VITE_FIREBASE_PROJECT_ID ??
-    "tactic-toes",
-  storageBucket:
-    import.meta.env.VITE_FIREBASE_STORAGE_BUCKET ??
-    "tactic-toes.appspot.com",
-  messagingSenderId:
-    import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID ??
-    "609730573184",
-  appId:
-    import.meta.env.VITE_FIREBASE_APP_ID ??
-    "1:609730573184:web:93cc2deb12fa0e22a34765",
-  measurementId:
-    import.meta.env.VITE_FIREBASE_MEASUREMENT_ID ??
-    "G-WYJM1LMD06",
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
 };
-
-
 
 const app = initializeApp(firebaseConfig)
 export const db = getFirestore(app)
 export const functions = getFunctions(app)
-// Connect to Firestore emulator in development
 export const analytics = getAnalytics(app)
 export const auth = getAuth(app)
 
@@ -47,7 +47,7 @@ provider.addScope("profile")
 provider.addScope("email")
 
 if (window.location.hostname === "localhost") {
-  connectFirestoreEmulator(db, "localhost", 8080) // Use connectFirestoreEmulator for local Firestore
-  connectAuthEmulator(auth, "http://localhost:9099") // Authentication emulator
-  connectFunctionsEmulator(functions, "localhost", 5001) // Functions emulator
+  connectFirestoreEmulator(db, "localhost", 8080)
+  connectAuthEmulator(auth, "http://localhost:9099")
+  connectFunctionsEmulator(functions, "localhost", 5001)
 }
