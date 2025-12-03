@@ -144,7 +144,8 @@ echo "=========================================="
 echo "Compute SA: $COMPUTE_SA"
 
 COMPUTE_ROLES=(
-    "roles/artifactregistry.reader"
+    "roles/artifactregistry.writer"
+    "roles/cloudbuild.builds.builder"
     "roles/logging.logWriter"
     "roles/storage.objectAdmin"
     "roles/datastore.user"
