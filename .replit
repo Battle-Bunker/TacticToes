@@ -105,10 +105,3 @@ deploymentTarget = "cloudrun"
 [userenv]
 
 [userenv.development]
-VITE_FIREBASE_API_KEY = "AIzaSyAa5zfOcG-0sQKvHDZLWMxEhNGO87wYQhQ"
-VITE_FIREBASE_AUTH_DOMAIN = "tactic-toes-cyphid-dev.firebaseapp.com"
-VITE_FIREBASE_PROJECT_ID = "tactic-toes-cyphid-dev"
-VITE_FIREBASE_STORAGE_BUCKET = "tactic-toes-cyphid-dev.firebasestorage.app"
-VITE_FIREBASE_MESSAGING_SENDER_ID = "142989483184"
-VITE_FIREBASE_APP_ID = "1:142989483184:web:8e36c2a13d087e2475ef75"
-VITE_FIREBASE_MEASUREMENT_ID = "G-4CR1B2EFC9"
