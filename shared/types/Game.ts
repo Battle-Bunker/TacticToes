@@ -65,6 +65,7 @@
     timeCreated: Timestamp | FieldValue
     teams?: Team[]
     maxTurns?: number // Default: 100
+    hazardPercentage?: number // Percentage of the board to fill with hazards (defaults to 0)
     gameMode?: "individual" | "team"
   }
 

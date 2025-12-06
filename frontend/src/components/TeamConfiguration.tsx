@@ -20,6 +20,8 @@ interface TeamConfigurationProps {
   onTeamsChange: (teams: Team[]) => void;
   maxTurns: number;
   onMaxTurnsChange: (turns: number) => void;
+  hazardPercentage: number;
+  onHazardPercentageChange: (percentage: number) => void;
   bots?: Bot[];
   gamePlayers?: Array<{ id: string; type: "bot" | "human"; teamID?: string }>;
 }
@@ -30,6 +32,8 @@ export const TeamConfiguration: React.FC<TeamConfigurationProps> = ({
   onTeamsChange,
   maxTurns,
   onMaxTurnsChange,
+  hazardPercentage,
+  onHazardPercentageChange,
   bots = [],
   gamePlayers = [],
 }) => {
@@ -69,14 +73,28 @@ export const TeamConfiguration: React.FC<TeamConfigurationProps> = ({
     <div>
       <h3>Team Configuration</h3>
 
-      {/* Turn Limit */}
+      {/* Turn Limit and Terrain */}
       <FormControl fullWidth margin="normal">
-        <TextField
-          type="number"
-          label="Max Turns"
-          value={maxTurns}
-          onChange={(e) => onMaxTurnsChange(parseInt(e.target.value))}
-        />
+        <div style={{ display: "flex", gap: "15px" }}>
+          <TextField
+            type="number"
+            label="Max Turns"
+            value={maxTurns}
+            onChange={(e) => onMaxTurnsChange(parseInt(e.target.value))}
+            sx={{ flex: 1 }}
+            inputProps={{ min: 1 }}
+          />
+          <TextField
+            type="number"
+            label="Hazard Percentage"
+            value={hazardPercentage}
+            onChange={(e) =>
+              onHazardPercentageChange(parseInt(e.target.value))
+            }
+            sx={{ flex: 1 }}
+            inputProps={{ min: 0, max: 100 }}
+          />
+        </div>
       </FormControl>
 
       {/* Team Creation */}

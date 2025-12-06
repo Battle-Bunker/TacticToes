@@ -1,5 +1,6 @@
 {
   "dependencies": {
-    "@uiw/react-color": "^2.8.0"
+    "@uiw/react-color": "^2.8.0",
+    "firebase-admin": "^13.6.0"
   }
 }

@@ -56,6 +56,11 @@ const GameSetup: React.FC = () => {
   const [boardSize, setBoardSize] = useState<BoardSize>("medium")
   const [teams, setTeams] = useState<Team[]>(gameSetup?.teams || [])
   const [maxTurns, setMaxTurns] = useState<number>(gameSetup?.maxTurns || 100)
+  const [hazardPercentage, setHazardPercentage] = useState<number>(
+    gameSetup?.hazardPercentage ??
+      (gameSetup as any)?.terrainPercentage ??
+      0,
+  )
   
   const { getBotStatus } = useBotHealth()
 
@@ -90,6 +95,14 @@ const GameSetup: React.FC = () => {
       //  Update max turns
       if (gameSetup.maxTurns !== undefined) {
         setMaxTurns(gameSetup.maxTurns)
+      }
+
+      // Update hazard percentage
+      if (gameSetup.hazardPercentage !== undefined) {
+        setHazardPercentage(gameSetup.hazardPercentage)
+      } else if ((gameSetup as any).terrainPercentage !== undefined) {
+        // backward compatibility
+        setHazardPercentage((gameSetup as any).terrainPercentage)
       }
 
       //  Update teams
@@ -230,6 +243,15 @@ const GameSetup: React.FC = () => {
       maxTurns: newMaxTurns,
     })
     setMaxTurns(newMaxTurns)
+  }
+
+  // Handle hazard percentage configuration
+  const handleHazardPercentageChange = async (newHazardPercentage: number) => {
+    const sanitizedValue = Math.max(0, Math.min(100, newHazardPercentage))
+    await updateDoc(gameDocRef, {
+      hazardPercentage: sanitizedValue,
+    })
+    setHazardPercentage(sanitizedValue)
   }
 
   // Handler for selecting game type
@@ -502,6 +524,8 @@ const GameSetup: React.FC = () => {
               onTeamsChange={handleTeamsChange}
               maxTurns={maxTurns}
               onMaxTurnsChange={handleMaxTurnsChange}
+              hazardPercentage={hazardPercentage}
+              onHazardPercentageChange={handleHazardPercentageChange}
               bots={bots}
               gamePlayers={gameSetup?.gamePlayers || []}
             />
