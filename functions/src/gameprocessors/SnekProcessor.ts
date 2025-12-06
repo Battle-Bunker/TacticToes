@@ -778,8 +778,14 @@ export class SnekProcessor extends GameProcessor {
     }
 
     const initialHazards = candidatePositions.slice(0, targetCount)
-    return this.ensureInitialSafeMoves(
+    const safeHazards = this.ensureInitialSafeMoves(
       initialHazards,
+      playerPieces,
+      boardWidth,
+      boardHeight,
+    )
+    return this.ensureConnectedBoard(
+      safeHazards,
       playerPieces,
       boardWidth,
       boardHeight,
@@ -818,6 +824,79 @@ export class SnekProcessor extends GameProcessor {
         }
       }
     })
+
+    return Array.from(hazardSet)
+  }
+
+  private ensureConnectedBoard(
+    hazards: number[],
+    playerPieces: { [playerID: string]: number[] },
+    boardWidth: number,
+    boardHeight: number,
+  ): number[] {
+    const hazardSet = new Set(hazards)
+    const walls = new Set(this.getWallPositions(boardWidth, boardHeight))
+    const occupied = new Set<number>()
+    Object.values(playerPieces).forEach((snake) => {
+      snake.forEach((pos) => occupied.add(pos))
+    })
+
+    const isConnected = (hazardsToCheck: Set<number>): boolean => {
+      const visited = new Set<number>()
+      let start: number | null = null
+
+      for (let i = 0; i < boardWidth * boardHeight; i++) {
+        if (!walls.has(i) && !hazardsToCheck.has(i) && !occupied.has(i)) {
+          start = i
+          break
+        }
+      }
+
+      if (start === null) return true // nothing to connect
+
+      const queue: number[] = [start]
+      visited.add(start)
+
+      while (queue.length > 0) {
+        const current = queue.shift() as number
+        const neighbors = this.getAdjacentIndices(
+          current,
+          boardWidth,
+          boardHeight,
+        )
+        neighbors.forEach((n) => {
+          if (
+            !visited.has(n) &&
+            !walls.has(n) &&
+            !hazardsToCheck.has(n) &&
+            !occupied.has(n)
+          ) {
+            visited.add(n)
+            queue.push(n)
+          }
+        })
+      }
+
+      // All free cells should be reachable
+      for (let i = 0; i < boardWidth * boardHeight; i++) {
+        if (!walls.has(i) && !hazardsToCheck.has(i) && !occupied.has(i)) {
+          if (!visited.has(i)) {
+            return false
+          }
+        }
+      }
+      return true
+    }
+
+    if (isConnected(hazardSet)) return Array.from(hazardSet)
+
+    // Greedily remove hazards until the board is connected
+    for (const hazard of Array.from(hazardSet)) {
+      hazardSet.delete(hazard)
+      if (isConnected(hazardSet)) {
+        break
+      }
+    }
 
     return Array.from(hazardSet)
   }
