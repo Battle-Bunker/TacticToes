@@ -815,10 +815,46 @@ export class SnekProcessor extends GameProcessor {
       )
 
       if (safeNeighbors.length === 0) {
-        // Remove one blocking hazard to free a move
+        // Move or remove one blocking hazard to free a move
         for (const n of neighbors) {
           if (!walls.has(n) && !occupied.has(n) && hazardSet.has(n)) {
-            hazardSet.delete(n)
+            const hazardsWithoutCurrent = new Set(hazardSet)
+            hazardsWithoutCurrent.delete(n)
+
+            const relocationCandidates = this.getFreePositions(
+              boardWidth,
+              boardHeight,
+              playerPieces,
+              [],
+              Array.from(hazardsWithoutCurrent),
+            )
+
+            let relocated = false
+            for (const candidate of relocationCandidates) {
+              if (candidate === n || hazardSet.has(candidate)) continue
+
+              hazardSet.delete(n)
+              hazardSet.add(candidate)
+
+              const updatedSafeNeighbors = neighbors.filter(
+                (neighbor) =>
+                  !walls.has(neighbor) &&
+                  !hazardSet.has(neighbor) &&
+                  !occupied.has(neighbor),
+              )
+
+              if (updatedSafeNeighbors.length > 0) {
+                relocated = true
+                break
+              }
+
+              hazardSet.delete(candidate)
+              hazardSet.add(n)
+            }
+
+            if (!relocated) {
+              hazardSet.delete(n)
+            }
             break
           }
         }
@@ -894,8 +930,32 @@ export class SnekProcessor extends GameProcessor {
     for (const hazard of Array.from(hazardSet)) {
       hazardSet.delete(hazard)
       if (isConnected(hazardSet)) {
+        const availablePositions = this.getFreePositions(
+          boardWidth,
+          boardHeight,
+          playerPieces,
+          [],
+          Array.from(hazardSet),
+        )
+
+        let relocated = false
+        for (const candidate of availablePositions) {
+          if (hazardSet.has(candidate)) continue
+
+          hazardSet.add(candidate)
+          if (isConnected(hazardSet)) {
+            relocated = true
+            break
+          }
+          hazardSet.delete(candidate)
+        }
+
+        if (!relocated) {
+          // Hazard stays removed
+        }
         break
       }
+      hazardSet.add(hazard)
     }
 
     return Array.from(hazardSet)
