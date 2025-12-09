@@ -5,6 +5,7 @@ import React, { useEffect, useState } from "react"
 import { useUser } from "../../context/UserContext"
 import { db } from "../../firebaseConfig"
 import { TeamConfiguration } from "../../components/TeamConfiguration"
+import { SnekConfiguration } from "../../components/SnekConfiguration"
 import { PlayerConfiguration } from "../../components/PlayerConfiguration"
 import { BotHealthProvider, useBotHealth } from "../../context/BotHealthContext"
 
@@ -505,6 +506,29 @@ const GameSetup: React.FC = () => {
         </FormControl>
       )}
 
+      {(gameType === "snek" || gameType === "teamsnek" || gameType === "kingsnek") && (
+        <FormControl fullWidth variant="outlined" sx={{ mt: 2 }}>
+          <InputLabel shrink sx={{ backgroundColor: "white", px: 1 }}>
+            Snek Configuration
+          </InputLabel>
+          <Box
+            sx={{
+              border: "2px solid black",
+              padding: 2,
+              borderRadius: "0px",
+              minHeight: "56px",
+            }}
+          >
+            <SnekConfiguration
+              maxTurns={maxTurns}
+              onMaxTurnsChange={handleMaxTurnsChange}
+              hazardPercentage={hazardPercentage}
+              onHazardPercentageChange={handleHazardPercentageChange}
+            />
+          </Box>
+        </FormControl>
+      )}
+
       {/* Team Configuration - Only show for team games */}
       {(gameType === "teamsnek" || gameType === "kingsnek") && (
         <FormControl fullWidth variant="outlined" sx={{ mt: 2 }}>
@@ -522,10 +546,6 @@ const GameSetup: React.FC = () => {
             <TeamConfiguration
               teams={teams}
               onTeamsChange={handleTeamsChange}
-              maxTurns={maxTurns}
-              onMaxTurnsChange={handleMaxTurnsChange}
-              hazardPercentage={hazardPercentage}
-              onHazardPercentageChange={handleHazardPercentageChange}
               bots={bots}
               gamePlayers={gameSetup?.gamePlayers || []}
             />

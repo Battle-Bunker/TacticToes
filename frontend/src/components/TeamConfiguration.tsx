@@ -1,9 +1,5 @@
 import React, { useState } from "react";
-import {
-  Button,
-  TextField,
-  FormControl,
-} from "@mui/material";
+import { Button, TextField } from "@mui/material";
 import { ColorPicker } from "./ColorPicker";
 import { Bot } from "@shared/types/Game";
 import { BotHealthCheck } from "./BotHealthCheck";
@@ -18,10 +14,6 @@ interface Team {
 interface TeamConfigurationProps {
   teams: Team[];
   onTeamsChange: (teams: Team[]) => void;
-  maxTurns: number;
-  onMaxTurnsChange: (turns: number) => void;
-  hazardPercentage: number;
-  onHazardPercentageChange: (percentage: number) => void;
   bots?: Bot[];
   gamePlayers?: Array<{ id: string; type: "bot" | "human"; teamID?: string }>;
 }
@@ -30,10 +22,6 @@ interface TeamConfigurationProps {
 export const TeamConfiguration: React.FC<TeamConfigurationProps> = ({
   teams,
   onTeamsChange,
-  maxTurns,
-  onMaxTurnsChange,
-  hazardPercentage,
-  onHazardPercentageChange,
   bots = [],
   gamePlayers = [],
 }) => {
@@ -72,30 +60,6 @@ export const TeamConfiguration: React.FC<TeamConfigurationProps> = ({
   return (
     <div>
       <h3>Team Configuration</h3>
-
-      {/* Turn Limit and Terrain */}
-      <FormControl fullWidth margin="normal">
-        <div style={{ display: "flex", gap: "15px" }}>
-          <TextField
-            type="number"
-            label="Max Turns"
-            value={maxTurns}
-            onChange={(e) => onMaxTurnsChange(parseInt(e.target.value))}
-            sx={{ flex: 1 }}
-            inputProps={{ min: 1 }}
-          />
-          <TextField
-            type="number"
-            label="Hazard Percentage"
-            value={hazardPercentage}
-            onChange={(e) =>
-              onHazardPercentageChange(parseInt(e.target.value))
-            }
-            sx={{ flex: 1 }}
-            inputProps={{ min: 0, max: 100 }}
-          />
-        </div>
-      </FormControl>
 
       {/* Team Creation */}
       <div style={{ display: "flex", gap: "15px", marginBottom: "20px", alignItems: "flex-start" }}>
