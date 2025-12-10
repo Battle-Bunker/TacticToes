@@ -109,22 +109,49 @@ const GameFinished: React.FC = () => {
   // Determine winner and draw based on scoring unit
   let draw = false
   let topWinner: { name?: string, emoji?: string, color?: string } | null = null
-  
-  if (scoringUnit === 'team' && sortedTeams.length > 0) {
-    draw = sortedTeams.length > 1 && sortedTeams[0].teamScore === sortedTeams[1].teamScore
-    if (!draw) {
-      topWinner = { 
-        name: sortedTeams[0].teamName,
-        emoji: '🏆',
-        color: sortedTeams[0].teamColor
+  const isSnekGame = ['snek', 'teamsnek', 'kingsnek'].includes(gameState.setup.gameType)
+
+  if (isSnekGame) {
+    draw = latestTurn.winners.length > 1
+    const primaryWinner = latestTurn.winners[0]
+
+    if (!draw && primaryWinner) {
+      if (scoringUnit === 'team' && primaryWinner.teamID && gameSetup?.teams) {
+        const winningTeam = gameSetup.teams.find(team => team.id === primaryWinner.teamID)
+        topWinner = {
+          name: winningTeam?.name,
+          emoji: '🏆',
+          color: winningTeam?.color,
+        }
+      } else {
+        const winningPlayer = players.find((player) => player.id === primaryWinner.playerID)
+        const gamePlayer = gameSetup?.gamePlayers.find((gp) => gp.id === primaryWinner.playerID)
+        const emoji = gamePlayer?.isKing ? '👑' : winningPlayer?.emoji
+
+        topWinner = {
+          name: winningPlayer?.name,
+          emoji,
+          color: winningPlayer?.colour,
+        }
       }
     }
-  } else if (sortedPlayers.length > 0) {
-    draw = sortedPlayers.length > 1 && sortedPlayers[0].score === sortedPlayers[1].score
-    if (!draw) {
-      topWinner = { 
-        name: sortedPlayers[0].name,
-        emoji: sortedPlayers[0].emoji
+  } else {
+    if (scoringUnit === 'team' && sortedTeams.length > 0) {
+      draw = sortedTeams.length > 1 && sortedTeams[0].teamScore === sortedTeams[1].teamScore
+      if (!draw) {
+        topWinner = {
+          name: sortedTeams[0].teamName,
+          emoji: '🏆',
+          color: sortedTeams[0].teamColor
+        }
+      }
+    } else if (sortedPlayers.length > 0) {
+      draw = sortedPlayers.length > 1 && sortedPlayers[0].score === sortedPlayers[1].score
+      if (!draw) {
+        topWinner = {
+          name: sortedPlayers[0].name,
+          emoji: sortedPlayers[0].emoji
+        }
       }
     }
   }
