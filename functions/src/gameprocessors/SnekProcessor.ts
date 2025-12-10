@@ -27,9 +27,11 @@ interface SnakeGameState {
 
 export class SnekProcessor extends GameProcessor {
   private foodSpawnChance: number = 0.5 // 50% chance to spawn food
+  private maxTurns?: number
 
   constructor(gameState: GameState) {
     super(gameState)
+    this.maxTurns = gameState.setup.maxTurns
   }
 
   firstTurn(): Turn {
@@ -453,6 +455,12 @@ export class SnekProcessor extends GameProcessor {
   }
 
   protected calculateWinners(gameState: SnakeGameState): Winner[] {
+    const currentTurnNumber = this.gameState.turns.length
+
+    if (this.maxTurns !== undefined && currentTurnNumber >= this.maxTurns) {
+      return this.calculateSurvivalWinners(gameState)
+    }
+
     if (gameState.newAlivePlayers.length <= 1) {
       return this.calculateSurvivalWinners(gameState)
     }
