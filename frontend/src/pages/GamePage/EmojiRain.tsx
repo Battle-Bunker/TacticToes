@@ -18,9 +18,14 @@ const EmojiRain: React.FC<EmojiRainProps> = ({
     size: number
     speed: number
   }>>([])
+  const [stopped, setStopped] = React.useState(false)
 
   React.useEffect(() => {
-    if (emoji) {
+    setStopped(false)
+  }, [emoji])
+
+  React.useEffect(() => {
+    if (emoji && !stopped) {
       const newEmojis = Array.from({ length: totalEmojis }, (_, i) => {
         const progress = i / totalEmojis
         const b = 3
@@ -42,10 +47,12 @@ const EmojiRain: React.FC<EmojiRainProps> = ({
       newEmojis.sort((a, b) => a.delay - b.delay)
 
       setEmojis(newEmojis)
+    } else {
+      setEmojis([])
     }
-  }, [emoji, duration, totalEmojis])
+  }, [emoji, duration, totalEmojis, stopped])
 
-  if (!emoji) return null
+  if (!emoji || stopped) return null
 
   return (
     <div
@@ -55,9 +62,13 @@ const EmojiRain: React.FC<EmojiRainProps> = ({
         left: "-20px",
         width: "120%",
         height: "120%",
-        pointerEvents: "none",
+        pointerEvents: "auto",
         overflow: "hidden",
         zIndex: 9999,
+      }}
+      onClick={() => {
+        setStopped(true)
+        setEmojis([])
       }}
     >
       {emojis.map(({ id, left, delay, size, speed }) => (
