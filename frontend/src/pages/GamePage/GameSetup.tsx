@@ -67,9 +67,7 @@ const GameSetup: React.FC = () => {
   )
   const [maxTurns, setMaxTurns] = useState<number>(gameSetup?.maxTurns ?? 100)
   const [hazardPercentage, setHazardPercentage] = useState<number>(
-    gameSetup?.hazardPercentage ??
-      (gameSetup as any)?.terrainPercentage ??
-      0,
+    gameSetup?.hazardPercentage ?? 0,
   )
   
   const { getBotStatus } = useBotHealth()
@@ -113,9 +111,6 @@ const GameSetup: React.FC = () => {
       // Update hazard percentage
       if (gameSetup.hazardPercentage !== undefined) {
         setHazardPercentage(gameSetup.hazardPercentage)
-      } else if ((gameSetup as any).terrainPercentage !== undefined) {
-        // backward compatibility
-        setHazardPercentage((gameSetup as any).terrainPercentage)
       }
 
       //  Update teams

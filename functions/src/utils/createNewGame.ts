@@ -20,11 +20,7 @@ export async function createNewGame(
     const newGameSetup: GameSetup = previousSetup
       ? {
           ...previousSetup, // Copy all fields including gamePlayers (preserves bots, kings, team assignments)
-          hazardPercentage:
-            previousSetup.hazardPercentage ??
-            // backward compatibility for older field name
-            (previousSetup as any).terrainPercentage ??
-            0,
+          hazardPercentage: previousSetup.hazardPercentage ?? 0,
           playersReady: [], // Reset ready state - players must re-ready
           startRequested: false, // Reset start flag
           started: false, // Reset started flag

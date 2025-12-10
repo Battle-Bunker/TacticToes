@@ -743,13 +743,7 @@ export class SnekProcessor extends GameProcessor {
   ): number[] {
     const hazardPercentage = Math.max(
       0,
-      Math.min(
-        100,
-        this.gameSetup.hazardPercentage ??
-          // backward compatibility
-          (this.gameSetup as any).terrainPercentage ??
-          0,
-      ),
+      Math.min(100, this.gameSetup.hazardPercentage ?? 0),
     )
     if (hazardPercentage <= 0) return []
 
