@@ -2,6 +2,9 @@
   "projects": {
     "default": "tactic-toes-tuke",
     "production": "tactic-toes-tuke",
-    "staging": "tactic-toes-cyphid-dev"
-  }
+    "staging": "tactic-toes-cyphid-dev",
+    "tac-tic-toc-toe": "tac-tic-toc-toe"
+  },
+  "targets": {},
+  "etags": {}
 }

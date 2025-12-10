@@ -27,9 +27,11 @@ interface SnakeGameState {
 
 export class SnekProcessor extends GameProcessor {
   private foodSpawnChance: number = 0.5 // 50% chance to spawn food
+  private maxTurns?: number
 
   constructor(gameState: GameState) {
     super(gameState)
+    this.maxTurns = gameState.setup.maxTurns
   }
 
   firstTurn(): Turn {
@@ -61,11 +63,23 @@ export class SnekProcessor extends GameProcessor {
     // Initialize playerPieces
     const playerPieces = this.initializeSnakes()
 
-    // Initialize food positions
-    const food = this.initializeFood(boardWidth, boardHeight, playerPieces)
-
     // Initialize walls
     const walls = this.getWallPositions(boardWidth, boardHeight)
+
+    // Initialize hazards
+    const hazards = this.generateHazardPositions(
+      boardWidth,
+      boardHeight,
+      playerPieces,
+    )
+
+    // Initialize food positions
+    const food = this.initializeFood(
+      boardWidth,
+      boardHeight,
+      playerPieces,
+      hazards,
+    )
 
     // Initialize allowed moves
     const allowedMoves = this.calculateAllowedMoves(
@@ -93,7 +107,7 @@ export class SnekProcessor extends GameProcessor {
       scores: initialScores,
       alivePlayers: gamePlayers.map((player) => player.id),
       food: food,
-      hazards: [],
+      hazards: hazards,
       playerPieces: playerPieces,
       allowedMoves: allowedMoves,
       walls: walls,
@@ -135,7 +149,13 @@ export class SnekProcessor extends GameProcessor {
   }
 
   private initializeGameState(currentTurn: Turn): SnakeGameState {
-    const { playerPieces, food, hazards, alivePlayers, playerHealth } = currentTurn
+    const {
+      playerPieces,
+      food,
+      hazards,
+      alivePlayers,
+      playerHealth,
+    } = currentTurn
       const { boardWidth, boardHeight } = this.gameSetup
 
       // Deep copy playerPieces and other mutable objects
@@ -224,6 +244,9 @@ export class SnekProcessor extends GameProcessor {
     // Wall collisions
     this.checkWallCollisions(gameState)
     
+    // Hazard collisions
+    this.checkHazardCollisions(gameState)
+    
     // Self collisions
     this.checkSelfCollisions(gameState)
     
@@ -232,6 +255,29 @@ export class SnekProcessor extends GameProcessor {
     
     // Remove dead players
     this.removeDeadPlayers(gameState)
+  }
+
+  private checkHazardCollisions(gameState: SnakeGameState): void {
+    if (!gameState.newHazards.length) return
+
+    gameState.newAlivePlayers.forEach((playerID) => {
+      const snake = gameState.newSnakes[playerID]
+      const headIndex = snake[0]
+
+      if (gameState.newHazards.includes(headIndex)) {
+        gameState.deadPlayers.add(playerID)
+        snake.forEach((position) => {
+          gameState.clashes.push({
+            index: position,
+            playerIDs: [playerID],
+            reason: "Entered hazard",
+          })
+        })
+        logger.info(
+          `Snek: Player ${playerID} entered hazard at position ${headIndex}.`,
+        )
+      }
+    })
   }
 
   private checkWallCollisions(gameState: SnakeGameState): void {
@@ -409,6 +455,12 @@ export class SnekProcessor extends GameProcessor {
   }
 
   protected calculateWinners(gameState: SnakeGameState): Winner[] {
+    const currentTurnNumber = this.gameState.turns.length
+
+    if (this.maxTurns !== undefined && currentTurnNumber >= this.maxTurns) {
+      return this.calculateSurvivalWinners(gameState)
+    }
+
     if (gameState.newAlivePlayers.length <= 1) {
       return this.calculateSurvivalWinners(gameState)
     }
@@ -494,6 +546,7 @@ export class SnekProcessor extends GameProcessor {
     boardWidth: number,
     boardHeight: number,
     playerPieces: { [playerID: string]: number[] },
+    hazards: number[],
   ): number[] {
     const occupiedPositions = new Set<number>()
 
@@ -501,6 +554,9 @@ export class SnekProcessor extends GameProcessor {
     Object.values(playerPieces).forEach((snake) => {
       snake.forEach((position) => occupiedPositions.add(position))
     })
+
+    // Add hazard positions
+    hazards.forEach((position) => occupiedPositions.add(position))
 
     // Add wall positions to the occupied set
     const wallPositions = this.getWallPositions(boardWidth, boardHeight)
@@ -512,8 +568,23 @@ export class SnekProcessor extends GameProcessor {
     const centerX = Math.floor(boardWidth / 2)
     const centerY = Math.floor(boardHeight / 2)
     const centerPosition = centerY * boardWidth + centerX
-    foodPositions.push(centerPosition)
-    occupiedPositions.add(centerPosition)
+    if (!occupiedPositions.has(centerPosition)) {
+      foodPositions.push(centerPosition)
+      occupiedPositions.add(centerPosition)
+    } else {
+      // Fallback: choose any free space that is not hazard/wall/snake
+      const fallbackPositions = this.getFreePositions(
+        boardWidth,
+        boardHeight,
+        playerPieces,
+        foodPositions,
+        hazards,
+      )
+      if (fallbackPositions.length > 0) {
+        foodPositions.push(fallbackPositions[0])
+        occupiedPositions.add(fallbackPositions[0])
+      }
+    }
 
     // Place additional food for each snake
     Object.values(playerPieces).forEach((snake) => {
@@ -671,6 +742,225 @@ export class SnekProcessor extends GameProcessor {
     }
 
     return freePositions
+  }
+
+  private generateHazardPositions(
+    boardWidth: number,
+    boardHeight: number,
+    playerPieces: { [playerID: string]: number[] },
+  ): number[] {
+    const hazardPercentage = Math.max(
+      0,
+      Math.min(100, this.gameSetup.hazardPercentage ?? 0),
+    )
+    if (hazardPercentage <= 0) return []
+
+    const candidatePositions = this.getFreePositions(
+      boardWidth,
+      boardHeight,
+      playerPieces,
+      [],
+      [],
+    )
+
+    if (candidatePositions.length === 0) return []
+
+    const targetCount = Math.floor(
+      (candidatePositions.length * hazardPercentage) / 100,
+    )
+    if (targetCount <= 0) return []
+
+    // Shuffle candidate positions for randomness
+    for (let i = candidatePositions.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1))
+      ;[candidatePositions[i], candidatePositions[j]] = [
+        candidatePositions[j],
+        candidatePositions[i],
+      ]
+    }
+
+    const initialHazards = candidatePositions.slice(0, targetCount)
+    const safeHazards = this.ensureInitialSafeMoves(
+      initialHazards,
+      playerPieces,
+      boardWidth,
+      boardHeight,
+    )
+    return this.ensureConnectedBoard(
+      safeHazards,
+      playerPieces,
+      boardWidth,
+      boardHeight,
+    )
+  }
+
+  // Ensure each player has at least one safe adjacent move on turn 0
+  private ensureInitialSafeMoves(
+    hazards: number[],
+    playerPieces: { [playerID: string]: number[] },
+    boardWidth: number,
+    boardHeight: number,
+  ): number[] {
+    const hazardSet = new Set(hazards)
+    const walls = new Set(this.getWallPositions(boardWidth, boardHeight))
+
+    const occupied = new Set<number>()
+    Object.values(playerPieces).forEach((snake) => {
+      snake.forEach((pos) => occupied.add(pos))
+    })
+
+    Object.values(playerPieces).forEach((snake) => {
+      const head = snake[0]
+      const neighbors = this.getAdjacentIndices(head, boardWidth, boardHeight)
+      const safeNeighbors = neighbors.filter(
+        (n) => !walls.has(n) && !hazardSet.has(n) && !occupied.has(n),
+      )
+
+      if (safeNeighbors.length === 0) {
+        // Move or remove one blocking hazard to free a move
+        for (const n of neighbors) {
+          if (!walls.has(n) && !occupied.has(n) && hazardSet.has(n)) {
+            const hazardsWithoutCurrent = new Set(hazardSet)
+            hazardsWithoutCurrent.delete(n)
+
+            const relocationCandidates = this.getFreePositions(
+              boardWidth,
+              boardHeight,
+              playerPieces,
+              [],
+              Array.from(hazardsWithoutCurrent),
+            )
+
+            let relocated = false
+            for (const candidate of relocationCandidates) {
+              if (candidate === n || hazardSet.has(candidate)) continue
+
+              hazardSet.delete(n)
+              hazardSet.add(candidate)
+
+              const updatedSafeNeighbors = neighbors.filter(
+                (neighbor) =>
+                  !walls.has(neighbor) &&
+                  !hazardSet.has(neighbor) &&
+                  !occupied.has(neighbor),
+              )
+
+              if (updatedSafeNeighbors.length > 0) {
+                relocated = true
+                break
+              }
+
+              hazardSet.delete(candidate)
+              hazardSet.add(n)
+            }
+
+            if (!relocated) {
+              hazardSet.delete(n)
+            }
+            break
+          }
+        }
+      }
+    })
+
+    return Array.from(hazardSet)
+  }
+
+  private ensureConnectedBoard(
+    hazards: number[],
+    playerPieces: { [playerID: string]: number[] },
+    boardWidth: number,
+    boardHeight: number,
+  ): number[] {
+    const hazardSet = new Set(hazards)
+    const walls = new Set(this.getWallPositions(boardWidth, boardHeight))
+    const occupied = new Set<number>()
+    Object.values(playerPieces).forEach((snake) => {
+      snake.forEach((pos) => occupied.add(pos))
+    })
+
+    const isConnected = (hazardsToCheck: Set<number>): boolean => {
+      const visited = new Set<number>()
+      let start: number | null = null
+
+      for (let i = 0; i < boardWidth * boardHeight; i++) {
+        if (!walls.has(i) && !hazardsToCheck.has(i) && !occupied.has(i)) {
+          start = i
+          break
+        }
+      }
+
+      if (start === null) return true // nothing to connect
+
+      const queue: number[] = [start]
+      visited.add(start)
+
+      while (queue.length > 0) {
+        const current = queue.shift() as number
+        const neighbors = this.getAdjacentIndices(
+          current,
+          boardWidth,
+          boardHeight,
+        )
+        neighbors.forEach((n) => {
+          if (
+            !visited.has(n) &&
+            !walls.has(n) &&
+            !hazardsToCheck.has(n) &&
+            !occupied.has(n)
+          ) {
+            visited.add(n)
+            queue.push(n)
+          }
+        })
+      }
+
+      // All free cells should be reachable
+      for (let i = 0; i < boardWidth * boardHeight; i++) {
+        if (!walls.has(i) && !hazardsToCheck.has(i) && !occupied.has(i)) {
+          if (!visited.has(i)) {
+            return false
+          }
+        }
+      }
+      return true
+    }
+
+    if (isConnected(hazardSet)) return Array.from(hazardSet)
+
+    // Greedily remove hazards until the board is connected
+    for (const hazard of Array.from(hazardSet)) {
+      hazardSet.delete(hazard)
+      if (isConnected(hazardSet)) {
+        const availablePositions = this.getFreePositions(
+          boardWidth,
+          boardHeight,
+          playerPieces,
+          [],
+          Array.from(hazardSet),
+        )
+
+        let relocated = false
+        for (const candidate of availablePositions) {
+          if (hazardSet.has(candidate)) continue
+
+          hazardSet.add(candidate)
+          if (isConnected(hazardSet)) {
+            relocated = true
+            break
+          }
+          hazardSet.delete(candidate)
+        }
+
+        if (!relocated) {
+          // Hazard stays removed
+        }
+        break
+      }
+      hazardSet.add(hazard)
+    }
+
+    return Array.from(hazardSet)
   }
 
   private generateStartingPositions(): { x: number; y: number }[] {

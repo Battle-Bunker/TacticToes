@@ -2,11 +2,11 @@ import { GameState, Winner, GameSetup, GamePlayer } from "@shared/types/Game";
 import { SnekProcessor } from "./SnekProcessor";
 
 export class TeamSnekProcessor extends SnekProcessor {
-  private maxTurns: number;
+  private maxTurns?: number;
 
   constructor(gameState: GameState) {
     super(gameState);
-    this.maxTurns = gameState.setup.maxTurns || 100;
+    this.maxTurns = gameState.setup.maxTurns;
   }
 
   /**
@@ -29,7 +29,7 @@ export class TeamSnekProcessor extends SnekProcessor {
     const currentTurnNumber = this.gameState.turns.length;
     
     // If maxTurns reached, end the game and calculate winners
-    if (currentTurnNumber >= this.maxTurns) {
+    if (this.maxTurns !== undefined && currentTurnNumber >= this.maxTurns) {
       return this.calculateSurvivalWinners(gameState);
     }
 

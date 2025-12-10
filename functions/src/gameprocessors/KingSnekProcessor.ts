@@ -79,8 +79,11 @@ export class KingSnekProcessor extends TeamSnekProcessor {
 
   protected calculateWinners(gameState: any): Winner[] {
     const currentTurnNumber = this.gameState.turns.length;
-    
-    if (currentTurnNumber >= (this.gameSetup.maxTurns || 100)) {
+
+    if (
+      this.gameSetup.maxTurns !== undefined &&
+      currentTurnNumber >= this.gameSetup.maxTurns
+    ) {
       return this.calculateSurvivalWinners(gameState);
     }
 

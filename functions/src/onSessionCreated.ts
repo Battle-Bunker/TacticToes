@@ -24,6 +24,7 @@ export const onSessionCreated = functions.firestore
         firstTurnTime: 60,
         startRequested: false,
         started: false,
+        hazardPercentage: 0,
         timeCreated: FieldValue.serverTimestamp(),
       }
       await createNewGame(transaction, sessionID, defaultSetup)

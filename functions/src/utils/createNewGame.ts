@@ -20,6 +20,7 @@ export async function createNewGame(
     const newGameSetup: GameSetup = previousSetup
       ? {
           ...previousSetup, // Copy all fields including gamePlayers (preserves bots, kings, team assignments)
+          hazardPercentage: previousSetup.hazardPercentage ?? 0,
           playersReady: [], // Reset ready state - players must re-ready
           startRequested: false, // Reset start flag
           started: false, // Reset started flag
@@ -36,6 +37,7 @@ export async function createNewGame(
           playersReady: [],
           startRequested: false,
           started: false,
+          hazardPercentage: 0,
           timeCreated: Timestamp.now(),
         }
 

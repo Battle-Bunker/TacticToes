@@ -1,10 +1,17 @@
 // src/pages/GamePage/components/GameSetup.tsx
 
-import { arrayRemove, arrayUnion, doc, updateDoc } from "firebase/firestore"
+import {
+  arrayRemove,
+  arrayUnion,
+  deleteField,
+  doc,
+  updateDoc,
+} from "firebase/firestore"
 import React, { useEffect, useState } from "react"
 import { useUser } from "../../context/UserContext"
 import { db } from "../../firebaseConfig"
 import { TeamConfiguration } from "../../components/TeamConfiguration"
+import { SnekConfiguration } from "../../components/SnekConfiguration"
 import { PlayerConfiguration } from "../../components/PlayerConfiguration"
 import { BotHealthProvider, useBotHealth } from "../../context/BotHealthContext"
 
@@ -55,7 +62,13 @@ const GameSetup: React.FC = () => {
   const [RulesComponent, setRulesComponent] = useState<React.FC | null>(null)
   const [boardSize, setBoardSize] = useState<BoardSize>("medium")
   const [teams, setTeams] = useState<Team[]>(gameSetup?.teams || [])
-  const [maxTurns, setMaxTurns] = useState<number>(gameSetup?.maxTurns || 100)
+  const [maxTurnsEnabled, setMaxTurnsEnabled] = useState<boolean>(
+    gameSetup?.maxTurns !== undefined,
+  )
+  const [maxTurns, setMaxTurns] = useState<number>(gameSetup?.maxTurns ?? 100)
+  const [hazardPercentage, setHazardPercentage] = useState<number>(
+    gameSetup?.hazardPercentage ?? 0,
+  )
   
   const { getBotStatus } = useBotHealth()
 
@@ -90,6 +103,14 @@ const GameSetup: React.FC = () => {
       //  Update max turns
       if (gameSetup.maxTurns !== undefined) {
         setMaxTurns(gameSetup.maxTurns)
+        setMaxTurnsEnabled(true)
+      } else {
+        setMaxTurnsEnabled(false)
+      }
+
+      // Update hazard percentage
+      if (gameSetup.hazardPercentage !== undefined) {
+        setHazardPercentage(gameSetup.hazardPercentage)
       }
 
       //  Update teams
@@ -226,10 +247,39 @@ const GameSetup: React.FC = () => {
 
   // Handle max turns configuration
   const handleMaxTurnsChange = async (newMaxTurns: number) => {
+    const sanitizedValue = Math.max(1, newMaxTurns)
+    setMaxTurns(sanitizedValue)
+
+    if (maxTurnsEnabled) {
+      await updateDoc(gameDocRef, {
+        maxTurns: sanitizedValue,
+      })
+    }
+  }
+
+  const handleMaxTurnsToggle = async (enabled: boolean) => {
+    setMaxTurnsEnabled(enabled)
+
+    if (enabled) {
+      const sanitizedValue = Math.max(1, maxTurns)
+      setMaxTurns(sanitizedValue)
+      await updateDoc(gameDocRef, {
+        maxTurns: sanitizedValue,
+      })
+    } else {
+      await updateDoc(gameDocRef, {
+        maxTurns: deleteField(),
+      })
+    }
+  }
+
+  // Handle hazard percentage configuration
+  const handleHazardPercentageChange = async (newHazardPercentage: number) => {
+    const sanitizedValue = Math.max(0, Math.min(100, newHazardPercentage))
     await updateDoc(gameDocRef, {
-      maxTurns: newMaxTurns,
+      hazardPercentage: sanitizedValue,
     })
-    setMaxTurns(newMaxTurns)
+    setHazardPercentage(sanitizedValue)
   }
 
   // Handler for selecting game type
@@ -483,6 +533,31 @@ const GameSetup: React.FC = () => {
         </FormControl>
       )}
 
+      {(gameType === "snek" || gameType === "teamsnek" || gameType === "kingsnek") && (
+        <FormControl fullWidth variant="outlined" sx={{ mt: 2 }}>
+          <InputLabel shrink sx={{ backgroundColor: "white", px: 1 }}>
+            Snek Configuration
+          </InputLabel>
+          <Box
+            sx={{
+              border: "2px solid black",
+              padding: 2,
+              borderRadius: "0px",
+              minHeight: "56px",
+            }}
+          >
+            <SnekConfiguration
+              maxTurns={maxTurns}
+              maxTurnsEnabled={maxTurnsEnabled}
+              onMaxTurnsToggle={handleMaxTurnsToggle}
+              onMaxTurnsChange={handleMaxTurnsChange}
+              hazardPercentage={hazardPercentage}
+              onHazardPercentageChange={handleHazardPercentageChange}
+            />
+          </Box>
+        </FormControl>
+      )}
+
       {/* Team Configuration - Only show for team games */}
       {(gameType === "teamsnek" || gameType === "kingsnek") && (
         <FormControl fullWidth variant="outlined" sx={{ mt: 2 }}>
@@ -500,8 +575,6 @@ const GameSetup: React.FC = () => {
             <TeamConfiguration
               teams={teams}
               onTeamsChange={handleTeamsChange}
-              maxTurns={maxTurns}
-              onMaxTurnsChange={handleMaxTurnsChange}
               bots={bots}
               gamePlayers={gameSetup?.gamePlayers || []}
             />

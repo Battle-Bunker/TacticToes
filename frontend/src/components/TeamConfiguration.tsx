@@ -1,9 +1,5 @@
 import React, { useState } from "react";
-import {
-  Button,
-  TextField,
-  FormControl,
-} from "@mui/material";
+import { Button, TextField } from "@mui/material";
 import { ColorPicker } from "./ColorPicker";
 import { Bot } from "@shared/types/Game";
 import { BotHealthCheck } from "./BotHealthCheck";
@@ -18,8 +14,6 @@ interface Team {
 interface TeamConfigurationProps {
   teams: Team[];
   onTeamsChange: (teams: Team[]) => void;
-  maxTurns: number;
-  onMaxTurnsChange: (turns: number) => void;
   bots?: Bot[];
   gamePlayers?: Array<{ id: string; type: "bot" | "human"; teamID?: string }>;
 }
@@ -28,8 +22,6 @@ interface TeamConfigurationProps {
 export const TeamConfiguration: React.FC<TeamConfigurationProps> = ({
   teams,
   onTeamsChange,
-  maxTurns,
-  onMaxTurnsChange,
   bots = [],
   gamePlayers = [],
 }) => {
@@ -68,16 +60,6 @@ export const TeamConfiguration: React.FC<TeamConfigurationProps> = ({
   return (
     <div>
       <h3>Team Configuration</h3>
-
-      {/* Turn Limit */}
-      <FormControl fullWidth margin="normal">
-        <TextField
-          type="number"
-          label="Max Turns"
-          value={maxTurns}
-          onChange={(e) => onMaxTurnsChange(parseInt(e.target.value))}
-        />
-      </FormControl>
 
       {/* Team Creation */}
       <div style={{ display: "flex", gap: "15px", marginBottom: "20px", alignItems: "flex-start" }}>
