@@ -109,11 +109,10 @@ const GameFinished: React.FC = () => {
   // Determine winner and draw based on scoring unit
   let draw = false
   let topWinner: { name?: string, emoji?: string, color?: string } | null = null
-  
   if (scoringUnit === 'team' && sortedTeams.length > 0) {
     draw = sortedTeams.length > 1 && sortedTeams[0].teamScore === sortedTeams[1].teamScore
     if (!draw) {
-      topWinner = { 
+      topWinner = {
         name: sortedTeams[0].teamName,
         emoji: '🏆',
         color: sortedTeams[0].teamColor
@@ -122,7 +121,7 @@ const GameFinished: React.FC = () => {
   } else if (sortedPlayers.length > 0) {
     draw = sortedPlayers.length > 1 && sortedPlayers[0].score === sortedPlayers[1].score
     if (!draw) {
-      topWinner = { 
+      topWinner = {
         name: sortedPlayers[0].name,
         emoji: sortedPlayers[0].emoji
       }
