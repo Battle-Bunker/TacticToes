@@ -1,9 +1,9 @@
-import * as functions from "firebase-functions"
+import * as functions from "firebase-functions/v1"
 import * as logger from "firebase-functions/logger"
 import axios from "axios"
 
 export const wakeBot = functions.https.onCall(async (data, context) => {
-  const { botUrl } = data
+  const { botUrl } = data as { botUrl?: unknown }
 
   // Validate input
   if (!botUrl || typeof botUrl !== "string") {

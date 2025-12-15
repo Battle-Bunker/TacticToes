@@ -1,4 +1,4 @@
-import * as functions from "firebase-functions"
+import * as functions from "firebase-functions/v1"
 import * as logger from "firebase-functions/logger"
 import * as admin from "firebase-admin"
 import { GameSetup, Session } from "./types/Game" // Adjust the import path as necessary
