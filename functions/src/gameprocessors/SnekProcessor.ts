@@ -27,7 +27,7 @@ interface SnakeGameState {
 
 export class SnekProcessor extends GameProcessor {
   private foodSpawnChance: number = 0.5 // 50% chance to spawn food
-  private maxTurns?: number
+  protected maxTurns?: number
 
   constructor(gameState: GameState) {
     super(gameState)
@@ -456,33 +456,41 @@ export class SnekProcessor extends GameProcessor {
 
   protected calculateWinners(gameState: SnakeGameState): Winner[] {
     const currentTurnNumber = this.gameState.turns.length
+    const reachedTurnLimit =
+      this.maxTurns !== undefined && currentTurnNumber >= this.maxTurns
 
-    if (this.maxTurns !== undefined && currentTurnNumber >= this.maxTurns) {
-      return this.calculateSurvivalWinners(gameState)
+    const alivePlayers = gameState.newAlivePlayers
+
+    if (alivePlayers.length === 0) {
+      // Everyone died simultaneously
+      return []
     }
 
-    if (gameState.newAlivePlayers.length <= 1) {
-      return this.calculateSurvivalWinners(gameState)
+    if (alivePlayers.length === 1) {
+      return this.createIndividualWinners(gameState, alivePlayers)
     }
+
+    if (reachedTurnLimit) {
+      // Multiple snakes survived the turn limit, so it's a draw
+      return []
+    }
+
     return []
   }
 
   protected calculateSurvivalWinners(gameState: SnakeGameState): Winner[] {
-        // Get the latest turn scores (game-specific scores like snake lengths) instead of counting survival turns
-        const latestTurn = this.gameState.turns[this.gameState.turns.length - 1]
-        const latestScores = latestTurn?.scores || {}
+    return this.createIndividualWinners(gameState, gameState.newAlivePlayers)
+  }
 
-        // Create winners array using actual game scores from turn data
-        const winners = this.gameSetup.gamePlayers.map(player => ({
-          playerID: player.id,
-          score: latestScores[player.id] || 0,  // Use game-specific score (snake length)
-          winningSquares: gameState.newSnakes[player.id] ?? []
-        }))
-
-        // Sort winners by actual game scores in descending order
-        winners.sort((a, b) => b.score - a.score)
-    
-        return winners
+  private createIndividualWinners(
+    gameState: SnakeGameState,
+    playerIDs: string[],
+  ): Winner[] {
+    return playerIDs.map((playerID) => ({
+      playerID,
+      score: gameState.newSnakes[playerID]?.length || 0,
+      winningSquares: gameState.newSnakes[playerID] ?? [],
+    }))
   }
 
   protected createNewTurn(currentTurn: Turn, gameState: SnakeGameState, winners: Winner[]): Turn {

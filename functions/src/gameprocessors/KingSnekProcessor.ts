@@ -49,53 +49,35 @@ export class KingSnekProcessor extends TeamSnekProcessor {
     return newTurn;
   }
 
-  protected calculateSurvivalWinners(gameState: any): Winner[] {
-    const individualWinners = this.gameSetup.gamePlayers.map(player => ({
-      playerID: player.id,
-      score: gameState.newSnakes[player.id]?.length || 0,
-      winningSquares: gameState.newSnakes[player.id] ?? []
-    }));
-
-    const teamScores = new Map<string, number>();
-    this.gameSetup.gamePlayers.forEach(player => {
-      if (player.teamID && player.isKing) {
-        const kingScore = gameState.newSnakes[player.id]?.length || 0;
-        teamScores.set(player.teamID, kingScore);
-      }
-    });
-
-    return individualWinners.map(winner => {
-      const player = this.gameSetup.gamePlayers.find(p => p.id === winner.playerID);
-      if (player && player.teamID) {
-        return {
-          ...winner,
-          teamID: player.teamID,
-          teamScore: teamScores.get(player.teamID) || 0
-        };
-      }
-      return winner;
-    });
-  }
-
   protected calculateWinners(gameState: any): Winner[] {
     const currentTurnNumber = this.gameState.turns.length;
-
-    if (
-      this.gameSetup.maxTurns !== undefined &&
-      currentTurnNumber >= this.gameSetup.maxTurns
-    ) {
-      return this.calculateSurvivalWinners(gameState);
-    }
+    const reachedTurnLimit =
+      this.gameSetup.maxTurns !== undefined && currentTurnNumber >= this.gameSetup.maxTurns;
 
     const aliveTeams = this.getKingSnekAliveTeams(gameState);
+
+    if (aliveTeams.length === 0) {
+      return [];
+    }
+
     if (aliveTeams.length === 1) {
       return this.calculateKingSnekTeamWinners(aliveTeams[0], gameState);
     }
-      
-    if (gameState.newAlivePlayers.length <= 1) {
-      return this.calculateSurvivalWinners(gameState);
+
+    if (reachedTurnLimit) {
+      const teamScores = this.getKingTeamScores(gameState);
+      const maxScore = Math.max(...teamScores.values());
+      const topTeams = Array.from(teamScores.entries())
+        .filter(([, score]) => score === maxScore)
+        .map(([teamID]) => teamID);
+
+      if (topTeams.length === 1) {
+        return this.calculateKingSnekTeamWinners(topTeams[0], gameState);
+      }
+
+      return [];
     }
-    
+
     return [];
   }
 
@@ -125,6 +107,20 @@ export class KingSnekProcessor extends TeamSnekProcessor {
       teamID: teamID,
       teamScore: teamScore
     }));
+  }
+
+  private getKingTeamScores(gameState: any): Map<string, number> {
+    const teamScores = new Map<string, number>();
+
+    this.gameSetup.gamePlayers.forEach(player => {
+      if (player.teamID) {
+        const king = this.getKingForTeam(player.teamID);
+        const kingScore = king ? (gameState.newSnakes[king.id]?.length || 0) : 0;
+        teamScores.set(player.teamID, kingScore);
+      }
+    });
+
+    return teamScores;
   }
 
   protected createNewTurn(currentTurn: any, gameState: any, winners: any[]): any {

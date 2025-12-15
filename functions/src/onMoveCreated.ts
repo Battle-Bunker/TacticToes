@@ -1,5 +1,5 @@
 import * as admin from "firebase-admin"
-import * as functions from "firebase-functions"
+import * as functions from "firebase-functions/v1"
 import * as logger from "firebase-functions/logger"
 import { getFunctions } from "firebase-admin/functions"
 import { processTurn } from "./gameprocessors/processTurn"
