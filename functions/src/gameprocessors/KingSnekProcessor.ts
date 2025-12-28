@@ -1,4 +1,4 @@
-import { GameState, Winner, GameSetup, GamePlayer } from "@shared/types/Game";
+import { GameState, Winner, GameSetup, GamePlayer, Turn } from "@shared/types/Game";
 import { TeamSnekProcessor } from "./TeamSnekProcessor";
 
 export class KingSnekProcessor extends TeamSnekProcessor {
@@ -57,7 +57,7 @@ export class KingSnekProcessor extends TeamSnekProcessor {
     const aliveTeams = this.getKingSnekAliveTeams(gameState);
 
     if (aliveTeams.length === 0) {
-      return [];
+      return this.calculatePreviousTurnKingOutcome();
     }
 
     if (aliveTeams.length === 1) {
@@ -97,7 +97,7 @@ export class KingSnekProcessor extends TeamSnekProcessor {
   private calculateKingSnekTeamWinners(teamID: string, gameState: any): Winner[] {
     const teamPlayers = this.gameSetup.gamePlayers.filter(player => player.teamID === teamID);
     const king = this.getKingForTeam(teamID);
-    
+
     const teamScore = king ? (gameState.newSnakes[king.id]?.length || 0) : 0;
     
     return teamPlayers.map(player => ({
@@ -111,21 +111,11 @@ export class KingSnekProcessor extends TeamSnekProcessor {
   }
 
   private calculateKingSnekDrawWinners(teamIDs: string[], gameState: any): Winner[] {
-    return teamIDs.flatMap(teamID => {
-      const king = this.getKingForTeam(teamID);
-      const teamScore = king ? (gameState.newSnakes[king.id]?.length || 0) : 0;
+    return teamIDs.flatMap(teamID => this.calculateKingSnekTeamWinners(teamID, gameState));
+  }
 
-      return this.gameSetup.gamePlayers
-        .filter(player => player.teamID === teamID)
-        .map(player => ({
-          playerID: player.id,
-          // King length fully determines the team score/placements
-          score: teamScore,
-          winningSquares: gameState.newSnakes[player.id] || [],
-          teamID,
-          teamScore
-        }));
-    });
+  private calculateKingSnekDrawWinnersFromTurn(teamIDs: string[], turn: Turn): Winner[] {
+    return teamIDs.flatMap(teamID => this.calculateKingSnekTeamWinnersFromTurn(teamID, turn));
   }
 
   private getKingTeamScores(gameState: any): Map<string, number> {
@@ -135,6 +125,20 @@ export class KingSnekProcessor extends TeamSnekProcessor {
       if (player.teamID) {
         const king = this.getKingForTeam(player.teamID);
         const kingScore = king ? (gameState.newSnakes[king.id]?.length || 0) : 0;
+        teamScores.set(player.teamID, kingScore);
+      }
+    });
+
+    return teamScores;
+  }
+
+  private getKingTeamScoresFromTurn(turn: Turn): Map<string, number> {
+    const teamScores = new Map<string, number>();
+
+    this.gameSetup.gamePlayers.forEach(player => {
+      if (player.teamID) {
+        const king = this.getKingForTeam(player.teamID);
+        const kingScore = king ? (turn.playerPieces[king.id]?.length || 0) : 0;
         teamScores.set(player.teamID, kingScore);
       }
     });
@@ -165,7 +169,67 @@ export class KingSnekProcessor extends TeamSnekProcessor {
     newTurn.scores = playerScores;
     newTurn.teamScores = teamScores;
     newTurn.scoringUnit = 'team';
-    
+
     return newTurn;
+  }
+
+  private calculateKingSnekTeamWinnersFromTurn(teamID: string, turn: Turn): Winner[] {
+    const king = this.getKingForTeam(teamID);
+    const teamScore = king ? (turn.playerPieces[king.id]?.length || 0) : 0;
+
+    return this.gameSetup.gamePlayers
+      .filter(player => player.teamID === teamID)
+      .map(player => ({
+        playerID: player.id,
+        // King length fully determines the team score/placements
+        score: teamScore,
+        winningSquares: turn.playerPieces[player.id] || [],
+        teamID,
+        teamScore,
+      }));
+  }
+
+  private getKingSnekAliveTeamsFromTurn(turn: Turn): string[] {
+    const aliveTeams = new Set<string>();
+
+    turn.alivePlayers.forEach(playerID => {
+      const player = this.gameSetup.gamePlayers.find(p => p.id === playerID);
+      if (player?.teamID) {
+        aliveTeams.add(player.teamID);
+      }
+    });
+
+    return Array.from(aliveTeams);
+  }
+
+  private calculatePreviousTurnKingOutcome(): Winner[] {
+    const previousTurn = this.gameState.turns[this.gameState.turns.length - 1];
+
+    if (!previousTurn) {
+      return [];
+    }
+
+    const aliveTeams = this.getKingSnekAliveTeamsFromTurn(previousTurn);
+
+    if (aliveTeams.length === 1) {
+      return this.calculateKingSnekTeamWinnersFromTurn(aliveTeams[0], previousTurn);
+    }
+
+    const teamScores = this.getKingTeamScoresFromTurn(previousTurn);
+
+    if (teamScores.size === 0) {
+      return [];
+    }
+
+    const maxScore = Math.max(...teamScores.values());
+    const topTeams = Array.from(teamScores.entries())
+      .filter(([, score]) => score === maxScore)
+      .map(([teamID]) => teamID);
+
+    if (topTeams.length === 1) {
+      return this.calculateKingSnekTeamWinnersFromTurn(topTeams[0], previousTurn);
+    }
+
+    return this.calculateKingSnekDrawWinnersFromTurn(topTeams, previousTurn);
   }
 }
