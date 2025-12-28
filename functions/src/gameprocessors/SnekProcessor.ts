@@ -462,8 +462,24 @@ export class SnekProcessor extends GameProcessor {
     const alivePlayers = gameState.newAlivePlayers
 
     if (alivePlayers.length === 0) {
-      // Everyone died simultaneously
-      return []
+      // Everyone died simultaneously - use the previous turn's state to declare winners
+      const previousTurn = this.gameState.turns[this.gameState.turns.length - 1]
+
+      if (previousTurn) {
+        const previousAlivePlayers = previousTurn.alivePlayers
+
+        if (previousAlivePlayers.length > 0) {
+          return this.createTurnWinners(previousTurn, previousAlivePlayers)
+        }
+
+        const previousPlayers = Object.keys(previousTurn.scores || {})
+
+        if (previousPlayers.length > 0) {
+          return this.createTurnWinners(previousTurn, previousPlayers)
+        }
+      }
+
+      return this.calculateSurvivalWinners(gameState)
     }
 
     if (alivePlayers.length === 1) {
@@ -489,6 +505,14 @@ export class SnekProcessor extends GameProcessor {
 
   protected calculateSurvivalWinners(gameState: SnakeGameState): Winner[] {
     return this.createIndividualWinners(gameState, gameState.newAlivePlayers)
+  }
+
+  private createTurnWinners(turn: Turn, playerIDs: string[]): Winner[] {
+    return playerIDs.map((playerID) => ({
+      playerID,
+      score: turn.scores[playerID] ?? 0,
+      winningSquares: turn.playerPieces[playerID] ?? [],
+    }))
   }
 
   protected createIndividualWinners(
