@@ -3,6 +3,7 @@ import { onMoveCreated } from "./onMoveCreated"
 import { onSessionCreated } from "./onSessionCreated"
 import { processTurnExpirationTask } from "./processTurnExpirationTask"
 import { wakeBot } from "./wakeBot"
+import { getPlayerPublicInfo } from "./getPlayerPublicInfo"
 import * as admin from "firebase-admin"
 
 admin.initializeApp()
@@ -22,4 +23,5 @@ export {
   onSessionCreated,
   processTurnExpirationTask,
   wakeBot,
+  getPlayerPublicInfo,
 }
