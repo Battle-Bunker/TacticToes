@@ -1077,16 +1077,10 @@ export class SnekProcessor extends GameProcessor {
   private generateTeamClusterStartingPositions(): { x: number; y: number }[] {
     const { boardWidth, boardHeight, gamePlayers, teams } = this.gameSetup
     const minDistance = 4
-    const maxTeammateDistance = 10
-    const center = {
-      x: Math.floor(boardWidth / 2),
-      y: Math.floor(boardHeight / 2),
-    }
-    const ringRadius = Math.max(
-      2,
-      Math.floor(Math.min(boardWidth, boardHeight) / 2) - 3,
+    const ringInset = Math.max(
+      1,
+      Math.floor(Math.min(boardWidth, boardHeight) / 2) - 6,
     )
-    const ringBandBase = 2
 
     const teamMap = new Map<string, GamePlayer[]>()
     gamePlayers.forEach((player) => {
@@ -1102,120 +1096,93 @@ export class SnekProcessor extends GameProcessor {
       return []
     }
 
-    const placedPositions = new Map<string, { x: number; y: number }>()
-    const occupied: { x: number; y: number }[] = []
-    const baseCenters = this.getTeamRingCenters(
-      teamCount,
-      center,
-      ringRadius,
+    const ringPositions = this.getSquareRingPositions(
+      boardWidth,
+      boardHeight,
+      ringInset,
     )
-    const baseAngles = baseCenters.map((pos) => this.getAngle(center, pos))
-    const baseArcSpan =
-      teamCount === 1
-        ? Math.PI
-        : teamCount === 2
-          ? Math.min(Math.PI / 2, 2.5 / Math.max(1, ringRadius))
-          : (Math.PI / teamCount) * 0.45
-    const maxArcSpan =
-      teamCount === 1
-        ? Math.PI
-        : Math.max(0.2, Math.PI / teamCount - 0.2)
-
-    const ringBandsToTry = [ringBandBase, ringBandBase + 1]
-    const arcSpansToTry: number[] = []
-    for (let span = baseArcSpan; span <= maxArcSpan + 0.001; span += 0.15) {
-      arcSpansToTry.push(span)
-    }
-
-    const tryPlaceTeams = (
-      requireParity: boolean,
-      ringBand: number,
-      arcSpan: number,
-    ): boolean => {
-      placedPositions.clear()
-      occupied.length = 0
-
-      for (let i = 0; i < teamIDs.length; i++) {
-        const teamID = teamIDs[i]
-        const teamPlayers = teamMap.get(teamID) || []
-        if (teamPlayers.length === 0) continue
-
-        const teamCenter = this.findNearestValidPosition(
-          baseCenters[i],
-          occupied,
-          requireParity,
-          0,
-          boardWidth,
-          boardHeight,
-          center,
-          ringRadius,
-          ringBand,
-          baseAngles[i],
-          arcSpan,
-        )
-
-        if (!teamCenter) {
-          return false
-        }
-
-        const teamPlaced: { x: number; y: number }[] = []
-        const candidates = this.getClusterCandidates(
-          teamCenter,
-          maxTeammateDistance,
-          requireParity,
-          boardWidth,
-          boardHeight,
-          center,
-          ringRadius,
-          ringBand,
-          baseAngles[i],
-          arcSpan,
-        )
-
-        for (const player of teamPlayers) {
-          const position = this.selectClusterPosition(
-            candidates,
-            occupied,
-            teamPlaced,
-            minDistance,
-            maxTeammateDistance,
-          )
-
-          if (!position) {
-            return false
-          }
-
-          placedPositions.set(player.id, position)
-          occupied.push(position)
-          teamPlaced.push(position)
-        }
-      }
-
-      return placedPositions.size === gamePlayers.length
-    }
-
-    let placed = false
-    for (const ringBand of ringBandsToTry) {
-      for (const arcSpan of arcSpansToTry) {
-        if (tryPlaceTeams(true, ringBand, arcSpan)) {
-          placed = true
-          break
-        }
-        if (tryPlaceTeams(false, ringBand, arcSpan)) {
-          placed = true
-          break
-        }
-      }
-      if (placed) break
-    }
-
-    if (!placed) {
+    if (ringPositions.length === 0) {
       return []
     }
 
-    return gamePlayers
-      .map((player) => placedPositions.get(player.id))
-      .filter((pos): pos is { x: number; y: number } => !!pos)
+    const minGap = 4
+    const totalPlayers = teamIDs.reduce(
+      (sum, teamID) => sum + (teamMap.get(teamID)?.length || 0),
+      0,
+    )
+    if (totalPlayers === 0) {
+      return []
+    }
+
+    const maxAttempts = Math.min(12, ringPositions.length)
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const teamInfo = this.shuffleArray(
+        teamIDs.map((teamID) => ({
+          teamID,
+          players: this.shuffleArray(teamMap.get(teamID) || []),
+        })),
+      )
+
+      const availableSlots = ringPositions.length - teamCount * minGap
+      if (availableSlots <= 0) {
+        return []
+      }
+
+      const segmentLengths = this.calculateTeamSegmentLengths(
+        teamInfo.map((team) => team.players.length),
+        availableSlots,
+      )
+      if (!segmentLengths) {
+        return []
+      }
+
+      const rotation = Math.floor(Math.random() * ringPositions.length)
+      const rotatedRing = [
+        ...ringPositions.slice(rotation),
+        ...ringPositions.slice(0, rotation),
+      ]
+
+      const segments = this.buildTeamSegments(teamInfo, segmentLengths, rotatedRing, minGap)
+      if (!segments) {
+        continue
+      }
+
+      const placedPositions = new Map<string, { x: number; y: number }>()
+      const occupied: { x: number; y: number; teamID: string }[] = []
+      let failed = false
+
+      for (const segment of segments) {
+        const candidates = segment.positions.filter((pos) =>
+          this.isValidSpawnPosition(pos, false, boardWidth, boardHeight),
+        )
+        const block = this.findContiguousBlock(
+          candidates,
+          segment.players.length,
+          occupied,
+          minDistance,
+          segment.teamID,
+        )
+        if (!block) {
+          failed = true
+          break
+        }
+
+        block.forEach((pos, index) => {
+          const player = segment.players[index]
+          if (!player) return
+          placedPositions.set(player.id, pos)
+          occupied.push({ ...pos, teamID: segment.teamID })
+        })
+      }
+
+      if (!failed && placedPositions.size === gamePlayers.length) {
+        return gamePlayers
+          .map((player) => placedPositions.get(player.id))
+          .filter((pos): pos is { x: number; y: number } => !!pos)
+      }
+    }
+
+    return []
   }
 
   private getOrderedTeamIDs(
@@ -1238,134 +1205,138 @@ export class SnekProcessor extends GameProcessor {
     return ordered
   }
 
-  private getTeamRingCenters(
-    teamCount: number,
-    center: { x: number; y: number },
-    ringRadius: number,
-  ): { x: number; y: number }[] {
-    if (teamCount === 0) return []
-
-    const targetArc = 5
-    const startAngle = -Math.PI / 4
-    const angleStep =
-      teamCount === 2
-        ? Math.min(Math.PI * 0.75, targetArc / Math.max(1, ringRadius))
-        : (2 * Math.PI) / teamCount
-
-    return Array.from({ length: teamCount }, (_, index) => {
-      const angle = startAngle + angleStep * index
-      const rawX = Math.round(center.x + ringRadius * Math.cos(angle))
-      const rawY = Math.round(center.y + ringRadius * Math.sin(angle))
-      return { x: rawX, y: rawY }
-    })
-  }
-
-  private findNearestValidPosition(
-    target: { x: number; y: number },
-    occupied: { x: number; y: number }[],
-    requireParity: boolean,
-    minDistance: number,
+  private getSquareRingPositions(
     boardWidth: number,
     boardHeight: number,
-    center: { x: number; y: number },
-    ringRadius: number,
-    ringBand: number,
-    arcAngle: number,
-    arcSpan: number,
-  ): { x: number; y: number } | null {
-    const maxRadius = Math.max(boardWidth, boardHeight)
-    for (let radius = 0; radius <= maxRadius; radius++) {
-      for (let dx = -radius; dx <= radius; dx++) {
-        const dy = radius - Math.abs(dx)
-        const candidates = [
-          { x: target.x + dx, y: target.y + dy },
-          { x: target.x + dx, y: target.y - dy },
-        ]
-        for (const candidate of candidates) {
-          if (!this.isValidSpawnPosition(candidate, requireParity, boardWidth, boardHeight)) {
-            continue
-          }
-          if (
-            !this.isOnRing(candidate, center, ringRadius, ringBand)
-          ) {
-            continue
-          }
-          if (!this.isWithinArc(candidate, center, arcAngle, arcSpan)) {
-            continue
-          }
-          if (this.isTooClose(candidate, occupied, minDistance)) {
-            continue
-          }
-          return candidate
-        }
-      }
+    inset: number,
+  ): { x: number; y: number }[] {
+    const minX = inset
+    const minY = inset
+    const maxX = boardWidth - inset - 1
+    const maxY = boardHeight - inset - 1
+    if (minX >= maxX || minY >= maxY) {
+      return []
     }
-    return null
-  }
 
-  private getClusterCandidates(
-    center: { x: number; y: number },
-    maxDistance: number,
-    requireParity: boolean,
-    boardWidth: number,
-    boardHeight: number,
-    ringCenter: { x: number; y: number },
-    ringRadius: number,
-    ringBand: number,
-    arcAngle: number,
-    arcSpan: number,
-  ): { x: number; y: number }[] {
     const positions: { x: number; y: number }[] = []
-    const seen = new Set<string>()
-    for (let distance = 0; distance <= maxDistance; distance++) {
-      for (let dx = -distance; dx <= distance; dx++) {
-        const dy = distance - Math.abs(dx)
-        const candidates = [
-          { x: center.x + dx, y: center.y + dy },
-          { x: center.x + dx, y: center.y - dy },
-        ]
-        for (const candidate of candidates) {
-          if (!this.isValidSpawnPosition(candidate, requireParity, boardWidth, boardHeight)) {
-            continue
-          }
-          if (!this.isOnRing(candidate, ringCenter, ringRadius, ringBand)) {
-            continue
-          }
-          if (!this.isWithinArc(candidate, ringCenter, arcAngle, arcSpan)) {
-            continue
-          }
-          const key = `${candidate.x},${candidate.y}`
-          if (seen.has(key)) continue
-          seen.add(key)
-          positions.push(candidate)
-        }
-      }
+    for (let x = minX; x <= maxX; x++) {
+      positions.push({ x, y: minY })
     }
+    for (let y = minY + 1; y <= maxY; y++) {
+      positions.push({ x: maxX, y })
+    }
+    for (let x = maxX - 1; x >= minX; x--) {
+      positions.push({ x, y: maxY })
+    }
+    for (let y = maxY - 1; y > minY; y--) {
+      positions.push({ x: minX, y })
+    }
+
     return positions
   }
 
-  private selectClusterPosition(
-    candidates: { x: number; y: number }[],
-    occupied: { x: number; y: number }[],
-    teamPlaced: { x: number; y: number }[],
-    minDistance: number,
-    maxTeammateDistance: number,
-  ): { x: number; y: number } | null {
-    for (const candidate of candidates) {
-      if (this.isTooClose(candidate, occupied, minDistance)) {
-        continue
-      }
-      if (teamPlaced.length > 0) {
-        const nearestTeammateDistance = Math.min(
-          ...teamPlaced.map((pos) => this.getManhattanDistance(candidate, pos)),
-        )
-        if (nearestTeammateDistance > maxTeammateDistance) {
-          continue
-        }
-      }
-      return candidate
+  private calculateTeamSegmentLengths(
+    teamSizes: number[],
+    availableSlots: number,
+  ): number[] | null {
+    const minPerTeam = teamSizes.map((size) => Math.max(size, 1))
+    const minTotal = minPerTeam.reduce((sum, len) => sum + len, 0)
+    if (minTotal > availableSlots) {
+      return null
     }
+
+    const totalPlayers = teamSizes.reduce((sum, size) => sum + size, 0)
+    let remaining = availableSlots - minTotal
+    const lengths = minPerTeam.map((len, index) => {
+      if (remaining <= 0) return len
+      const extra = Math.floor((remaining * teamSizes[index]) / totalPlayers)
+      remaining -= extra
+      return len + extra
+    })
+
+    const order = this.shuffleArray(teamSizes.map((_size, index) => index))
+    let pointer = 0
+    while (remaining > 0) {
+      lengths[order[pointer % order.length]] += 1
+      remaining -= 1
+      pointer += 1
+    }
+
+    return lengths
+  }
+
+  private buildTeamSegments(
+    teamInfo: { teamID: string; players: GamePlayer[] }[],
+    segmentLengths: number[],
+    ringPositions: { x: number; y: number }[],
+    gap: number,
+  ): { teamID: string; players: GamePlayer[]; positions: { x: number; y: number }[] }[] | null {
+    const segments: { teamID: string; players: GamePlayer[]; positions: { x: number; y: number }[] }[] = []
+    let cursor = 0
+    for (let i = 0; i < teamInfo.length; i++) {
+      const length = segmentLengths[i]
+      if (cursor + length > ringPositions.length) {
+        return null
+      }
+      const positions = ringPositions.slice(cursor, cursor + length)
+      segments.push({
+        teamID: teamInfo[i].teamID,
+        players: teamInfo[i].players,
+        positions,
+      })
+      cursor += length + gap
+    }
+    return segments
+  }
+
+  private findContiguousBlock(
+    positions: { x: number; y: number }[],
+    blockSize: number,
+    occupied: { x: number; y: number; teamID: string }[],
+    minDistance: number,
+    teamID: string,
+  ): { x: number; y: number }[] | null {
+    if (blockSize <= 0) return []
+    if (positions.length < blockSize) return null
+
+    const startIndices = this.shuffleArray(
+      Array.from({ length: positions.length - blockSize + 1 }, (_, i) => i),
+    )
+
+    for (const start of startIndices) {
+      const block = positions.slice(start, start + blockSize)
+      const valid = block.every((pos) =>
+        this.isFarFromOtherTeams(pos, occupied, minDistance, teamID),
+      )
+      if (valid) {
+        return block
+      }
+    }
+
     return null
+  }
+
+  private isFarFromOtherTeams(
+    position: { x: number; y: number },
+    occupied: { x: number; y: number; teamID: string }[],
+    minDistance: number,
+    teamID: string,
+  ): boolean {
+    return occupied.every((other) => {
+      if (other.teamID === teamID) return true
+      return this.getManhattanDistance(position, other) >= minDistance
+    })
+  }
+
+  private shuffleArray<T>(items: T[]): T[] {
+    const copy = [...items]
+    for (let i = copy.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1))
+      const temp = copy[i]
+      copy[i] = copy[j]
+      copy[j] = temp
+    }
+    return copy
   }
 
   private isValidSpawnPosition(
@@ -1403,42 +1374,6 @@ export class SnekProcessor extends GameProcessor {
     b: { x: number; y: number },
   ): number {
     return Math.abs(a.x - b.x) + Math.abs(a.y - b.y)
-  }
-
-  private isOnRing(
-    position: { x: number; y: number },
-    center: { x: number; y: number },
-    ringRadius: number,
-    ringBand: number,
-  ): boolean {
-    const distance = this.getManhattanDistance(position, center)
-    return distance >= ringRadius - ringBand && distance <= ringRadius + ringBand
-  }
-
-  private isWithinArc(
-    position: { x: number; y: number },
-    center: { x: number; y: number },
-    arcAngle: number,
-    arcSpan: number,
-  ): boolean {
-    const angle = this.getAngle(center, position)
-    const delta = this.getAngleDelta(angle, arcAngle)
-    return Math.abs(delta) <= arcSpan
-  }
-
-  private getAngle(
-    center: { x: number; y: number },
-    position: { x: number; y: number },
-  ): number {
-    const angle = Math.atan2(position.y - center.y, position.x - center.x)
-    return angle >= 0 ? angle : angle + 2 * Math.PI
-  }
-
-  private getAngleDelta(angle: number, reference: number): number {
-    let delta = angle - reference
-    if (delta > Math.PI) delta -= 2 * Math.PI
-    if (delta < -Math.PI) delta += 2 * Math.PI
-    return delta
   }
 
   private getMidpoints(
