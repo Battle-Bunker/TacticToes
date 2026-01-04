@@ -28,3 +28,5 @@ firebase-debug.log
 firestore-debug.log
 .firebase
 attached_assets/
+node_modules/
+.npm/
