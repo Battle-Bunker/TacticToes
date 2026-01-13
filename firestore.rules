@@ -100,7 +100,14 @@ service cloud.firestore {
         botData.capabilities is list && botData.capabilities.size() > 0 && botData.capabilities.size() < 10 &&
         botData.emoji is string && botData.emoji.size() > 0 && botData.emoji.size() < 10 &&
         botData.colour is string && botData.colour.matches('hsl\\([0-9]+(\\.[0-9]+)?,\\s*[0-9]+(\\.[0-9]+)?%,\\s*[0-9]+(\\.[0-9]+)?%\\)') &&
-        (botData.createdAt == request.time);
+        (!botData.keys().hasAny(['public']) || botData.public is bool);
+    }
+
+    function isValidBotUpdate(botData, botId, currentData) {
+      return isValidBotData(botData, botId) &&
+        currentData.owner == request.auth.uid &&
+        botData.owner == currentData.owner &&
+        botData.createdAt == currentData.createdAt;
     }
 
     // =========== USERS COLLECTION ===========
@@ -150,7 +157,10 @@ service cloud.firestore {
       allow read: if true;
       allow create: if isAuthenticated() &&
                        request.resource.data.owner == request.auth.uid &&
-                       isValidBotData(request.resource.data, botId);
+                       isValidBotData(request.resource.data, botId) &&
+                       request.resource.data.createdAt == request.time;
+      allow update: if isAuthenticated() &&
+                       isValidBotUpdate(request.resource.data, botId, resource.data);
       allow delete: if isAuthenticated() && resource.data.owner == request.auth.uid;
     }
 
