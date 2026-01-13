@@ -135,8 +135,9 @@ export const GameStateProvider: React.FC<{
         }
 
         const gameData = docSnapshot.data() as GameState
-        setGameState(gameData)
-        setLatestTurn(gameData.turns[gameData.turns.length - 1])
+        const safeTurns = Array.isArray(gameData.turns) ? gameData.turns : []
+        setGameState({ ...gameData, turns: safeTurns })
+        setLatestTurn(safeTurns.length ? safeTurns[safeTurns.length - 1] : null)
 
         if (!docSnapshot.metadata.fromCache) {
           clearQueryTimeout()

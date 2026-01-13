@@ -18,7 +18,9 @@ import { BotHealthProvider, useBotHealth } from "../../context/BotHealthContext"
 import {
   Box,
   Button,
+  Checkbox,
   FormControl,
+  FormControlLabel,
   InputLabel,
   MenuItem,
   Select,
@@ -58,6 +60,8 @@ const GameSetup: React.FC = () => {
     gameState,
   } = useGameStateContext()
 
+  if (!gameSetup) return null
+
   const [secondsPerTurn, setSecondsPerTurn] = useState<string>("10")
   const [RulesComponent, setRulesComponent] = useState<React.FC | null>(null)
   const [boardSize, setBoardSize] = useState<BoardSize>("medium")
@@ -68,6 +72,9 @@ const GameSetup: React.FC = () => {
   const [maxTurns, setMaxTurns] = useState<number>(gameSetup?.maxTurns ?? 100)
   const [hazardPercentage, setHazardPercentage] = useState<number>(
     gameSetup?.hazardPercentage ?? 0,
+  )
+  const [teamClustersEnabled, setTeamClustersEnabled] = useState<boolean>(
+    gameSetup?.teamClustersEnabled ?? false,
   )
   
   const { getBotStatus } = useBotHealth()
@@ -112,6 +119,8 @@ const GameSetup: React.FC = () => {
       if (gameSetup.hazardPercentage !== undefined) {
         setHazardPercentage(gameSetup.hazardPercentage)
       }
+
+      setTeamClustersEnabled(gameSetup.teamClustersEnabled ?? false)
 
       //  Update teams
       if (gameSetup.teams) {
@@ -280,6 +289,13 @@ const GameSetup: React.FC = () => {
       hazardPercentage: sanitizedValue,
     })
     setHazardPercentage(sanitizedValue)
+  }
+
+  const handleTeamClustersToggle = async (enabled: boolean) => {
+    setTeamClustersEnabled(enabled)
+    await updateDoc(gameDocRef, {
+      teamClustersEnabled: enabled,
+    })
   }
 
   // Handler for selecting game type
@@ -553,6 +569,36 @@ const GameSetup: React.FC = () => {
               onMaxTurnsChange={handleMaxTurnsChange}
               hazardPercentage={hazardPercentage}
               onHazardPercentageChange={handleHazardPercentageChange}
+            />
+          </Box>
+        </FormControl>
+      )}
+
+      {/* Team Cluster Configuration - Only show for team games */}
+      {(gameType === "teamsnek" || gameType === "kingsnek") && (
+        <FormControl fullWidth variant="outlined" sx={{ mt: 2 }}>
+          <InputLabel shrink sx={{ backgroundColor: "white", px: 1 }}>
+            Team Cluster
+          </InputLabel>
+          <Box
+            sx={{
+              border: "2px solid black",
+              padding: 2,
+              borderRadius: "0px",
+              minHeight: "56px",
+              display: "flex",
+              alignItems: "center",
+            }}
+          >
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={teamClustersEnabled}
+                  onChange={(e) => handleTeamClustersToggle(e.target.checked)}
+                  disabled={started}
+                />
+              }
+              label="Team cluster"
             />
           </Box>
         </FormControl>

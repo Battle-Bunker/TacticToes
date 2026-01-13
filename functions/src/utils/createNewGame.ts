@@ -38,6 +38,7 @@ export async function createNewGame(
           startRequested: false,
           started: false,
           hazardPercentage: 0,
+          teamClustersEnabled: false,
           timeCreated: Timestamp.now(),
         }
 

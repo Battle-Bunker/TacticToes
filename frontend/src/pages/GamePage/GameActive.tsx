@@ -43,17 +43,27 @@ const GameActive: React.FC = () => {
 
   if (!gameState) return null;
 
-  const currentTurn = gameState.turns[gameState.turns.length - 1];
+  const currentTurn = gameState.turns?.[gameState.turns.length - 1];
   const playerInCurrentGame = gameSetup?.gamePlayers.find(
     (player) => player.id === userID,
   );
 
   const scoringUnit = currentTurn?.scoringUnit || "individual";
+  const showTeamClusterFallback = Boolean(currentTurn?.teamClusterFallback);
+
 
   // Filter players to only show those in the current game
   const gamePlayers = players.filter((player) =>
     gameSetup?.gamePlayers.some((gp) => gp.id === player.id),
   );
+
+  if (!currentTurn) {
+    return (
+      <Stack spacing={2} pt={2}>
+        <Alert severity="info">Waiting for game data.</Alert>
+      </Stack>
+    );
+  }
 
   return (
     <Stack spacing={2} pt={2}>
@@ -69,11 +79,17 @@ const GameActive: React.FC = () => {
           />
         )}
 
-      {/* Alert if player joined late */}
-      {!playerInCurrentGame && (
+      {/* Alert if player joined late or team clusters failed */}
+      {showTeamClusterFallback ? (
         <Alert severity="warning">
-          This game started before you joined. Watch until the next game starts.
+          Team cluster spawn failed to fit all players. Standard spawn was used.
         </Alert>
+      ) : (
+        !playerInCurrentGame && (
+          <Alert severity="warning">
+            This game started before you joined. Watch until the next game starts.
+          </Alert>
+        )
       )}
       {/* Alert if internet error */}
       {connectivityStatus === "disconnected" && (

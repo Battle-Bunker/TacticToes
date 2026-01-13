@@ -15,6 +15,7 @@
 // }
 
 describe("checkWinCondition", () => {
+  test.todo("add checkWinCondition coverage once helper is finalized")
   //   test("should work", () => {
   //     const board = [
   //       "X",

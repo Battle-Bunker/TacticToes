@@ -195,3 +195,7 @@
 // //         expect(turn.eliminatedTeams).toEqual([])
 // //       })
 // // })
+
+describe("TeamSnekProcessor", () => {
+  test.todo("add TeamSnekProcessor coverage")
+})

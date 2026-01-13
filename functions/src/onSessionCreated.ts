@@ -25,6 +25,7 @@ export const onSessionCreated = functions.firestore
         startRequested: false,
         started: false,
         hazardPercentage: 0,
+        teamClustersEnabled: false,
         timeCreated: FieldValue.serverTimestamp(),
       }
       await createNewGame(transaction, sessionID, defaultSetup)

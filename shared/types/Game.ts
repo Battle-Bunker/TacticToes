@@ -1,6 +1,7 @@
   // @shared/types/Game.ts
 
-  import { FieldValue, Timestamp } from "firebase-admin/firestore"
+  export type Timestamp = any
+  export type FieldValue = any
 
   // Define the Winner interface
   export interface Winner {
@@ -67,6 +68,7 @@
     maxTurns?: number // Default: 100
     hazardPercentage?: number // Percentage of the board to fill with hazards (defaults to 0)
     gameMode?: "individual" | "team"
+    teamClustersEnabled?: boolean
   }
 
   // Updated GameState interface with the new 'winners' structure
@@ -121,6 +123,7 @@
     eliminatedTeams?: string[] // Optional: only for team games
     turnNumber?: number // Optional: only for team games
     scoringUnit?: 'individual' | 'team' // How scores/winners are aggregated
+    teamClusterFallback?: boolean // Optional: team clusters requested but fell back
   }
 
   export interface Clash {
