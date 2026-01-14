@@ -1,4 +1,4 @@
-import { Box, SxProps, Theme } from "@mui/material"
+import { Box, SxProps, Theme, Tooltip } from "@mui/material"
 import React from "react"
 import { GameLogicProps, GameLogicReturn } from "./GameGrid"
 
@@ -16,11 +16,24 @@ interface CellProps {
   sx?: SxProps<Theme>
   borders: BorderStyles
   onClick?: () => void
+  onMouseDown?: (event: React.MouseEvent<HTMLDivElement>) => void
+  onContextMenu?: (event: React.MouseEvent<HTMLDivElement>) => void
+  title?: string
 }
 
-const Cell: React.FC<CellProps> = ({ children, sx, onClick }) => (
+const Cell: React.FC<CellProps> = ({
+  children,
+  sx,
+  onClick,
+  onMouseDown,
+  onContextMenu,
+  title,
+}) => (
   <Box
     onClick={onClick}
+    onMouseDown={onMouseDown}
+    onContextMenu={onContextMenu}
+    title={title}
     sx={{
       position: "relative",
       width: "100%",
@@ -32,6 +45,8 @@ const Cell: React.FC<CellProps> = ({ children, sx, onClick }) => (
   >
     <Box
       onClick={onClick}
+      onMouseDown={onMouseDown}
+      onContextMenu={onContextMenu}
       sx={{
         position: "relative",
         width: "100%",
@@ -90,6 +105,7 @@ const GameLogic = ({
   players,
   cellSize,
   selectedTurnIndex,
+  onSnakeHeadHoldChange,
 }: GameLogicProps): GameLogicReturn => {
   const cellContentMap: { [index: number]: JSX.Element } = {}
   const cellBackgroundMap: { [index: number]: string } = {}
@@ -127,17 +143,19 @@ const GameLogic = ({
 
   const getSnakeColor = (playerID: string): string => {
     const playerInfo = players.find((p) => p.id === playerID)
-    
+    const gamePlayers = Array.isArray(gameState.setup.gamePlayers)
+      ? gameState.setup.gamePlayers
+      : []
+    const teams = Array.isArray(gameState.setup.teams) ? gameState.setup.teams : []
+
     if (
       (gameState.setup.gameType === "teamsnek" ||
         gameState.setup.gameType === "kingsnek") &&
-      gameState.setup.teams
+      teams.length > 0
     ) {
-      const gamePlayer = gameState.setup.gamePlayers.find(
-        (gp) => gp.id === playerID,
-      )
+      const gamePlayer = gamePlayers.find((gp) => gp.id === playerID)
       if (gamePlayer?.teamID) {
-        const team = gameState.setup.teams.find((t) => t.id === gamePlayer.teamID)
+        const team = teams.find((t) => t.id === gamePlayer.teamID)
         if (team) {
           return team.color
         }
@@ -145,6 +163,33 @@ const GameLogic = ({
     }
 
     return playerInfo?.colour || "white"
+  }
+
+  const getSnakeTooltip = (playerID: string): string => {
+    const playerInfo = players.find((p) => p.id === playerID)
+    const gamePlayers = Array.isArray(gameState.setup.gamePlayers)
+      ? gameState.setup.gamePlayers
+      : []
+    const teams = Array.isArray(gameState.setup.teams) ? gameState.setup.teams : []
+    const gamePlayer = gamePlayers.find((gp) => gp.id === playerID)
+    const playerLabel = `${playerInfo?.name || "Unknown"}${playerInfo?.emoji ? ` ${playerInfo.emoji}` : ""}`
+
+    if (
+      (gameState.setup.gameType === "teamsnek" ||
+        gameState.setup.gameType === "kingsnek") &&
+      teams.length > 0 &&
+      gamePlayer?.teamID
+    ) {
+      const team = teams.find((t) => t.id === gamePlayer.teamID)
+      const teamLabel = team?.name || "Unknown team"
+      const kingLabel =
+        gameState.setup.gameType === "kingsnek" && gamePlayer?.isKing
+          ? " (King)"
+          : ""
+      return `${playerLabel} - ${teamLabel}${kingLabel}`
+    }
+
+    return playerLabel
   }
 
   // Helper function to determine snake segment borders
@@ -247,19 +292,41 @@ const GameLogic = ({
         const gamePlayer = gameState.setup.gamePlayers.find(gp => gp.id === playerID)
         const isKing = gameState.setup.gameType === 'kingsnek' && gamePlayer?.isKing
         const displayEmoji = isKing ? "👑" : (playerInfo?.emoji || "⭕")
-        
+        const tooltipText = getSnakeTooltip(playerID)
+        const handleHeadMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
+          if (event.button !== 2) return
+          event.preventDefault()
+          event.stopPropagation()
+          onSnakeHeadHoldChange?.(playerID)
+          const handleMouseUp = () => {
+            onSnakeHeadHoldChange?.(null)
+            window.removeEventListener("mouseup", handleMouseUp)
+          }
+          window.addEventListener("mouseup", handleMouseUp)
+        }
+
+        const handleHeadContextMenu = (event: React.MouseEvent<HTMLDivElement>) => {
+          event.preventDefault()
+        }
+
         content = (
-          <Cell
-            key={`head-${playerID}-${position}-${selectedTurnIndex}`}
-            sx={commonBoxStyle}
-            borders={borders}
-          >
-            <span
-              style={{ fontSize: cellSize * 0.8, lineHeight: 1, zIndex: 2 }}
-            >
-              {displayEmoji}
-            </span>
-          </Cell>
+          <Tooltip title={tooltipText} arrow>
+            <Box sx={{ width: "100%", height: "100%" }}>
+              <Cell
+                key={`head-${playerID}-${position}-${selectedTurnIndex}`}
+                sx={commonBoxStyle}
+                borders={borders}
+                onMouseDown={handleHeadMouseDown}
+                onContextMenu={handleHeadContextMenu}
+              >
+                <span
+                  style={{ fontSize: cellSize * 0.8, lineHeight: 1, zIndex: 2 }}
+                >
+                  {displayEmoji}
+                </span>
+              </Cell>
+            </Box>
+          </Tooltip>
         )
       } else if (positions[1] === position) {
         // Snake length on the second body piece
