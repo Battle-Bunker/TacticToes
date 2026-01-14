@@ -29,6 +29,7 @@ export interface GameLogicProps {
   gridWidth: number
   cellSize: number
   selectedTurnIndex: number
+  onSnakeHeadHoldChange?: (playerID: string | null) => void
 }
 
 export interface ClashInfo {
@@ -43,7 +44,9 @@ export interface GameLogicReturn {
   clashesAtPosition: { [index: number]: ClashInfo }
 }
 
-const GameGrid: React.FC = () => {
+const GameGrid: React.FC<{
+  onSnakeHeadHoldChange?: (playerID: string | null) => void
+}> = ({ onSnakeHeadHoldChange }) => {
   const {
     gameState,
     gameSetup,
@@ -160,6 +163,7 @@ const GameGrid: React.FC = () => {
         gridWidth,
         cellSize,
         selectedTurnIndex: selectedTurnIndex >= 0 ? selectedTurnIndex : 0,
+        onSnakeHeadHoldChange,
       }
 
       setGameLogicReturn(

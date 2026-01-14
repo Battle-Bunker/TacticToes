@@ -1,6 +1,6 @@
 // src/components/GameActive.tsx
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useUser } from "../../context/UserContext";
 
 import {
@@ -35,11 +35,23 @@ const GameActive: React.FC = () => {
 
   const [isRulesDialogOpen, setIsRulesDialogOpen] = useState(true); // Show rules dialog initially
   const [isRulesAccepted, setIsRulesAccepted] = useState(false); // Track if rules have been accepted
+  const [highlightedSnakePlayerId, setHighlightedSnakePlayerId] = useState<string | null>(null);
 
   const handleRulesAccepted = () => {
     setIsRulesAccepted(true);
     setIsRulesDialogOpen(false);
   };
+
+  useEffect(() => {
+    if (
+      gameSetup?.gameType !== "snek" &&
+      gameSetup?.gameType !== "teamsnek" &&
+      gameSetup?.gameType !== "kingsnek" &&
+      highlightedSnakePlayerId
+    ) {
+      setHighlightedSnakePlayerId(null);
+    }
+  }, [gameSetup?.gameType, highlightedSnakePlayerId]);
 
   if (!gameState) return null;
 
@@ -50,7 +62,6 @@ const GameActive: React.FC = () => {
 
   const scoringUnit = currentTurn?.scoringUnit || "individual";
   const showTeamClusterFallback = Boolean(currentTurn?.teamClusterFallback);
-
 
   // Filter players to only show those in the current game
   const gamePlayers = players.filter((player) =>
@@ -114,7 +125,7 @@ const GameActive: React.FC = () => {
       )}
 
       {/* Game Grid */}
-      {<GameGrid />}
+      {<GameGrid onSnakeHeadHoldChange={setHighlightedSnakePlayerId} />}
 
       {/* Players/Teams Table */}
       {scoringUnit === "team" && gameSetup?.teams ? (
@@ -173,10 +184,18 @@ const GameActive: React.FC = () => {
             </TableHead>
             <TableBody>
               {gamePlayers.map((player) => {
+                const isHighlighted =
+                  gameSetup?.gameType === "snek" &&
+                  highlightedSnakePlayerId === player.id;
                 return (
                   <TableRow
                     key={player.id}
-                    sx={{ backgroundColor: player.colour }}
+                    sx={{
+                      backgroundColor: player.colour,
+                      boxShadow: isHighlighted
+                        ? "inset 0 0 0 3px #000"
+                        : "none",
+                    }}
                   >
                     <TableCell>
                       {player.name} {player.emoji}
