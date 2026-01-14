@@ -26,6 +26,7 @@ interface PlayerConfigurationProps {
   getBotStatus?: (botId: string) => "unknown" | "loading" | "alive" | "dead" | "error";
   gameType?: GameType;
   onKingToggle?: (playerID: string, teamID: string) => void;
+  playerNameOverrides?: Record<string, string>;
 }
 
 export const PlayerConfiguration: React.FC<PlayerConfigurationProps> = ({
@@ -39,6 +40,7 @@ export const PlayerConfiguration: React.FC<PlayerConfigurationProps> = ({
   getBotStatus,
   gameType,
   onKingToggle,
+  playerNameOverrides,
 }) => {
   const isKingSnek = gameType === 'kingsnek';
   // Group players by team
@@ -96,10 +98,11 @@ export const PlayerConfiguration: React.FC<PlayerConfigurationProps> = ({
                     (p) => p.id === gamePlayer.id
                   );
                   if (!player) return null;
+                  const displayName = playerNameOverrides?.[player.id] || player.name;
                   return (
                     <TableRow key={player.id}>
                       <TableCell sx={{ backgroundColor: player.colour }}>
-                        {player.name} {player.emoji}
+                        {displayName} {player.emoji}
                         {gamePlayer.type === 'bot' && getBotStatus?.(player.id) === 'dead' && ' (DEAD)'}
                       </TableCell>
                       <TableCell sx={{ backgroundColor: player.colour }}>
@@ -196,10 +199,11 @@ export const PlayerConfiguration: React.FC<PlayerConfigurationProps> = ({
                     (p) => p.id === gamePlayer.id
                   );
                   if (!player) return null;
+                  const displayName = playerNameOverrides?.[player.id] || player.name;
                   return (
                     <TableRow key={player.id}>
                       <TableCell sx={{ backgroundColor: player.colour }}>
-                        {player.name} {player.emoji}
+                        {displayName} {player.emoji}
                         {gamePlayer.type === 'bot' && getBotStatus?.(player.id) === 'dead' && ' (DEAD)'}
                       </TableCell>
                       <TableCell sx={{ backgroundColor: player.colour }}>
