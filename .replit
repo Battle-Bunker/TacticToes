@@ -4,6 +4,7 @@ expertMode = true
 
 [nix]
 channel = "stable-25_05"
+packages = ["firebase-tools"]
 
 [workflows]
 runButton = "Project"
@@ -99,8 +100,8 @@ externalPort = 8000
 
 [deployment]
 build = ["sh", "-c", "cd frontend && npm run build"]
-run = ["sh", "-c", "cd frontend && npm run preview -- --port 5000 --host 0.0.0.0"]
-deploymentTarget = "cloudrun"
+deploymentTarget = "static"
+publicDir = "frontend/dist"
 
 [userenv]
 
