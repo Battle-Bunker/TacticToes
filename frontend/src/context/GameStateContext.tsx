@@ -12,14 +12,12 @@ import {
 } from "@shared/types/Game"
 import {
   addDoc,
-  and,
   arrayUnion,
   collection,
   doc,
   DocumentSnapshot,
   limit,
   onSnapshot,
-  or,
   orderBy,
   query,
   QuerySnapshot,
