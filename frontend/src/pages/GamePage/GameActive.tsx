@@ -62,6 +62,7 @@ const GameActive: React.FC = () => {
 
   const scoringUnit = currentTurn?.scoringUnit || "individual";
   const showTeamClusterFallback = Boolean(currentTurn?.teamClusterFallback);
+  const alivePlayers = currentTurn?.alivePlayers || [];
 
   // Filter players to only show those in the current game
   const gamePlayers = players.filter((player) =>
@@ -156,7 +157,7 @@ const GameActive: React.FC = () => {
                       {teamPlayers.map((p) => (
                         <span key={p.id}>
                           {p.emoji} {p.name}
-                          {latestMoveStatus?.movedPlayerIDs.includes(p.id)
+                          {latestMoveStatus?.movedPlayerIDs?.includes(p.id)
                             ? " ✓"
                             : " ⏳"}
                           {teamPlayers.indexOf(p) < teamPlayers.length - 1
@@ -201,12 +202,12 @@ const GameActive: React.FC = () => {
                       {player.name} {player.emoji}
                     </TableCell>
                     <TableCell align="right">
-                      {latestMoveStatus?.movedPlayerIDs.includes(player.id)
+                      {latestMoveStatus?.movedPlayerIDs?.includes(player.id)
                         ? "yeah"
                         : "nah"}
                     </TableCell>
                     <TableCell align="right">
-                      {currentTurn.scores[player.id]}
+                      {currentTurn.scores?.[player.id] ?? 0}
                     </TableCell>
                   </TableRow>
                 );
@@ -219,7 +220,7 @@ const GameActive: React.FC = () => {
       {/* Waiting Overlay */}
       {latestMoveStatus &&
         latestMoveStatus.moveNumber === gameState.turns.length - 1 &&
-        latestMoveStatus.movedPlayerIDs.includes(userID) && (
+        latestMoveStatus.movedPlayerIDs?.includes(userID) && (
           <Box
             sx={{
               position: "fixed",
@@ -239,7 +240,7 @@ const GameActive: React.FC = () => {
               Waiting for
               <br />
               {(() => {
-                const unmovePlayers = currentTurn.alivePlayers.filter(
+                const unmovePlayers = alivePlayers.filter(
                   (player) =>
                     !latestMoveStatus?.movedPlayerIDs?.includes(player),
                 );

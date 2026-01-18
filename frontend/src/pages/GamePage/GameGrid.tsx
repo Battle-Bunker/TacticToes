@@ -99,7 +99,7 @@ const GameGrid: React.FC<{
     if (!latestTurn || !gameState) return
 
     if (gameSetup?.started) {
-      const allowedMoves = latestTurn.allowedMoves[user.userID] || []
+      const allowedMoves = latestTurn.allowedMoves?.[user.userID] || []
       if (allowedMoves.includes(index)) {
         setSelectedSquare(index)
 

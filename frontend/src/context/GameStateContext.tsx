@@ -88,6 +88,7 @@ export const GameStateProvider: React.FC<{
   const [timeRemaining, setTimeRemaining] = useState<number>(0)
   const [selectedSquare, setSelectedSquare] = useState<number | null>(null)
   const [bots, setBots] = useState<Bot[]>([])
+  const [ownerNames, setOwnerNames] = useState<Record<string, string>>({})
   const [gameType, setGameType] = useState<GameType>("snek")
   const [connectivityStatus, setConnectivityStatus] = useState<'connected' | 'disconnected'>('connected')
   const [queryTimedOut, setQueryTimedOut] = useState<boolean>(false)
@@ -281,16 +282,10 @@ export const GameStateProvider: React.FC<{
 
   // Subscribe to the "bots" collection
   useEffect(() => {
-    if (!gameSetup?.gameType) return
+    if (!gameSetup?.gameType || userID === "") return
     const botsQuery = query(
       collection(db, "bots"),
-      and(
-        where("capabilities", "array-contains", gameSetup.gameType),
-        or(
-          where("public", "==", true),
-          where("owner", "==", userID)
-        )
-      )
+      where("capabilities", "array-contains", gameSetup.gameType),
     )
     let timeoutId: NodeJS.Timeout | null = null
 
@@ -316,7 +311,9 @@ export const GameStateProvider: React.FC<{
       (snapshot) => {
         updateConnectivityStatus(snapshot)
 
-        const botsData = snapshot.docs.map((doc) => doc.data() as Bot)
+        const botsData = snapshot.docs.map(
+          (doc) => ({ id: doc.id, ...(doc.data() as Omit<Bot, "id">) })
+        )
         setBots(botsData)
 
         if (!snapshot.metadata.fromCache) {
@@ -334,7 +331,69 @@ export const GameStateProvider: React.FC<{
       unsubscribe()
       clearQueryTimeout()
     }
-  }, [gameSetup?.gameType])
+  }, [gameSetup?.gameType, userID])
+
+  useEffect(() => {
+    if (bots.length === 0) {
+      setOwnerNames({})
+      return
+    }
+
+    const ownerIDs = Array.from(new Set(bots.map((bot) => bot.owner)))
+    const unsubscribers = ownerIDs.map((ownerID) => {
+      const userDocRef = doc(db, "users", ownerID)
+      return onSnapshot(userDocRef, (docSnapshot) => {
+        setOwnerNames((prev) => ({
+          ...prev,
+          [ownerID]: docSnapshot.exists()
+            ? (docSnapshot.data()?.name as string) || "Unknown"
+            : "Unknown",
+        }))
+      })
+    })
+
+    return () => {
+      unsubscribers.forEach((unsubscribe) => unsubscribe())
+    }
+  }, [bots])
+
+  const privateBotCountsByOwner = bots.reduce<Record<string, number>>(
+    (counts, bot) => {
+      if (!bot.public) {
+        counts[bot.owner] = (counts[bot.owner] ?? 0) + 1
+      }
+      return counts
+    },
+    {},
+  )
+
+  const privateBotIndexByOwner: Record<string, number> = {}
+
+  const botDisplayNameById = bots.reduce<Record<string, string>>(
+    (labels, bot) => {
+      if (!bot.public && bot.owner !== userID) {
+        const currentIndex = (privateBotIndexByOwner[bot.owner] ?? 0) + 1
+        privateBotIndexByOwner[bot.owner] = currentIndex
+        const suffix =
+          (privateBotCountsByOwner[bot.owner] ?? 0) > 1
+            ? ` ${currentIndex}`
+            : ""
+        const ownerName = ownerNames[bot.owner] || "Unknown"
+        labels[bot.id] = `${ownerName}'s Private bot${suffix}`
+        return labels
+      }
+
+      labels[bot.id] = bot.name
+      return labels
+    },
+    {},
+  )
+
+  const displayBots = bots.map((bot) => {
+    const displayName = botDisplayNameById[bot.id]
+    if (!displayName) return bot
+    return { ...bot, name: displayName }
+  })
 
   // Subscribe to player documents
   useEffect(() => {
@@ -606,10 +665,10 @@ export const GameStateProvider: React.FC<{
     error,
     gameID,
     timeRemaining,
-    bots,
+    bots: displayBots,
     gameType,
     setGameType,
-    players: [...humans, ...bots],
+    players: [...humans, ...displayBots],
     sessionName,
     gameSetup,
     latestMoveStatus,
