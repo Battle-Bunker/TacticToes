@@ -20,14 +20,12 @@ const GameLogic = ({
       clashesAtPosition,
     }
 
-  const { playerPieces, allowedMoves, clashes } = selectedTurn
+  const { playerPieces = {}, allowedMoves = {}, clashes = [] } = selectedTurn
 
   // Map clashes to positions
-  if (clashes) {
-    clashes.forEach((clash) => {
+  clashes.forEach((clash) => {
       clashesAtPosition[clash.index] = clash
-    })
-  }
+  })
 
   // Map allowed moves for all players
   Object.entries(allowedMoves).forEach(([, moves]) => {
@@ -52,7 +50,7 @@ const GameLogic = ({
   })
 
   // Place clashes
-  clashes?.forEach((clash) => {
+  clashes.forEach((clash) => {
     const position = clash.index
     cellContentMap[position] = (
       <span key={`clash-${position}`} style={{ fontSize: cellSize }}>

@@ -1,11 +1,12 @@
 // src/components/GameActive.tsx
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useUser } from "../../context/UserContext";
 
 import {
   Alert,
   Box,
+  Button,
   Stack,
   Table,
   TableBody,
@@ -15,10 +16,19 @@ import {
   TableRow,
   Typography,
 } from "@mui/material";
+import {
+  addDoc,
+  arrayUnion,
+  collection,
+  doc,
+  serverTimestamp,
+  updateDoc,
+} from "firebase/firestore";
 
 import { useGameStateContext } from "../../context/GameStateContext";
 import GameGrid from "./GameGrid";
 import UserRulesAccept from "./UserRuleAccept";
+import { db } from "../../firebaseConfig";
 
 const GameActive: React.FC = () => {
   const { userID } = useUser();
@@ -28,6 +38,8 @@ const GameActive: React.FC = () => {
     players,
     timeRemaining,
     selectedSquare,
+    sessionName,
+    gameID,
     latestMoveStatus,
     connectivityStatus,
     queryTimedOut,
@@ -35,11 +47,24 @@ const GameActive: React.FC = () => {
 
   const [isRulesDialogOpen, setIsRulesDialogOpen] = useState(true); // Show rules dialog initially
   const [isRulesAccepted, setIsRulesAccepted] = useState(false); // Track if rules have been accepted
+  const [highlightedSnakePlayerId, setHighlightedSnakePlayerId] = useState<string | null>(null);
+  const [isResigning, setIsResigning] = useState(false);
 
   const handleRulesAccepted = () => {
     setIsRulesAccepted(true);
     setIsRulesDialogOpen(false);
   };
+
+  useEffect(() => {
+    if (
+      gameSetup?.gameType !== "snek" &&
+      gameSetup?.gameType !== "teamsnek" &&
+      gameSetup?.gameType !== "kingsnek" &&
+      highlightedSnakePlayerId
+    ) {
+      setHighlightedSnakePlayerId(null);
+    }
+  }, [gameSetup?.gameType, highlightedSnakePlayerId]);
 
   if (!gameState) return null;
 
@@ -47,10 +72,53 @@ const GameActive: React.FC = () => {
   const playerInCurrentGame = gameSetup?.gamePlayers.find(
     (player) => player.id === userID,
   );
+  const canResign =
+    Boolean(userID) &&
+    playerInCurrentGame?.type === "human" &&
+    Boolean(currentTurn?.alivePlayers.includes(userID)) &&
+    (currentTurn?.winners.length || 0) === 0;
+  const hasMovedThisTurn =
+    latestMoveStatus?.moveNumber === gameState.turns.length - 1 &&
+    latestMoveStatus?.movedPlayerIDs.includes(userID);
+  const resignDisabled = !canResign || hasMovedThisTurn || isResigning;
 
   const scoringUnit = currentTurn?.scoringUnit || "individual";
   const showTeamClusterFallback = Boolean(currentTurn?.teamClusterFallback);
+  const alivePlayers = currentTurn?.alivePlayers || [];
 
+  const handleResign = async () => {
+    if (!canResign || !sessionName || !gameID) return;
+    if (!window.confirm("Resign from this game?")) return;
+
+    setIsResigning(true);
+    try {
+      const moveNumber = gameState.turns.length - 1;
+      const moveRef = collection(
+        db,
+        `sessions/${sessionName}/games/${gameID}/privateMoves`,
+      );
+      await addDoc(moveRef, {
+        gameID,
+        moveNumber,
+        playerID: userID,
+        move: -1,
+        action: "resign",
+        timestamp: serverTimestamp(),
+      });
+
+      const moveStatusDocRef = doc(
+        db,
+        `sessions/${sessionName}/games/${gameID}/moveStatuses/${moveNumber}`,
+      );
+      await updateDoc(moveStatusDocRef, {
+        movedPlayerIDs: arrayUnion(userID),
+      });
+    } catch (error) {
+      console.error("Error resigning from game:", error);
+    } finally {
+      setIsResigning(false);
+    }
+  };
 
   // Filter players to only show those in the current game
   const gamePlayers = players.filter((player) =>
@@ -113,8 +181,21 @@ const GameActive: React.FC = () => {
         <Typography>Tap a square to submit your move.</Typography>
       )}
 
+      {canResign && (
+        <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
+          <Button
+            color="error"
+            variant="contained"
+            onClick={handleResign}
+            disabled={resignDisabled}
+          >
+            {isResigning ? "Resigning..." : "Resign"}
+          </Button>
+        </Box>
+      )}
+
       {/* Game Grid */}
-      {<GameGrid />}
+      {<GameGrid onSnakeHeadHoldChange={setHighlightedSnakePlayerId} />}
 
       {/* Players/Teams Table */}
       {scoringUnit === "team" && gameSetup?.teams ? (
@@ -145,7 +226,7 @@ const GameActive: React.FC = () => {
                       {teamPlayers.map((p) => (
                         <span key={p.id}>
                           {p.emoji} {p.name}
-                          {latestMoveStatus?.movedPlayerIDs.includes(p.id)
+                          {latestMoveStatus?.movedPlayerIDs?.includes(p.id)
                             ? " ✓"
                             : " ⏳"}
                           {teamPlayers.indexOf(p) < teamPlayers.length - 1
@@ -173,21 +254,29 @@ const GameActive: React.FC = () => {
             </TableHead>
             <TableBody>
               {gamePlayers.map((player) => {
+                const isHighlighted =
+                  gameSetup?.gameType === "snek" &&
+                  highlightedSnakePlayerId === player.id;
                 return (
                   <TableRow
                     key={player.id}
-                    sx={{ backgroundColor: player.colour }}
+                    sx={{
+                      backgroundColor: player.colour,
+                      boxShadow: isHighlighted
+                        ? "inset 0 0 0 3px #000"
+                        : "none",
+                    }}
                   >
                     <TableCell>
                       {player.name} {player.emoji}
                     </TableCell>
                     <TableCell align="right">
-                      {latestMoveStatus?.movedPlayerIDs.includes(player.id)
+                      {latestMoveStatus?.movedPlayerIDs?.includes(player.id)
                         ? "yeah"
                         : "nah"}
                     </TableCell>
                     <TableCell align="right">
-                      {currentTurn.scores[player.id]}
+                      {currentTurn.scores?.[player.id] ?? 0}
                     </TableCell>
                   </TableRow>
                 );
@@ -200,7 +289,7 @@ const GameActive: React.FC = () => {
       {/* Waiting Overlay */}
       {latestMoveStatus &&
         latestMoveStatus.moveNumber === gameState.turns.length - 1 &&
-        latestMoveStatus.movedPlayerIDs.includes(userID) && (
+        latestMoveStatus.movedPlayerIDs?.includes(userID) && (
           <Box
             sx={{
               position: "fixed",
@@ -220,7 +309,7 @@ const GameActive: React.FC = () => {
               Waiting for
               <br />
               {(() => {
-                const unmovePlayers = currentTurn.alivePlayers.filter(
+                const unmovePlayers = alivePlayers.filter(
                   (player) =>
                     !latestMoveStatus?.movedPlayerIDs?.includes(player),
                 );

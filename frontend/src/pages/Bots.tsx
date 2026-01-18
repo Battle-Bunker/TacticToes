@@ -34,6 +34,7 @@ import { Bot, GameType } from "@shared/types/Game";
 import {
   doc,
   setDoc,
+  updateDoc,
   deleteDoc,
   serverTimestamp,
   collection,
@@ -96,6 +97,11 @@ const Bots: React.FC = () => {
     setDeleteDialogOpen(false);
   };
 
+  const getHueFromColour = (value: string) => {
+    const match = value.match(/hsl\(\s*([0-9.]+)/i);
+    return match ? Number(match[1]) : Math.random() * 360;
+  };
+
   // — Add form state —
   const [botName, setBotName] = useState("");
   const [botUrl, setBotUrl] = useState("");
@@ -110,6 +116,22 @@ const Bots: React.FC = () => {
 
   const contrast = theme.palette.getContrastText(colour);
 
+  // — Edit form state —
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editingBotId, setEditingBotId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editUrl, setEditUrl] = useState("");
+  const [editCaps, setEditCaps] = useState<GameType[]>([]);
+  const [editPublic, setEditPublic] = useState(false);
+  const [editHue, setEditHue] = useState(0);
+  const [editColour, setEditColour] = useState(generateColor(0));
+  const [editEmoji, setEditEmoji] = useState(emojiList[0] || "🐍");
+  const [showEditEmojis, setShowEditEmojis] = useState<string[]>([]);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [editBusy, setEditBusy] = useState(false);
+
+  const editContrast = theme.palette.getContrastText(editColour);
+
   const randomizeEmojis = () => {
     const shuffled = [...emojiList].sort(() => 0.5 - Math.random());
     const pick = shuffled.includes(emoji) ? emoji : shuffled[0];
@@ -117,8 +139,19 @@ const Bots: React.FC = () => {
     setEmoji(pick);
   };
 
+  const randomizeEditEmojis = () => {
+    const shuffled = [...emojiList].sort(() => 0.5 - Math.random());
+    const pick = shuffled.includes(editEmoji) ? editEmoji : shuffled[0];
+    setShowEditEmojis([
+      pick,
+      ...shuffled.filter((e) => e !== pick).slice(0, 11),
+    ]);
+    setEditEmoji(pick);
+  };
+
   useEffect(randomizeEmojis, []);
   useEffect(() => setColour(generateColor(hue)), [hue]);
+  useEffect(() => setEditColour(generateColor(editHue)), [editHue]);
 
   const handleAdd = async () => {
     if (!userID) {
@@ -174,6 +207,74 @@ const Bots: React.FC = () => {
     }
   };
 
+  const openEditDialog = (bot: Bot) => {
+    setEditingBotId(bot.id);
+    setEditName(bot.name);
+    setEditUrl(bot.url);
+    setEditCaps(bot.capabilities);
+    setEditPublic(bot.public);
+    const botHue = getHueFromColour(bot.colour);
+    setEditHue(botHue);
+    setEditColour(bot.colour);
+    setEditError(null);
+    setEditBusy(false);
+    setEditDialogOpen(true);
+    setShowEditEmojis(() => {
+      const shuffled = [...emojiList].sort(() => 0.5 - Math.random());
+      const pick = shuffled.includes(bot.emoji) ? bot.emoji : shuffled[0];
+      setEditEmoji(pick);
+      return [pick, ...shuffled.filter((e) => e !== pick).slice(0, 11)];
+    });
+  };
+
+  const handleCloseEdit = () => {
+    setEditingBotId(null);
+    setEditDialogOpen(false);
+    setEditError(null);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingBotId) return;
+    if (!editName.trim()) {
+      setEditError("Name required");
+      return;
+    }
+
+    const normalizedUrl = editUrl.trim().replace(/\/+$/, "");
+    try {
+      new URL(normalizedUrl);
+    } catch {
+      setEditError("Invalid URL");
+      return;
+    }
+
+    if (!editCaps.length) {
+      setEditError("Choose at least one skill");
+      return;
+    }
+
+    setEditBusy(true);
+    setEditError(null);
+
+    try {
+      await updateDoc(doc(db, "bots", editingBotId), {
+        name: editName.trim(),
+        url: normalizedUrl,
+        capabilities: editCaps,
+        emoji: editEmoji,
+        colour: editColour,
+        public: editPublic,
+      });
+      setEditDialogOpen(false);
+      setEditingBotId(null);
+    } catch (saveError) {
+      console.error("Failed to update bot", saveError);
+      setEditError("Failed to save changes");
+    } finally {
+      setEditBusy(false);
+    }
+  };
+
   return (
     <Container sx={{ py: 3 }}>
       {/* My Bots List */}
@@ -224,13 +325,22 @@ const Bots: React.FC = () => {
                         </Box>
 
                         {/* right side */}
-                        <Button
-                          onClick={() => openDeleteDialog(b.id)}
-                          disabled={busy}
-                          sx={{ minWidth: 0, height: 40 }}
-                        >
-                          💣
-                        </Button>
+                        <Box sx={{ display: "flex", alignItems: "center" }}>
+                          <Button
+                            onClick={() => openEditDialog(b)}
+                            disabled={busy || editBusy}
+                            sx={{ minWidth: 0, height: 40 }}
+                          >
+                            ✏️
+                          </Button>
+                          <Button
+                            onClick={() => openDeleteDialog(b.id)}
+                            disabled={busy || editBusy}
+                            sx={{ minWidth: 0, height: 40 }}
+                          >
+                            💣
+                          </Button>
+                        </Box>
                       </Box>
                     </TableCell>
                     <TableCell>{b.capabilities.join(", ")}</TableCell>
@@ -391,6 +501,135 @@ const Bots: React.FC = () => {
             variant="contained"
           >
             Delete
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Edit Bot Dialog */}
+      <Dialog
+        open={editDialogOpen}
+        onClose={handleCloseEdit}
+        fullWidth
+        maxWidth="sm"
+        PaperProps={{
+          sx: {
+            border: "2px solid black",
+            borderRadius: 0,
+            boxShadow: "none",
+          },
+        }}
+      >
+        <DialogTitle>Edit Bot</DialogTitle>
+        <DialogContent>
+          <Box sx={{ mt: 1 }}>
+            <TextField
+              label="Name"
+              value={editName}
+              onChange={(e) => setEditName(e.target.value)}
+              disabled={editBusy}
+              fullWidth
+              size="small"
+              sx={{ mb: 2 }}
+            />
+
+            <TextField
+              label="URL"
+              value={editUrl}
+              onChange={(e) => setEditUrl(e.target.value)}
+              disabled={editBusy}
+              fullWidth
+              size="small"
+              sx={{ mb: 2 }}
+            />
+
+            <Box
+              sx={{
+                display: "flex",
+                alignItems: "center",
+                mb: 2,
+                border: "2px solid #000",
+              }}
+            >
+              <Hue
+                hue={editHue}
+                onChange={(newHue: { h: number }) => setEditHue(newHue.h)}
+                style={{ width: "100%", height: "20px" }}
+              />
+            </Box>
+
+            <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, mb: 2 }}>
+              {showEditEmojis.map((e) => (
+                <Button
+                  key={e}
+                  onClick={() => !editBusy && setEditEmoji(e)}
+                  size="small"
+                  sx={{
+                    fontSize: "1.5rem",
+                    width: 50,
+                    height: 50,
+                    backgroundColor: editEmoji === e ? editColour : "white",
+                  }}
+                >
+                  {e}
+                </Button>
+              ))}
+              <Button onClick={randomizeEditEmojis} size="small">
+                <Refresh fontSize="small" />
+              </Button>
+            </Box>
+
+            <FormGroup row sx={{ gap: 1, mb: 2 }}>
+              {availableGameTypes.map((g) => (
+                <FormControlLabel
+                  key={g}
+                  control={
+                    <Checkbox
+                      checked={editCaps.includes(g)}
+                      onChange={() =>
+                        setEditCaps((prev) =>
+                          prev.includes(g)
+                            ? prev.filter((x) => x !== g)
+                            : [...prev, g],
+                        )
+                      }
+                      size="small"
+                    />
+                  }
+                  label={g}
+                />
+              ))}
+            </FormGroup>
+
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={editPublic}
+                  onChange={(e) => setEditPublic(e.target.checked)}
+                  size="small"
+                />
+              }
+              label="Public"
+              sx={{ mb: 2 }}
+            />
+
+            {editError && (
+              <Typography color="error" variant="body2" sx={{ mb: 2 }}>
+                {editError}
+              </Typography>
+            )}
+          </Box>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={handleCloseEdit} disabled={editBusy}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleSaveEdit}
+            variant="contained"
+            disabled={editBusy}
+            sx={{ bgcolor: editColour, color: editContrast }}
+          >
+            Save Changes
           </Button>
         </DialogActions>
       </Dialog>

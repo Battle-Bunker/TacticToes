@@ -20,6 +20,7 @@
     moveNumber: number // The turn number
     playerID: string
     move: number // The index of the square the player wants to move into
+    action?: "move" | "resign"
     timestamp: FieldValue | Timestamp // Server timestamp when the move was submitted
   }
 
