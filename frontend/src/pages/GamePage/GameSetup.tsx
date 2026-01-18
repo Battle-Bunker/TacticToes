@@ -131,8 +131,9 @@ const GameSetup: React.FC = () => {
 
   // Start game
   const handleReady = async () => {
+    const isReady = gameSetup.playersReady.includes(userID)
     await updateDoc(gameDocRef, {
-      playersReady: arrayUnion(userID),
+      playersReady: isReady ? arrayRemove(userID) : arrayUnion(userID),
     })
   }
 
@@ -415,6 +416,7 @@ const GameSetup: React.FC = () => {
     return '';
   };
 
+
   const privateBotCountsByOwner = bots.reduce<Record<string, number>>(
     (counts, bot) => {
       if (!bot.public) {
@@ -446,6 +448,9 @@ const GameSetup: React.FC = () => {
     return labels
   }, {})
 
+  const isReady = gameSetup.playersReady.includes(userID)
+
+
   return (
     <Stack spacing={2} pt={2}>
       {/* Ready Section */}
@@ -457,16 +462,16 @@ const GameSetup: React.FC = () => {
           <Button
             disabled={
               started ||
-              gameSetup.boardWidth < 5 ||
-              gameSetup.boardWidth > 20 ||
-              parseInt(secondsPerTurn) <= 0 ||
-              gameSetup.playersReady.includes(userID)
+              (!isReady &&
+                (gameSetup.boardWidth < 5 ||
+                  gameSetup.boardWidth > 20 ||
+                  parseInt(secondsPerTurn) <= 0))
             }
             onClick={handleReady}
             sx={{ backgroundColor: colour, height: "70px", fontSize: "32px" }}
             fullWidth
           >
-            {gameSetup.playersReady.includes(userID) ? `Waiting` : "I'm ready!"}
+            {isReady ? "I'm not ready" : "I'm ready!"}
           </Button>
           {(gameType === 'teamsnek' || gameType === 'kingsnek') && !canStartGame() && getTeamValidationMessage() && (
             <Typography color="error" sx={{ textAlign: 'center', mt: 1 }}>
