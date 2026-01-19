@@ -106,15 +106,19 @@ const GameLogic = ({
     }
   }
 
-  const { playerPieces, allowedMoves, clashes, food, hazards, walls } =
-    selectedTurn
+  const {
+    playerPieces = {},
+    allowedMoves = {},
+    clashes = [],
+    food = [],
+    hazards = [],
+    walls = [],
+  } = selectedTurn
 
   // Map clashes to positions
-  if (clashes) {
-    clashes.forEach((clash) => {
+  clashes.forEach((clash) => {
       clashesAtPosition[clash.index] = clash
-    })
-  }
+  })
 
   // Map allowed moves for all players
   Object.entries(allowedMoves).forEach(([, moves]) => {
@@ -332,7 +336,7 @@ const GameLogic = ({
   }
 
   // Place food
-  food?.forEach((position) => {
+  food.forEach((position) => {
     cellContentMap[position] = (
       <Box key={`food-${position}`} sx={commonCellStyle}>
         🎃
@@ -341,7 +345,7 @@ const GameLogic = ({
   })
 
   // Place walls
-  walls?.forEach((position) => {
+  walls.forEach((position) => {
     cellContentMap[position] = (
       <Box key={`wall-${position}`} sx={commonCellStyle}>
         🧱
@@ -351,7 +355,7 @@ const GameLogic = ({
   })
 
   // Place hazards (rendered as red squares)
-  hazards?.forEach((position) => {
+  hazards.forEach((position) => {
     if (!cellContentMap[position]) {
       cellContentMap[position] = (
         <Box
@@ -371,7 +375,7 @@ const GameLogic = ({
   })
 
   // Place clashes
-  clashes?.forEach((clash) => {
+  clashes.forEach((clash) => {
     const position = clash.index
     cellContentMap[position] = (
       <Box key={`clash-${position}`} sx={commonCellStyle}>
