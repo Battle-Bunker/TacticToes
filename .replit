@@ -103,6 +103,10 @@ build = ["sh", "-c", "cd frontend && npm run build"]
 deploymentTarget = "static"
 publicDir = "frontend/dist"
 
+[[deployment.rewrites]]
+from = "/*"
+to = "/index.html"
+
 [userenv]
 
 [userenv.development]
