@@ -5,6 +5,7 @@ import {
   arrayUnion,
   deleteField,
   doc,
+  onSnapshot,
   updateDoc,
 } from "firebase/firestore"
 import React, { useEffect, useState } from "react"
@@ -48,7 +49,7 @@ const BOARD_SIZE_MAPPING = {
 type BoardSize = keyof typeof BOARD_SIZE_MAPPING
 
 const GameSetup: React.FC = () => {
-  const { userID, colour } = useUser()
+  const { userID, colour, name: currentUserName } = useUser()
   const {
     gameSetup,
     players,
@@ -60,12 +61,11 @@ const GameSetup: React.FC = () => {
     gameState,
   } = useGameStateContext()
 
-  if (!gameSetup) return null
-
   const [secondsPerTurn, setSecondsPerTurn] = useState<string>("10")
   const [RulesComponent, setRulesComponent] = useState<React.FC | null>(null)
   const [boardSize, setBoardSize] = useState<BoardSize>("medium")
   const [teams, setTeams] = useState<Team[]>(gameSetup?.teams || [])
+  const [ownerNames, setOwnerNames] = useState<Record<string, string>>({})
   const [maxTurnsEnabled, setMaxTurnsEnabled] = useState<boolean>(
     gameSetup?.maxTurns !== undefined,
   )
@@ -137,6 +137,11 @@ const GameSetup: React.FC = () => {
   }
 
   const handleAddBot = async (botID: string) => {
+    const selectedBot = bots.find((bot) => bot.id === botID)
+    if (selectedBot && !selectedBot.public && selectedBot.owner !== userID) {
+      console.log(`Cannot add private bot ${botID} owned by another user`)
+      return
+    }
     // Check if bot is dead before adding to game
     const botHealthStatus = getBotStatus(botID);
     if (botHealthStatus === 'dead') {
@@ -330,6 +335,30 @@ const GameSetup: React.FC = () => {
     setRulesComponent(() => getRulesComponent(gameSetup?.gameType))
   }, [gameSetup?.gameType, gameSetup])
 
+  useEffect(() => {
+    if (bots.length === 0) {
+      setOwnerNames({})
+      return
+    }
+
+    const ownerIDs = Array.from(new Set(bots.map((bot) => bot.owner)))
+    const unsubscribers = ownerIDs.map((ownerID) => {
+      const userDocRef = doc(db, "users", ownerID)
+      return onSnapshot(userDocRef, (docSnapshot) => {
+        setOwnerNames((prev) => ({
+          ...prev,
+          [ownerID]: docSnapshot.exists()
+            ? (docSnapshot.data()?.name as string) || "Unknown"
+            : "Unknown",
+        }))
+      })
+    })
+
+    return () => {
+      unsubscribers.forEach((unsubscribe) => unsubscribe())
+    }
+  }, [bots])
+
   if (gameState || !gameSetup) return null
 
   const { started, playersReady } = gameSetup
@@ -385,6 +414,37 @@ const GameSetup: React.FC = () => {
     
     return '';
   };
+
+  const privateBotCountsByOwner = bots.reduce<Record<string, number>>(
+    (counts, bot) => {
+      if (!bot.public) {
+        counts[bot.owner] = (counts[bot.owner] ?? 0) + 1
+      }
+      return counts
+    },
+    {},
+  )
+
+  const privateBotIndexByOwner: Record<string, number> = {}
+
+  const getPrivateBotLabel = (botOwner: string) => {
+    if (botOwner === userID && currentUserName) return currentUserName
+    return ownerNames[botOwner] || "Unknown"
+  }
+
+  const botLabelById = bots.reduce<Record<string, string>>((labels, bot) => {
+    if (!bot.public && bot.owner !== userID) {
+      const currentIndex = (privateBotIndexByOwner[bot.owner] ?? 0) + 1
+      privateBotIndexByOwner[bot.owner] = currentIndex
+      const suffix =
+        (privateBotCountsByOwner[bot.owner] ?? 0) > 1 ? ` ${currentIndex}` : ""
+      labels[bot.id] = `${getPrivateBotLabel(bot.owner)}'s Private bot${suffix}`
+      return labels
+    }
+
+    labels[bot.id] = bot.name
+    return labels
+  }, {})
 
   return (
     <Stack spacing={2} pt={2}>
@@ -525,21 +585,28 @@ const GameSetup: React.FC = () => {
               {bots.map((bot) => {
                 const botStatus = getBotStatus(bot.id);
                 const isDead = botStatus === 'dead';
+                const isPrivate = !bot.public
+                const isPrivateLocked = isPrivate && bot.owner !== userID
+                const botLabel = botLabelById[bot.id] || bot.name
                 
                 return (
                   <Button
-                    key={bot.name}
-                    disabled={isDead}
+                    key={bot.id}
+                    disabled={isDead || isPrivateLocked}
                     sx={{
                       backgroundColor: isDead ? '#ccc' : bot.colour,
-                      opacity: isDead ? 0.6 : 1,
+                      opacity: isDead || isPrivateLocked ? 0.6 : 1,
                     }}
                     onClick={() => handleAddBot(bot.id)}
-                    title={isDead ? 'Bot is dead and cannot be added to game' : ''}
+                    title={
+                      isDead
+                        ? 'Bot is dead and cannot be added to game'
+                        : isPrivateLocked
+                          ? 'Private bot can only be added by the owner'
+                          : ''
+                    }
                   >
-                    {bot.emoji}   {bot.name.length > 10
-                      ? `${bot.name.slice(0, 10)}…`
-                      : bot.name}
+                    {bot.emoji}   {botLabel}
                     {isDead && ' (DEAD)'}
                   </Button>
                 );
@@ -653,6 +720,7 @@ const GameSetup: React.FC = () => {
               getBotStatus={getBotStatus}
               gameType={gameType}
               onKingToggle={handleKingToggle}
+              playerNameOverrides={botLabelById}
             />
           </Box>
         </FormControl>
