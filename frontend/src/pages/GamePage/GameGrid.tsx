@@ -94,7 +94,7 @@ const GameGrid: React.FC = () => {
 
   const handleSquareClick = async (index: number) => {
     const currentTurnIndex = gameState?.turns ? gameState.turns.length - 1 : -1
-    const timestamp = new Date().toISOString()
+    const timestamp = new Date().toLocaleString()
     
     console.log(`[GameGrid] [${timestamp}] [turn:${currentTurnIndex}] handleSquareClick called`, {
       index,
@@ -203,7 +203,7 @@ const GameGrid: React.FC = () => {
         timestamp: serverTimestamp(),
       })
       
-      console.log(`[GameGrid] [${new Date().toISOString()}] [turn:${currentTurnIndex}] move document created successfully`, {
+      console.log(`[GameGrid] [${new Date().toLocaleString()}] [turn:${currentTurnIndex}] move document created successfully`, {
         turnIndex: currentTurnIndex,
         docId: docRef.id,
         path: docRef.path,
@@ -214,7 +214,7 @@ const GameGrid: React.FC = () => {
         `sessions/${sessionName}/games/${gameID}/moveStatuses/${moveNumber}`,
       )
       
-      console.log(`[GameGrid] [${new Date().toISOString()}] [turn:${currentTurnIndex}] updating moveStatus document`, {
+      console.log(`[GameGrid] [${new Date().toLocaleString()}] [turn:${currentTurnIndex}] updating moveStatus document`, {
         turnIndex: currentTurnIndex,
         path: `sessions/${sessionName}/games/${gameID}/moveStatuses/${moveNumber}`,
         playerID: user.userID,
@@ -224,9 +224,9 @@ const GameGrid: React.FC = () => {
         movedPlayerIDs: arrayUnion(user.userID),
       })
       
-      console.log(`[GameGrid] [${new Date().toISOString()}] [turn:${currentTurnIndex}] moveStatus updated successfully`, { turnIndex: currentTurnIndex })
+      console.log(`[GameGrid] [${new Date().toLocaleString()}] [turn:${currentTurnIndex}] moveStatus updated successfully`, { turnIndex: currentTurnIndex })
     } catch (error) {
-      console.error(`[GameGrid] [${new Date().toISOString()}] [turn:${currentTurnIndex}] Error submitting move to Firestore`, {
+      console.error(`[GameGrid] [${new Date().toLocaleString()}] [turn:${currentTurnIndex}] Error submitting move to Firestore`, {
         turnIndex: currentTurnIndex,
         error,
         errorMessage: error instanceof Error ? error.message : 'Unknown error',

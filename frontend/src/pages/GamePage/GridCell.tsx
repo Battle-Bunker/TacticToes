@@ -34,7 +34,7 @@ const GridCell: React.FC<GridCellProps> = ({
     <Box
       key={`${index}-${selectedTurnIndex}`}
       onClick={() => {
-        const timestamp = new Date().toISOString()
+        const timestamp = new Date().toLocaleString()
         console.log(`[GridCell] [${timestamp}] [turn:${selectedTurnIndex}] onClick triggered`, {
           timestamp,
           turnIndex: selectedTurnIndex,
