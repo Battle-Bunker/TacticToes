@@ -305,7 +305,7 @@ const GameSetup: React.FC = () => {
 
   // Handle max turn time configuration
   const handleSecondsPerTurnChange = async (newSeconds: number) => {
-    const sanitizedValue = Math.max(1, Math.min(300, newSeconds)) // Min 1s, max 5 minutes
+    const sanitizedValue = Math.max(0.5, Math.min(300, newSeconds)) // Min 0.5s, max 5 minutes
     setSecondsPerTurn(`${sanitizedValue}`)
     await updateDoc(gameDocRef, {
       maxTurnTime: sanitizedValue,
@@ -499,14 +499,14 @@ const GameSetup: React.FC = () => {
           type="number"
           value={secondsPerTurn}
           onChange={(e) => {
-            const value = parseInt(e.target.value)
+            const value = parseFloat(e.target.value)
             if (!isNaN(value)) {
               handleSecondsPerTurnChange(value)
             }
           }}
           disabled={started}
           sx={{ flex: 1 }}
-          inputProps={{ min: 1, max: 300 }}
+          inputProps={{ min: 0.5, max: 300, step: 0.1 }}
         />
       </Box>
 
