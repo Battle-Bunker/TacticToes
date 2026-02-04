@@ -38,6 +38,7 @@ import React, {
 import { EmojiCycler } from "../components/EmojiCycler"
 import { db } from "../firebaseConfig"
 import { useUser } from "./UserContext"
+import { debugLog } from "../utils/debugLogger"
 
 interface GameStateContextType {
   gameState: GameState | null
@@ -139,16 +140,14 @@ export const GameStateProvider: React.FC<{
         const latestTurnData = safeTurns.length ? safeTurns[safeTurns.length - 1] : null
         
         const turnIndex = safeTurns.length - 1
-        console.log(`[GameStateContext] [${new Date().toLocaleString()}] [turn:${turnIndex}] gameState updated`, {
-          timestamp: new Date().toLocaleString(),
-          turnIndex,
+        debugLog('GameStateContext', 'gameState updated', {
           gameID,
           turnCount: safeTurns.length,
           hasLatestTurn: !!latestTurnData,
           allowedMovesKeys: latestTurnData ? Object.keys(latestTurnData.allowedMoves || {}) : [],
           userAllowedMoves: latestTurnData?.allowedMoves?.[userID] || [],
           fromCache: docSnapshot.metadata.fromCache,
-        })
+        }, turnIndex)
         
         setGameState({ ...gameData, turns: safeTurns })
         setLatestTurn(latestTurnData)
@@ -257,8 +256,7 @@ export const GameStateProvider: React.FC<{
 
         const gameData = docSnapshot.data() as GameSetup
         
-        console.log(`[GameStateContext] [${new Date().toLocaleString()}] gameSetup updated`, {
-          timestamp: new Date().toLocaleString(),
+        debugLog('GameStateContext', 'gameSetup updated', {
           gameID,
           started: gameData.started,
           gameType: gameData.gameType,
@@ -481,26 +479,22 @@ export const GameStateProvider: React.FC<{
         if (!querySnapshot.empty) {
           const highestMoveStatus = querySnapshot.docs[0].data() as MoveStatus
           const turnIndex = highestMoveStatus.moveNumber
-          console.log(`[GameStateContext] [${new Date().toLocaleString()}] [turn:${turnIndex}] moveStatus updated`, {
-            timestamp: new Date().toLocaleString(),
-            turnIndex,
+          debugLog('GameStateContext', 'moveStatus updated', {
             moveNumber: highestMoveStatus.moveNumber,
             movedPlayerIDs: highestMoveStatus.movedPlayerIDs,
             alivePlayerIDs: highestMoveStatus.alivePlayerIDs,
             userID,
             userHasMoved: highestMoveStatus.movedPlayerIDs?.includes(userID),
-          })
+          }, turnIndex)
           setLatestMoveStatus(highestMoveStatus)
           
           // Check if user has submitted move for current turn
           const userHasMoved = highestMoveStatus.movedPlayerIDs?.includes(userID) || false
-          console.log(`[GameStateContext] [${new Date().toLocaleString()}] [turn:${turnIndex}] updating hasSubmittedMove`, {
-            timestamp: new Date().toLocaleString(),
-            turnIndex,
+          debugLog('GameStateContext', 'updating hasSubmittedMove', {
             userHasMoved,
             userID,
             movedPlayerIDs: highestMoveStatus.movedPlayerIDs,
-          })
+          }, turnIndex)
           setHasSubmittedMove(userHasMoved)
         }
 

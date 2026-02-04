@@ -22,6 +22,7 @@ import {
   FirstPage,
   LastPage,
 } from "@mui/icons-material"
+import { debugLog, debugWarn, debugError } from "../../utils/debugLogger"
 
 export interface GameLogicProps {
   gameState: GameState | null
@@ -94,11 +95,9 @@ const GameGrid: React.FC = () => {
 
   const handleSquareClick = async (index: number) => {
     const currentTurnIndex = gameState?.turns ? gameState.turns.length - 1 : -1
-    const timestamp = new Date().toLocaleString()
     
-    console.log(`[GameGrid] [${timestamp}] [turn:${currentTurnIndex}] handleSquareClick called`, {
+    debugLog('GameGrid', 'handleSquareClick called', {
       index,
-      turnIndex: currentTurnIndex,
       hasLatestTurn: !!latestTurn,
       hasGameState: !!gameState,
       hasGameSetup: !!gameSetup,
@@ -110,58 +109,53 @@ const GameGrid: React.FC = () => {
       disabled,
       selectedSquare,
       hasGameLogicReturn: !!gameLogicReturn,
-    })
+    }, currentTurnIndex)
 
     if (!latestTurn || !gameState) {
-      console.warn(`[GameGrid] [${timestamp}] [turn:${currentTurnIndex}] handleSquareClick early return: missing latestTurn or gameState`, {
-        turnIndex: currentTurnIndex,
+      debugWarn('GameGrid', 'handleSquareClick early return: missing latestTurn or gameState', {
         hasLatestTurn: !!latestTurn,
         hasGameState: !!gameState,
-      })
+      }, currentTurnIndex)
       return
     }
 
     if (!gameSetup?.started) {
-      console.warn(`[GameGrid] [${timestamp}] [turn:${currentTurnIndex}] handleSquareClick: game not started`, {
-        turnIndex: currentTurnIndex,
+      debugWarn('GameGrid', 'handleSquareClick: game not started', {
         gameSetup,
         started: gameSetup?.started,
-      })
+      }, currentTurnIndex)
       return
     }
 
     const allowedMoves = latestTurn.allowedMoves[user.userID] || []
-    console.log(`[GameGrid] [${timestamp}] [turn:${currentTurnIndex}] allowedMoves check`, {
-      turnIndex: currentTurnIndex,
+    debugLog('GameGrid', 'allowedMoves check', {
       userID: user.userID,
       allowedMoves,
       clickedIndex: index,
       isAllowed: allowedMoves.includes(index),
       allAllowedMoves: latestTurn.allowedMoves,
-    })
+    }, currentTurnIndex)
 
     if (!allowedMoves.includes(index)) {
-      console.warn(`[GameGrid] [${timestamp}] [turn:${currentTurnIndex}] handleSquareClick: clicked index not in allowedMoves`, {
-        turnIndex: currentTurnIndex,
+      debugWarn('GameGrid', 'handleSquareClick: clicked index not in allowedMoves', {
         index,
         allowedMoves,
         userID: user.userID,
-      })
+      }, currentTurnIndex)
       return
     }
 
-    console.log(`[GameGrid] [${timestamp}] [turn:${currentTurnIndex}] setSelectedSquare called`, { turnIndex: currentTurnIndex, index })
+    debugLog('GameGrid', 'setSelectedSquare called', { index }, currentTurnIndex)
     setSelectedSquare(index)
 
     // Handle clash
     const clash = gameLogicReturn?.clashesAtPosition[index]
     if (clash) {
-      console.log(`[GameGrid] [${timestamp}] [turn:${currentTurnIndex}] clash detected at position`, {
-        turnIndex: currentTurnIndex,
+      debugLog('GameGrid', 'clash detected at position', {
         index,
         clash,
         clashesAtPosition: gameLogicReturn?.clashesAtPosition,
-      })
+      }, currentTurnIndex)
       const playersInvolved = gameSetup.gamePlayers.filter((player) =>
         clash.playerIDs.includes(player.id),
       )
@@ -172,11 +166,10 @@ const GameGrid: React.FC = () => {
 
     // Submit move
     if (!gameID || !sessionName) {
-      console.error(`[GameGrid] [${timestamp}] [turn:${currentTurnIndex}] handleSquareClick: missing gameID or sessionName for move submission`, {
-        turnIndex: currentTurnIndex,
+      debugError('GameGrid', 'handleSquareClick: missing gameID or sessionName for move submission', {
         gameID,
         sessionName,
-      })
+      }, currentTurnIndex)
       return
     }
 
@@ -187,13 +180,12 @@ const GameGrid: React.FC = () => {
       )
       const moveNumber = gameState.turns.length - 1
       
-      console.log(`[GameGrid] [${timestamp}] [turn:${currentTurnIndex}] submitting move to Firestore`, {
-        turnIndex: currentTurnIndex,
+      debugLog('GameGrid', 'submitting move to Firestore', {
         path: `sessions/${sessionName}/games/${gameID}/privateMoves`,
         moveNumber,
         playerID: user.userID,
         move: index,
-      })
+      }, currentTurnIndex)
 
       const docRef = await addDoc(moveRef, {
         gameID,
@@ -203,31 +195,28 @@ const GameGrid: React.FC = () => {
         timestamp: serverTimestamp(),
       })
       
-      console.log(`[GameGrid] [${new Date().toLocaleString()}] [turn:${currentTurnIndex}] move document created successfully`, {
-        turnIndex: currentTurnIndex,
+      debugLog('GameGrid', 'move document created successfully', {
         docId: docRef.id,
         path: docRef.path,
-      })
+      }, currentTurnIndex)
 
       const moveStatusDocRef = doc(
         db,
         `sessions/${sessionName}/games/${gameID}/moveStatuses/${moveNumber}`,
       )
       
-      console.log(`[GameGrid] [${new Date().toLocaleString()}] [turn:${currentTurnIndex}] updating moveStatus document`, {
-        turnIndex: currentTurnIndex,
+      debugLog('GameGrid', 'updating moveStatus document', {
         path: `sessions/${sessionName}/games/${gameID}/moveStatuses/${moveNumber}`,
         playerID: user.userID,
-      })
+      }, currentTurnIndex)
 
       await updateDoc(moveStatusDocRef, {
         movedPlayerIDs: arrayUnion(user.userID),
       })
       
-      console.log(`[GameGrid] [${new Date().toLocaleString()}] [turn:${currentTurnIndex}] moveStatus updated successfully`, { turnIndex: currentTurnIndex })
+      debugLog('GameGrid', 'moveStatus updated successfully', {}, currentTurnIndex)
     } catch (error) {
-      console.error(`[GameGrid] [${new Date().toLocaleString()}] [turn:${currentTurnIndex}] Error submitting move to Firestore`, {
-        turnIndex: currentTurnIndex,
+      debugError('GameGrid', 'Error submitting move to Firestore', {
         error,
         errorMessage: error instanceof Error ? error.message : 'Unknown error',
         errorStack: error instanceof Error ? error.stack : undefined,
@@ -235,7 +224,7 @@ const GameGrid: React.FC = () => {
         sessionName,
         index,
         userID: user.userID,
-      })
+      }, currentTurnIndex)
     }
   }
 
