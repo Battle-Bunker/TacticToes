@@ -138,10 +138,12 @@ export const GameStateProvider: React.FC<{
         const safeTurns = Array.isArray(gameData.turns) ? gameData.turns : []
         const latestTurnData = safeTurns.length ? safeTurns[safeTurns.length - 1] : null
         
-        console.log('[GameStateContext] gameState updated', {
+        const turnIndex = safeTurns.length - 1
+        console.log(`[GameStateContext] [${new Date().toISOString()}] [turn:${turnIndex}] gameState updated`, {
+          timestamp: new Date().toISOString(),
+          turnIndex,
           gameID,
           turnCount: safeTurns.length,
-          latestTurnNumber: safeTurns.length - 1,
           hasLatestTurn: !!latestTurnData,
           allowedMovesKeys: latestTurnData ? Object.keys(latestTurnData.allowedMoves || {}) : [],
           userAllowedMoves: latestTurnData?.allowedMoves?.[userID] || [],
@@ -255,7 +257,8 @@ export const GameStateProvider: React.FC<{
 
         const gameData = docSnapshot.data() as GameSetup
         
-        console.log('[GameStateContext] gameSetup updated', {
+        console.log(`[GameStateContext] [${new Date().toISOString()}] gameSetup updated`, {
+          timestamp: new Date().toISOString(),
           gameID,
           started: gameData.started,
           gameType: gameData.gameType,
@@ -477,7 +480,10 @@ export const GameStateProvider: React.FC<{
 
         if (!querySnapshot.empty) {
           const highestMoveStatus = querySnapshot.docs[0].data() as MoveStatus
-          console.log('[GameStateContext] moveStatus updated', {
+          const turnIndex = highestMoveStatus.moveNumber
+          console.log(`[GameStateContext] [${new Date().toISOString()}] [turn:${turnIndex}] moveStatus updated`, {
+            timestamp: new Date().toISOString(),
+            turnIndex,
             moveNumber: highestMoveStatus.moveNumber,
             movedPlayerIDs: highestMoveStatus.movedPlayerIDs,
             alivePlayerIDs: highestMoveStatus.alivePlayerIDs,
@@ -488,7 +494,9 @@ export const GameStateProvider: React.FC<{
           
           // Check if user has submitted move for current turn
           const userHasMoved = highestMoveStatus.movedPlayerIDs?.includes(userID) || false
-          console.log('[GameStateContext] updating hasSubmittedMove', {
+          console.log(`[GameStateContext] [${new Date().toISOString()}] [turn:${turnIndex}] updating hasSubmittedMove`, {
+            timestamp: new Date().toISOString(),
+            turnIndex,
             userHasMoved,
             userID,
             movedPlayerIDs: highestMoveStatus.movedPlayerIDs,

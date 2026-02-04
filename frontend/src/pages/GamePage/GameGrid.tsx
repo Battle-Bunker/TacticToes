@@ -93,8 +93,12 @@ const GameGrid: React.FC = () => {
   }, [gridWidth, selectedTurnIndex])
 
   const handleSquareClick = async (index: number) => {
-    console.log('[GameGrid] handleSquareClick called', {
+    const currentTurnIndex = gameState?.turns ? gameState.turns.length - 1 : -1
+    const timestamp = new Date().toISOString()
+    
+    console.log(`[GameGrid] [${timestamp}] [turn:${currentTurnIndex}] handleSquareClick called`, {
       index,
+      turnIndex: currentTurnIndex,
       hasLatestTurn: !!latestTurn,
       hasGameState: !!gameState,
       hasGameSetup: !!gameSetup,
@@ -109,7 +113,8 @@ const GameGrid: React.FC = () => {
     })
 
     if (!latestTurn || !gameState) {
-      console.warn('[GameGrid] handleSquareClick early return: missing latestTurn or gameState', {
+      console.warn(`[GameGrid] [${timestamp}] [turn:${currentTurnIndex}] handleSquareClick early return: missing latestTurn or gameState`, {
+        turnIndex: currentTurnIndex,
         hasLatestTurn: !!latestTurn,
         hasGameState: !!gameState,
       })
@@ -117,7 +122,8 @@ const GameGrid: React.FC = () => {
     }
 
     if (!gameSetup?.started) {
-      console.warn('[GameGrid] handleSquareClick: game not started', {
+      console.warn(`[GameGrid] [${timestamp}] [turn:${currentTurnIndex}] handleSquareClick: game not started`, {
+        turnIndex: currentTurnIndex,
         gameSetup,
         started: gameSetup?.started,
       })
@@ -125,7 +131,8 @@ const GameGrid: React.FC = () => {
     }
 
     const allowedMoves = latestTurn.allowedMoves[user.userID] || []
-    console.log('[GameGrid] allowedMoves check', {
+    console.log(`[GameGrid] [${timestamp}] [turn:${currentTurnIndex}] allowedMoves check`, {
+      turnIndex: currentTurnIndex,
       userID: user.userID,
       allowedMoves,
       clickedIndex: index,
@@ -134,7 +141,8 @@ const GameGrid: React.FC = () => {
     })
 
     if (!allowedMoves.includes(index)) {
-      console.warn('[GameGrid] handleSquareClick: clicked index not in allowedMoves', {
+      console.warn(`[GameGrid] [${timestamp}] [turn:${currentTurnIndex}] handleSquareClick: clicked index not in allowedMoves`, {
+        turnIndex: currentTurnIndex,
         index,
         allowedMoves,
         userID: user.userID,
@@ -142,13 +150,14 @@ const GameGrid: React.FC = () => {
       return
     }
 
-    console.log('[GameGrid] setSelectedSquare called', { index })
+    console.log(`[GameGrid] [${timestamp}] [turn:${currentTurnIndex}] setSelectedSquare called`, { turnIndex: currentTurnIndex, index })
     setSelectedSquare(index)
 
     // Handle clash
     const clash = gameLogicReturn?.clashesAtPosition[index]
     if (clash) {
-      console.log('[GameGrid] clash detected at position', {
+      console.log(`[GameGrid] [${timestamp}] [turn:${currentTurnIndex}] clash detected at position`, {
+        turnIndex: currentTurnIndex,
         index,
         clash,
         clashesAtPosition: gameLogicReturn?.clashesAtPosition,
@@ -163,7 +172,8 @@ const GameGrid: React.FC = () => {
 
     // Submit move
     if (!gameID || !sessionName) {
-      console.error('[GameGrid] handleSquareClick: missing gameID or sessionName for move submission', {
+      console.error(`[GameGrid] [${timestamp}] [turn:${currentTurnIndex}] handleSquareClick: missing gameID or sessionName for move submission`, {
+        turnIndex: currentTurnIndex,
         gameID,
         sessionName,
       })
@@ -177,7 +187,8 @@ const GameGrid: React.FC = () => {
       )
       const moveNumber = gameState.turns.length - 1
       
-      console.log('[GameGrid] submitting move to Firestore', {
+      console.log(`[GameGrid] [${timestamp}] [turn:${currentTurnIndex}] submitting move to Firestore`, {
+        turnIndex: currentTurnIndex,
         path: `sessions/${sessionName}/games/${gameID}/privateMoves`,
         moveNumber,
         playerID: user.userID,
@@ -192,7 +203,8 @@ const GameGrid: React.FC = () => {
         timestamp: serverTimestamp(),
       })
       
-      console.log('[GameGrid] move document created successfully', {
+      console.log(`[GameGrid] [${new Date().toISOString()}] [turn:${currentTurnIndex}] move document created successfully`, {
+        turnIndex: currentTurnIndex,
         docId: docRef.id,
         path: docRef.path,
       })
@@ -202,7 +214,8 @@ const GameGrid: React.FC = () => {
         `sessions/${sessionName}/games/${gameID}/moveStatuses/${moveNumber}`,
       )
       
-      console.log('[GameGrid] updating moveStatus document', {
+      console.log(`[GameGrid] [${new Date().toISOString()}] [turn:${currentTurnIndex}] updating moveStatus document`, {
+        turnIndex: currentTurnIndex,
         path: `sessions/${sessionName}/games/${gameID}/moveStatuses/${moveNumber}`,
         playerID: user.userID,
       })
@@ -211,9 +224,10 @@ const GameGrid: React.FC = () => {
         movedPlayerIDs: arrayUnion(user.userID),
       })
       
-      console.log('[GameGrid] moveStatus updated successfully')
+      console.log(`[GameGrid] [${new Date().toISOString()}] [turn:${currentTurnIndex}] moveStatus updated successfully`, { turnIndex: currentTurnIndex })
     } catch (error) {
-      console.error('[GameGrid] Error submitting move to Firestore', {
+      console.error(`[GameGrid] [${new Date().toISOString()}] [turn:${currentTurnIndex}] Error submitting move to Firestore`, {
+        turnIndex: currentTurnIndex,
         error,
         errorMessage: error instanceof Error ? error.message : 'Unknown error',
         errorStack: error instanceof Error ? error.stack : undefined,
