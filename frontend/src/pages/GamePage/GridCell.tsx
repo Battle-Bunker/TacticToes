@@ -34,7 +34,17 @@ const GridCell: React.FC<GridCellProps> = ({
     <Box
       key={`${index}-${selectedTurnIndex}`}
       onClick={() => {
-        if (disabled) return
+        console.log('[GridCell] onClick triggered', {
+          index,
+          disabled,
+          isAllowedMove,
+          isSelected,
+          selectedTurnIndex,
+        })
+        if (disabled) {
+          console.warn('[GridCell] click ignored: cell is disabled', { index, disabled })
+          return
+        }
         onClick(index)
       }}
       sx={{

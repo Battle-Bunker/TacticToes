@@ -136,8 +136,20 @@ export const GameStateProvider: React.FC<{
 
         const gameData = docSnapshot.data() as GameState
         const safeTurns = Array.isArray(gameData.turns) ? gameData.turns : []
+        const latestTurnData = safeTurns.length ? safeTurns[safeTurns.length - 1] : null
+        
+        console.log('[GameStateContext] gameState updated', {
+          gameID,
+          turnCount: safeTurns.length,
+          latestTurnNumber: safeTurns.length - 1,
+          hasLatestTurn: !!latestTurnData,
+          allowedMovesKeys: latestTurnData ? Object.keys(latestTurnData.allowedMoves || {}) : [],
+          userAllowedMoves: latestTurnData?.allowedMoves?.[userID] || [],
+          fromCache: docSnapshot.metadata.fromCache,
+        })
+        
         setGameState({ ...gameData, turns: safeTurns })
-        setLatestTurn(safeTurns.length ? safeTurns[safeTurns.length - 1] : null)
+        setLatestTurn(latestTurnData)
 
         if (!docSnapshot.metadata.fromCache) {
           clearQueryTimeout()
@@ -242,6 +254,15 @@ export const GameStateProvider: React.FC<{
         }
 
         const gameData = docSnapshot.data() as GameSetup
+        
+        console.log('[GameStateContext] gameSetup updated', {
+          gameID,
+          started: gameData.started,
+          gameType: gameData.gameType,
+          gamePlayers: gameData.gamePlayers?.map(p => ({ id: p.id, type: p.type })),
+          fromCache: docSnapshot.metadata.fromCache,
+        })
+        
         setGameSetup(gameData)
 
         if (!docSnapshot.metadata.fromCache) {
@@ -456,7 +477,23 @@ export const GameStateProvider: React.FC<{
 
         if (!querySnapshot.empty) {
           const highestMoveStatus = querySnapshot.docs[0].data() as MoveStatus
+          console.log('[GameStateContext] moveStatus updated', {
+            moveNumber: highestMoveStatus.moveNumber,
+            movedPlayerIDs: highestMoveStatus.movedPlayerIDs,
+            alivePlayerIDs: highestMoveStatus.alivePlayerIDs,
+            userID,
+            userHasMoved: highestMoveStatus.movedPlayerIDs?.includes(userID),
+          })
           setLatestMoveStatus(highestMoveStatus)
+          
+          // Check if user has submitted move for current turn
+          const userHasMoved = highestMoveStatus.movedPlayerIDs?.includes(userID) || false
+          console.log('[GameStateContext] updating hasSubmittedMove', {
+            userHasMoved,
+            userID,
+            movedPlayerIDs: highestMoveStatus.movedPlayerIDs,
+          })
+          setHasSubmittedMove(userHasMoved)
         }
 
         if (!querySnapshot.metadata.fromCache) {

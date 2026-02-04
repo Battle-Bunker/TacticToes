@@ -93,48 +93,135 @@ const GameGrid: React.FC = () => {
   }, [gridWidth, selectedTurnIndex])
 
   const handleSquareClick = async (index: number) => {
-    if (!latestTurn || !gameState) return
+    console.log('[GameGrid] handleSquareClick called', {
+      index,
+      hasLatestTurn: !!latestTurn,
+      hasGameState: !!gameState,
+      hasGameSetup: !!gameSetup,
+      gameStarted: gameSetup?.started,
+      userID: user.userID,
+      gameID,
+      sessionName,
+      hasSubmittedMove,
+      disabled,
+      selectedSquare,
+      hasGameLogicReturn: !!gameLogicReturn,
+    })
 
-    if (gameSetup?.started) {
-      const allowedMoves = latestTurn.allowedMoves[user.userID] || []
-      if (allowedMoves.includes(index)) {
-        setSelectedSquare(index)
+    if (!latestTurn || !gameState) {
+      console.warn('[GameGrid] handleSquareClick early return: missing latestTurn or gameState', {
+        hasLatestTurn: !!latestTurn,
+        hasGameState: !!gameState,
+      })
+      return
+    }
 
-        // Handle clash
-        const clash = gameLogicReturn?.clashesAtPosition[index]
-        if (clash) {
-          const playersInvolved = gameSetup.gamePlayers.filter((player) =>
-            clash.playerIDs.includes(player.id),
-          )
-          setClashReason(clash.reason)
-          setClashPlayersList(playersInvolved)
-          setOpenClashDialog(true)
-        }
+    if (!gameSetup?.started) {
+      console.warn('[GameGrid] handleSquareClick: game not started', {
+        gameSetup,
+        started: gameSetup?.started,
+      })
+      return
+    }
 
-        // Submit move
-        if (gameID && sessionName) {
-          const moveRef = collection(
-            db,
-            `sessions/${sessionName}/games/${gameID}/privateMoves`,
-          )
-          const moveNumber = gameState.turns.length - 1
-          await addDoc(moveRef, {
-            gameID,
-            moveNumber,
-            playerID: user.userID,
-            move: index,
-            timestamp: serverTimestamp(),
-          })
+    const allowedMoves = latestTurn.allowedMoves[user.userID] || []
+    console.log('[GameGrid] allowedMoves check', {
+      userID: user.userID,
+      allowedMoves,
+      clickedIndex: index,
+      isAllowed: allowedMoves.includes(index),
+      allAllowedMoves: latestTurn.allowedMoves,
+    })
 
-          const moveStatusDocRef = doc(
-            db,
-            `sessions/${sessionName}/games/${gameID}/moveStatuses/${moveNumber}`,
-          )
-          await updateDoc(moveStatusDocRef, {
-            movedPlayerIDs: arrayUnion(user.userID),
-          })
-        }
-      }
+    if (!allowedMoves.includes(index)) {
+      console.warn('[GameGrid] handleSquareClick: clicked index not in allowedMoves', {
+        index,
+        allowedMoves,
+        userID: user.userID,
+      })
+      return
+    }
+
+    console.log('[GameGrid] setSelectedSquare called', { index })
+    setSelectedSquare(index)
+
+    // Handle clash
+    const clash = gameLogicReturn?.clashesAtPosition[index]
+    if (clash) {
+      console.log('[GameGrid] clash detected at position', {
+        index,
+        clash,
+        clashesAtPosition: gameLogicReturn?.clashesAtPosition,
+      })
+      const playersInvolved = gameSetup.gamePlayers.filter((player) =>
+        clash.playerIDs.includes(player.id),
+      )
+      setClashReason(clash.reason)
+      setClashPlayersList(playersInvolved)
+      setOpenClashDialog(true)
+    }
+
+    // Submit move
+    if (!gameID || !sessionName) {
+      console.error('[GameGrid] handleSquareClick: missing gameID or sessionName for move submission', {
+        gameID,
+        sessionName,
+      })
+      return
+    }
+
+    try {
+      const moveRef = collection(
+        db,
+        `sessions/${sessionName}/games/${gameID}/privateMoves`,
+      )
+      const moveNumber = gameState.turns.length - 1
+      
+      console.log('[GameGrid] submitting move to Firestore', {
+        path: `sessions/${sessionName}/games/${gameID}/privateMoves`,
+        moveNumber,
+        playerID: user.userID,
+        move: index,
+      })
+
+      const docRef = await addDoc(moveRef, {
+        gameID,
+        moveNumber,
+        playerID: user.userID,
+        move: index,
+        timestamp: serverTimestamp(),
+      })
+      
+      console.log('[GameGrid] move document created successfully', {
+        docId: docRef.id,
+        path: docRef.path,
+      })
+
+      const moveStatusDocRef = doc(
+        db,
+        `sessions/${sessionName}/games/${gameID}/moveStatuses/${moveNumber}`,
+      )
+      
+      console.log('[GameGrid] updating moveStatus document', {
+        path: `sessions/${sessionName}/games/${gameID}/moveStatuses/${moveNumber}`,
+        playerID: user.userID,
+      })
+
+      await updateDoc(moveStatusDocRef, {
+        movedPlayerIDs: arrayUnion(user.userID),
+      })
+      
+      console.log('[GameGrid] moveStatus updated successfully')
+    } catch (error) {
+      console.error('[GameGrid] Error submitting move to Firestore', {
+        error,
+        errorMessage: error instanceof Error ? error.message : 'Unknown error',
+        errorStack: error instanceof Error ? error.stack : undefined,
+        gameID,
+        sessionName,
+        index,
+        userID: user.userID,
+      })
     }
   }
 
