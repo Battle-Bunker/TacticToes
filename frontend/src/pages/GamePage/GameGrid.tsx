@@ -250,6 +250,7 @@ const GameGrid: React.FC = () => {
         setSelectedTurnIndex(newTurnCount - 1) // Automatically go to the latest turn
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gameState?.turns?.length])
 
   // Update gameLogicReturn when relevant variables change
@@ -323,6 +324,7 @@ const GameGrid: React.FC = () => {
 
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSnekGame, latestTurn, gameState, disabled, user.userID, gridWidth])
 
   // Navigation handlers
