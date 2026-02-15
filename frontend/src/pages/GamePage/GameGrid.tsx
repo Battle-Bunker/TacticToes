@@ -280,6 +280,51 @@ const GameGrid: React.FC = () => {
     })
   }
 
+  // Check if this is a snek game mode
+  const isSnekGame = gameState?.setup.gameType === "snek" ||
+    gameState?.setup.gameType === "teamsnek" ||
+    gameState?.setup.gameType === "kingsnek"
+
+  // Arrow key controls for snek game modes
+  useEffect(() => {
+    if (!isSnekGame || !latestTurn || !gameState || disabled) return
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const arrowKeys = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"]
+      if (!arrowKeys.includes(event.key)) return
+
+      event.preventDefault()
+
+      const headPosition = latestTurn.playerPieces[user.userID]?.[0]
+      if (headPosition === undefined) return
+
+      const allowedMoves = latestTurn.allowedMoves[user.userID] || []
+      let targetIndex: number | null = null
+
+      switch (event.key) {
+        case "ArrowUp":
+          targetIndex = headPosition - gridWidth
+          break
+        case "ArrowDown":
+          targetIndex = headPosition + gridWidth
+          break
+        case "ArrowLeft":
+          targetIndex = headPosition - 1
+          break
+        case "ArrowRight":
+          targetIndex = headPosition + 1
+          break
+      }
+
+      if (targetIndex !== null && allowedMoves.includes(targetIndex)) {
+        handleSquareClick(targetIndex)
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [isSnekGame, latestTurn, gameState, disabled, user.userID, gridWidth])
+
   // Navigation handlers
   const handlePrevTurn = () => {
     if (gameState?.turns && selectedTurnIndex > 0) {
