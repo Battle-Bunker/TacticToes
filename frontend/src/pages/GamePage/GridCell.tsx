@@ -1,5 +1,6 @@
 import { Box } from "@mui/material"
 import React from "react"
+import { debugLog, debugWarn } from "../../utils/debugLogger"
 
 interface GridCellProps {
   index: number
@@ -34,7 +35,16 @@ const GridCell: React.FC<GridCellProps> = ({
     <Box
       key={`${index}-${selectedTurnIndex}`}
       onClick={() => {
-        if (disabled) return
+        debugLog('GridCell', 'onClick triggered', {
+          index,
+          disabled,
+          isAllowedMove,
+          isSelected,
+        }, selectedTurnIndex)
+        if (disabled) {
+          debugWarn('GridCell', 'click ignored: cell is disabled', { index, disabled }, selectedTurnIndex)
+          return
+        }
         onClick(index)
       }}
       sx={{
