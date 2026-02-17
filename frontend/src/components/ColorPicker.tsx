@@ -45,7 +45,7 @@ export const ColorPicker: React.FC<ColorPickerProps> = ({
     setOpen(false);
   };
 
-  const handleColorChange = (color: any) => {
+  const handleColorChange = (color: { hex: string }) => {
     setTempColor(color.hex);
   };
 

@@ -22,6 +22,7 @@ import {
   FirstPage,
   LastPage,
 } from "@mui/icons-material"
+import { debugLog, debugWarn, debugError } from "../../utils/debugLogger"
 
 export interface GameLogicProps {
   gameState: GameState | null
@@ -96,48 +97,137 @@ const GameGrid: React.FC<{
   }, [gridWidth, selectedTurnIndex])
 
   const handleSquareClick = async (index: number) => {
-    if (!latestTurn || !gameState) return
+    const currentTurnIndex = gameState?.turns ? gameState.turns.length - 1 : -1
+    
+    debugLog('GameGrid', 'handleSquareClick called', {
+      index,
+      hasLatestTurn: !!latestTurn,
+      hasGameState: !!gameState,
+      hasGameSetup: !!gameSetup,
+      gameStarted: gameSetup?.started,
+      userID: user.userID,
+      gameID,
+      sessionName,
+      hasSubmittedMove,
+      disabled,
+      selectedSquare,
+      hasGameLogicReturn: !!gameLogicReturn,
+    }, currentTurnIndex)
 
-    if (gameSetup?.started) {
-      const allowedMoves = latestTurn.allowedMoves[user.userID] || []
-      if (allowedMoves.includes(index)) {
-        setSelectedSquare(index)
+    if (!latestTurn || !gameState) {
+      debugWarn('GameGrid', 'handleSquareClick early return: missing latestTurn or gameState', {
+        hasLatestTurn: !!latestTurn,
+        hasGameState: !!gameState,
+      }, currentTurnIndex)
+      return
+    }
 
-        // Handle clash
-        const clash = gameLogicReturn?.clashesAtPosition[index]
-        if (clash) {
-          const playersInvolved = gameSetup.gamePlayers.filter((player) =>
-            clash.playerIDs.includes(player.id),
-          )
-          setClashReason(clash.reason)
-          setClashPlayersList(playersInvolved)
-          setOpenClashDialog(true)
-        }
+    if (!gameSetup?.started) {
+      debugWarn('GameGrid', 'handleSquareClick: game not started', {
+        gameSetup,
+        started: gameSetup?.started,
+      }, currentTurnIndex)
+      return
+    }
 
-        // Submit move
-        if (gameID && sessionName) {
-          const moveRef = collection(
-            db,
-            `sessions/${sessionName}/games/${gameID}/privateMoves`,
-          )
-          const moveNumber = gameState.turns.length - 1
-          await addDoc(moveRef, {
-            gameID,
-            moveNumber,
-            playerID: user.userID,
-            move: index,
-            timestamp: serverTimestamp(),
-          })
+    const allowedMoves = latestTurn.allowedMoves[user.userID] || []
+    debugLog('GameGrid', 'allowedMoves check', {
+      userID: user.userID,
+      allowedMoves,
+      clickedIndex: index,
+      isAllowed: allowedMoves.includes(index),
+      allAllowedMoves: latestTurn.allowedMoves,
+    }, currentTurnIndex)
 
-          const moveStatusDocRef = doc(
-            db,
-            `sessions/${sessionName}/games/${gameID}/moveStatuses/${moveNumber}`,
-          )
-          await updateDoc(moveStatusDocRef, {
-            movedPlayerIDs: arrayUnion(user.userID),
-          })
-        }
-      }
+    if (!allowedMoves.includes(index)) {
+      debugWarn('GameGrid', 'handleSquareClick: clicked index not in allowedMoves', {
+        index,
+        allowedMoves,
+        userID: user.userID,
+      }, currentTurnIndex)
+      return
+    }
+
+    debugLog('GameGrid', 'setSelectedSquare called', { index }, currentTurnIndex)
+    setSelectedSquare(index)
+
+    // Handle clash
+    const clash = gameLogicReturn?.clashesAtPosition[index]
+    if (clash) {
+      debugLog('GameGrid', 'clash detected at position', {
+        index,
+        clash,
+        clashesAtPosition: gameLogicReturn?.clashesAtPosition,
+      }, currentTurnIndex)
+      const playersInvolved = gameSetup.gamePlayers.filter((player) =>
+        clash.playerIDs.includes(player.id),
+      )
+      setClashReason(clash.reason)
+      setClashPlayersList(playersInvolved)
+      setOpenClashDialog(true)
+    }
+
+    // Submit move
+    if (!gameID || !sessionName) {
+      debugError('GameGrid', 'handleSquareClick: missing gameID or sessionName for move submission', {
+        gameID,
+        sessionName,
+      }, currentTurnIndex)
+      return
+    }
+
+    try {
+      const moveRef = collection(
+        db,
+        `sessions/${sessionName}/games/${gameID}/privateMoves`,
+      )
+      const moveNumber = gameState.turns.length - 1
+      
+      debugLog('GameGrid', 'submitting move to Firestore', {
+        path: `sessions/${sessionName}/games/${gameID}/privateMoves`,
+        moveNumber,
+        playerID: user.userID,
+        move: index,
+      }, currentTurnIndex)
+
+      const docRef = await addDoc(moveRef, {
+        gameID,
+        moveNumber,
+        playerID: user.userID,
+        move: index,
+        timestamp: serverTimestamp(),
+      })
+      
+      debugLog('GameGrid', 'move document created successfully', {
+        docId: docRef.id,
+        path: docRef.path,
+      }, currentTurnIndex)
+
+      const moveStatusDocRef = doc(
+        db,
+        `sessions/${sessionName}/games/${gameID}/moveStatuses/${moveNumber}`,
+      )
+      
+      debugLog('GameGrid', 'updating moveStatus document', {
+        path: `sessions/${sessionName}/games/${gameID}/moveStatuses/${moveNumber}`,
+        playerID: user.userID,
+      }, currentTurnIndex)
+
+      await updateDoc(moveStatusDocRef, {
+        movedPlayerIDs: arrayUnion(user.userID),
+      })
+      
+      debugLog('GameGrid', 'moveStatus updated successfully', {}, currentTurnIndex)
+    } catch (error) {
+      debugError('GameGrid', 'Error submitting move to Firestore', {
+        error,
+        errorMessage: error instanceof Error ? error.message : 'Unknown error',
+        errorStack: error instanceof Error ? error.stack : undefined,
+        gameID,
+        sessionName,
+        index,
+        userID: user.userID,
+      }, currentTurnIndex)
     }
   }
 
@@ -152,6 +242,7 @@ const GameGrid: React.FC<{
         setSelectedTurnIndex(newTurnCount - 1) // Automatically go to the latest turn
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gameState?.turns?.length])
 
   // Update gameLogicReturn when relevant variables change
@@ -182,6 +273,52 @@ const GameGrid: React.FC<{
       currentUserAllowedMoveMap[move] = true
     })
   }
+
+  // Check if this is a snek game mode
+  const isSnekGame = gameState?.setup.gameType === "snek" ||
+    gameState?.setup.gameType === "teamsnek" ||
+    gameState?.setup.gameType === "kingsnek"
+
+  // Arrow key controls for snek game modes
+  useEffect(() => {
+    if (!isSnekGame || !latestTurn || !gameState || disabled) return
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const arrowKeys = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"]
+      if (!arrowKeys.includes(event.key)) return
+
+      event.preventDefault()
+
+      const headPosition = latestTurn.playerPieces[user.userID]?.[0]
+      if (headPosition === undefined) return
+
+      const allowedMoves = latestTurn.allowedMoves[user.userID] || []
+      let targetIndex: number | null = null
+
+      switch (event.key) {
+        case "ArrowUp":
+          targetIndex = headPosition - gridWidth
+          break
+        case "ArrowDown":
+          targetIndex = headPosition + gridWidth
+          break
+        case "ArrowLeft":
+          targetIndex = headPosition - 1
+          break
+        case "ArrowRight":
+          targetIndex = headPosition + 1
+          break
+      }
+
+      if (targetIndex !== null && allowedMoves.includes(targetIndex)) {
+        handleSquareClick(targetIndex)
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSnekGame, latestTurn, gameState, disabled, user.userID, gridWidth])
 
   // Navigation handlers
   const handlePrevTurn = () => {
