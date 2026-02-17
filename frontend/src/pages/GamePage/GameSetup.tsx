@@ -32,6 +32,7 @@ import {
   TableContainer,
   TableHead,
   TableRow,
+  TextField,
   Typography,
 } from "@mui/material"
 import { GamePlayer, GameType, Team } from "@shared/types/Game"
@@ -302,6 +303,15 @@ const GameSetup: React.FC = () => {
     })
   }
 
+  // Handle max turn time configuration
+  const handleSecondsPerTurnChange = async (newSeconds: number) => {
+    const sanitizedValue = Math.max(0.5, Math.min(300, newSeconds)) // Min 0.5s, max 5 minutes
+    setSecondsPerTurn(`${sanitizedValue}`)
+    await updateDoc(gameDocRef, {
+      maxTurnTime: sanitizedValue,
+    })
+  }
+
   // Handler for selecting game type
   const handleGameTypeChange = async (event: SelectChangeEvent<GameType>) => {
 
@@ -482,6 +492,22 @@ const GameSetup: React.FC = () => {
             <MenuItem value="large">Large</MenuItem>
           </Select>
         </FormControl>
+
+        {/* Turn Time */}
+        <TextField
+          label="Turn Time (s)"
+          type="number"
+          value={secondsPerTurn}
+          onChange={(e) => {
+            const value = parseFloat(e.target.value)
+            if (!isNaN(value)) {
+              handleSecondsPerTurnChange(value)
+            }
+          }}
+          disabled={started}
+          sx={{ flex: 1 }}
+          inputProps={{ min: 0.5, max: 300, step: 0.1 }}
+        />
       </Box>
 
       {/* Game rules */}
