@@ -60,8 +60,6 @@ const GameSetup: React.FC = () => {
     gameState,
   } = useGameStateContext()
 
-  if (!gameSetup) return null
-
   const [secondsPerTurn, setSecondsPerTurn] = useState<string>("10")
   const [RulesComponent, setRulesComponent] = useState<React.FC | null>(null)
   const [boardSize, setBoardSize] = useState<BoardSize>("medium")
@@ -128,6 +126,12 @@ const GameSetup: React.FC = () => {
       }
     }
   }, [gameSetup, setGameType])
+
+  useEffect(() => {
+    setRulesComponent(() => getRulesComponent(gameSetup?.gameType))
+  }, [gameSetup?.gameType, gameSetup])
+
+  if (!gameSetup) return null
 
   // Start game
   const handleReady = async () => {
@@ -326,11 +330,7 @@ const GameSetup: React.FC = () => {
     }
   }
 
-  useEffect(() => {
-    setRulesComponent(() => getRulesComponent(gameSetup?.gameType))
-  }, [gameSetup?.gameType, gameSetup])
-
-  if (gameState || !gameSetup) return null
+  if (gameState) return null
 
   const { started, playersReady } = gameSetup
   const notReadyPlayers = gameSetup.gamePlayers

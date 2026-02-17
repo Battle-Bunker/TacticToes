@@ -190,6 +190,7 @@ const Bots: React.FC = () => {
       emoji,
       colour,
       public: isPublic,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       createdAt: serverTimestamp() as any,
     };
 

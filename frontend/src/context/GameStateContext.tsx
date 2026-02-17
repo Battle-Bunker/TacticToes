@@ -539,7 +539,7 @@ export const GameStateProvider: React.FC<{
       return
     }
 
-    let intervalTime = 1000
+    const intervalTime = 1000
 
     const intervalFunction = async () => {
       if (shouldClearInterval()) {
