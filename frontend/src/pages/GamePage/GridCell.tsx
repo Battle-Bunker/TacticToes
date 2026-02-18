@@ -13,12 +13,11 @@ interface GridCellProps {
   isSelected: boolean
   onClick: (index: number) => void
   disabled: boolean
-  selectedTurnIndex: number
 }
 
 const BORDER_WIDTH = 4
 
-const GridCell: React.FC<GridCellProps> = ({
+const GridCell: React.FC<GridCellProps> = React.memo(({
   index,
   cellSize,
   cellContent,
@@ -29,20 +28,18 @@ const GridCell: React.FC<GridCellProps> = ({
   isSelected,
   onClick,
   disabled,
-  selectedTurnIndex,
 }) => {
   return (
     <Box
-      key={`${index}-${selectedTurnIndex}`}
       onClick={() => {
         debugLog('GridCell', 'onClick triggered', {
           index,
           disabled,
           isAllowedMove,
           isSelected,
-        }, selectedTurnIndex)
+        })
         if (disabled) {
-          debugWarn('GridCell', 'click ignored: cell is disabled', { index, disabled }, selectedTurnIndex)
+          debugWarn('GridCell', 'click ignored: cell is disabled', { index, disabled })
           return
         }
         onClick(index)
@@ -108,6 +105,6 @@ const GridCell: React.FC<GridCellProps> = ({
       </Box>
     </Box>
   )
-}
+})
 
 export default GridCell

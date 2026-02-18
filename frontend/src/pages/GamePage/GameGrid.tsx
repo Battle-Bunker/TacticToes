@@ -366,7 +366,7 @@ const GameGrid: React.FC = () => {
       >
         {Array.from({ length: totalCells }).map((_, index) => (
           <GridCell
-            key={`${index}-${selectedTurnIndex}`}
+            key={index}
             index={index}
             cellSize={cellSize}
             cellContent={gameLogicReturn.cellContentMap[index]}
@@ -380,7 +380,6 @@ const GameGrid: React.FC = () => {
             isSelected={selectedSquare === index}
             onClick={handleSquareClick}
             disabled={disabled}
-            selectedTurnIndex={selectedTurnIndex}
           />
         ))}
       </Box>
