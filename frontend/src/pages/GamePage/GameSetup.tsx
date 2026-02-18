@@ -502,6 +502,7 @@ const GameSetup: React.FC = () => {
             <MenuItem value="small">Small</MenuItem>
             <MenuItem value="medium">Medium</MenuItem>
             <MenuItem value="large">Large</MenuItem>
+            <MenuItem value="giant">Giant</MenuItem>
           </Select>
         </FormControl>
 
