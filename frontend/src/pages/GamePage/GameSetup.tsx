@@ -418,7 +418,7 @@ const GameSetup: React.FC = () => {
             disabled={
               started ||
               gameSetup.boardWidth < 5 ||
-              gameSetup.boardWidth > 20 ||
+              gameSetup.boardWidth > 25 ||
               parseInt(secondsPerTurn) <= 0 ||
               gameSetup.playersReady.includes(userID)
             }
