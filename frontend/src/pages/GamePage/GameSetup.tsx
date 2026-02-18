@@ -6,14 +6,17 @@ import {
   deleteField,
   doc,
   updateDoc,
-} from "firebase/firestore"
-import React, { useEffect, useState } from "react"
-import { useUser } from "../../context/UserContext"
-import { db } from "../../firebaseConfig"
-import { TeamConfiguration } from "../../components/TeamConfiguration"
-import { SnekConfiguration } from "../../components/SnekConfiguration"
-import { PlayerConfiguration } from "../../components/PlayerConfiguration"
-import { BotHealthProvider, useBotHealth } from "../../context/BotHealthContext"
+} from "firebase/firestore";
+import React, { useEffect, useState } from "react";
+import { useUser } from "../../context/UserContext";
+import { db } from "../../firebaseConfig";
+import { TeamConfiguration } from "../../components/TeamConfiguration";
+import { SnekConfiguration } from "../../components/SnekConfiguration";
+import { PlayerConfiguration } from "../../components/PlayerConfiguration";
+import {
+  BotHealthProvider,
+  useBotHealth,
+} from "../../context/BotHealthContext";
 
 import {
   Box,
@@ -34,22 +37,23 @@ import {
   TableRow,
   TextField,
   Typography,
-} from "@mui/material"
-import { GamePlayer, GameType, Team } from "@shared/types/Game"
-import { useGameStateContext } from "../../context/GameStateContext"
-import { getRulesComponent } from "./RulesDialog"
+} from "@mui/material";
+import { GamePlayer, GameType, Team } from "@shared/types/Game";
+import { useGameStateContext } from "../../context/GameStateContext";
+import { getRulesComponent } from "./RulesDialog";
 
 // Define the board size mapping
 const BOARD_SIZE_MAPPING = {
   small: { width: 11, height: 11 },
   medium: { width: 13, height: 13 },
   large: { width: 17, height: 17 },
-}
+  giant: { width: 25, height: 25 },
+};
 
-type BoardSize = keyof typeof BOARD_SIZE_MAPPING
+type BoardSize = keyof typeof BOARD_SIZE_MAPPING;
 
 const GameSetup: React.FC = () => {
-  const { userID, colour } = useUser()
+  const { userID, colour } = useUser();
   const {
     gameSetup,
     players,
@@ -59,31 +63,31 @@ const GameSetup: React.FC = () => {
     sessionName,
     gameID,
     gameState,
-  } = useGameStateContext()
+  } = useGameStateContext();
 
-  const [secondsPerTurn, setSecondsPerTurn] = useState<string>("10")
-  const [RulesComponent, setRulesComponent] = useState<React.FC | null>(null)
-  const [boardSize, setBoardSize] = useState<BoardSize>("medium")
-  const [teams, setTeams] = useState<Team[]>(gameSetup?.teams || [])
+  const [secondsPerTurn, setSecondsPerTurn] = useState<string>("10");
+  const [RulesComponent, setRulesComponent] = useState<React.FC | null>(null);
+  const [boardSize, setBoardSize] = useState<BoardSize>("medium");
+  const [teams, setTeams] = useState<Team[]>(gameSetup?.teams || []);
   const [maxTurnsEnabled, setMaxTurnsEnabled] = useState<boolean>(
     gameSetup?.maxTurns !== undefined,
-  )
-  const [maxTurns, setMaxTurns] = useState<number>(gameSetup?.maxTurns ?? 100)
+  );
+  const [maxTurns, setMaxTurns] = useState<number>(gameSetup?.maxTurns ?? 100);
   const [hazardPercentage, setHazardPercentage] = useState<number>(
     gameSetup?.hazardPercentage ?? 0,
-  )
+  );
   const [teamClustersEnabled, setTeamClustersEnabled] = useState<boolean>(
     gameSetup?.teamClustersEnabled ?? false,
-  )
-  
-  const { getBotStatus } = useBotHealth()
+  );
 
-  const gameDocRef = doc(db, "sessions", sessionName, "setups", gameID)
+  const { getBotStatus } = useBotHealth();
+
+  const gameDocRef = doc(db, "sessions", sessionName, "setups", gameID);
 
   // Inject the shake animation styles once the component mounts
   React.useEffect(() => {
-    addStyles()
-  }, [])
+    addStyles();
+  }, []);
 
   // Update local state when gameSetup changes
   useEffect(() => {
@@ -93,58 +97,58 @@ const GameSetup: React.FC = () => {
         ([, dimensions]) =>
           dimensions.width === gameSetup.boardWidth &&
           dimensions.height === gameSetup.boardHeight,
-      )
+      );
       if (currentSize) {
-        setBoardSize(currentSize[0] as BoardSize)
+        setBoardSize(currentSize[0] as BoardSize);
       }
 
       // Update game type
       if (gameSetup.gameType) {
-        setGameType(gameSetup.gameType)
+        setGameType(gameSetup.gameType);
       }
 
       // Update turn time
-      setSecondsPerTurn(`${gameSetup.maxTurnTime}`)
+      setSecondsPerTurn(`${gameSetup.maxTurnTime}`);
 
       //  Update max turns
       if (gameSetup.maxTurns !== undefined) {
-        setMaxTurns(gameSetup.maxTurns)
-        setMaxTurnsEnabled(true)
+        setMaxTurns(gameSetup.maxTurns);
+        setMaxTurnsEnabled(true);
       } else {
-        setMaxTurnsEnabled(false)
+        setMaxTurnsEnabled(false);
       }
 
       // Update hazard percentage
       if (gameSetup.hazardPercentage !== undefined) {
-        setHazardPercentage(gameSetup.hazardPercentage)
+        setHazardPercentage(gameSetup.hazardPercentage);
       }
 
-      setTeamClustersEnabled(gameSetup.teamClustersEnabled ?? false)
+      setTeamClustersEnabled(gameSetup.teamClustersEnabled ?? false);
 
       //  Update teams
       if (gameSetup.teams) {
-        setTeams(gameSetup.teams)
+        setTeams(gameSetup.teams);
       }
     }
-  }, [gameSetup, setGameType])
+  }, [gameSetup, setGameType]);
 
   useEffect(() => {
-    setRulesComponent(() => getRulesComponent(gameSetup?.gameType))
-  }, [gameSetup?.gameType, gameSetup])
+    setRulesComponent(() => getRulesComponent(gameSetup?.gameType));
+  }, [gameSetup?.gameType, gameSetup]);
 
-  if (!gameSetup) return null
+  if (!gameSetup) return null;
 
   // Start game
   const handleReady = async () => {
     await updateDoc(gameDocRef, {
       playersReady: arrayUnion(userID),
-    })
-  }
+    });
+  };
 
   const handleAddBot = async (botID: string) => {
     // Check if bot is dead before adding to game
     const botHealthStatus = getBotStatus(botID);
-    if (botHealthStatus === 'dead') {
+    if (botHealthStatus === "dead") {
       console.log(`Cannot add bot ${botID} to game - bot is dead`);
       return;
     }
@@ -152,61 +156,61 @@ const GameSetup: React.FC = () => {
     const bot: GamePlayer = {
       id: botID,
       type: "bot",
-    }
+    };
 
     await updateDoc(gameDocRef, {
       gamePlayers: arrayUnion(bot),
-    })
-  }
+    });
+  };
 
   // Start game
   const handleStart = async () => {
     await updateDoc(gameDocRef, {
       startRequested: true,
-    })
-  }
+    });
+  };
 
   // Kick a player by removing their playerID from the playerIDs field
   const handlePlayerKick = async (playerID: string, type: "bot" | "human") => {
     const player: GamePlayer = {
       id: playerID,
       type: type,
-    }
+    };
     await updateDoc(gameDocRef, {
       gamePlayers: arrayRemove(player),
-        })
-  }
+    });
+  };
 
   // Handle team assignment for a player
   const handleTeamChange = async (playerID: string, teamID: string) => {
-    if (!gameSetup) return
-    
+    if (!gameSetup) return;
+
     // Check if this is a dead bot trying to be assigned to a team
-    const player = gameSetup.gamePlayers.find(p => p.id === playerID);
-    if (player?.type === 'bot') {
+    const player = gameSetup.gamePlayers.find((p) => p.id === playerID);
+    if (player?.type === "bot") {
       const botStatus = getBotStatus(playerID);
-      if (botStatus === 'dead') {
+      if (botStatus === "dead") {
         console.log(`Cannot assign dead bot ${playerID} to team`);
         return;
       }
     }
-    
+
     const updatedGamePlayers = gameSetup.gamePlayers.map((player) =>
-      player.id === playerID ? { ...player, teamID } : player
-    )
-    
+      player.id === playerID ? { ...player, teamID } : player,
+    );
+
     await updateDoc(gameDocRef, {
       gamePlayers: updatedGamePlayers,
-    })
-  }
+    });
+  };
 
   // Handle team configuration changes
   const handleTeamsChange = async (newTeams: Team[]) => {
     await updateDoc(gameDocRef, {
       teams: newTeams,
-    })
-    setTeams(newTeams)
-  }
+    });
+    setTeams(newTeams);
+  };
 
   // Handle King selection for a player
   const handleKingToggle = async (playerID: string, teamID: string) => {
@@ -219,181 +223,187 @@ const GameSetup: React.FC = () => {
       return player;
     });
 
-    const teamPlayers = updatedGamePlayers.filter(p => p.teamID === teamID);
-    const kingPlayer = teamPlayers.find(p => p.isKing);
-    const otherPlayers = teamPlayers.filter(p => !p.isKing);
-    const nonTeamPlayers = updatedGamePlayers.filter(p => p.teamID !== teamID);
+    const teamPlayers = updatedGamePlayers.filter((p) => p.teamID === teamID);
+    const kingPlayer = teamPlayers.find((p) => p.isKing);
+    const otherPlayers = teamPlayers.filter((p) => !p.isKing);
+    const nonTeamPlayers = updatedGamePlayers.filter(
+      (p) => p.teamID !== teamID,
+    );
 
     const reorderedPlayers = [
       ...(kingPlayer ? [kingPlayer] : []),
       ...otherPlayers,
-      ...nonTeamPlayers
+      ...nonTeamPlayers,
     ];
 
     await updateDoc(gameDocRef, {
       gamePlayers: reorderedPlayers,
     });
-  }
+  };
 
   const handlePlayerTeamKick = async (playerID: string, teamID: string) => {
-   if (!gameSetup) return;
+    if (!gameSetup) return;
 
     const playerIndex = gameSetup.gamePlayers.findIndex(
-      (player: GamePlayer) => player.id === playerID && player.teamID === teamID
+      (player: GamePlayer) =>
+        player.id === playerID && player.teamID === teamID,
     );
-  
+
     if (playerIndex === -1) {
-     console.log("Player not found.")
+      console.log("Player not found.");
       return;
     }
-  
+
     //  Use null instead of deleteField()
-    const updatedGamePlayers = gameSetup.gamePlayers.map((player, index) => 
-      index === playerIndex 
-        ? { ...player, teamID: null }  //  Set to null
-        : player
+    const updatedGamePlayers = gameSetup.gamePlayers.map((player, index) =>
+      index === playerIndex
+        ? { ...player, teamID: null } //  Set to null
+        : player,
     );
-  
+
     await updateDoc(gameDocRef, {
-      gamePlayers: updatedGamePlayers
+      gamePlayers: updatedGamePlayers,
     });
   };
 
   // Handle max turns configuration
   const handleMaxTurnsChange = async (newMaxTurns: number) => {
-    const sanitizedValue = Math.max(1, newMaxTurns)
-    setMaxTurns(sanitizedValue)
+    const sanitizedValue = Math.max(1, newMaxTurns);
+    setMaxTurns(sanitizedValue);
 
     if (maxTurnsEnabled) {
       await updateDoc(gameDocRef, {
         maxTurns: sanitizedValue,
-      })
+      });
     }
-  }
+  };
 
   const handleMaxTurnsToggle = async (enabled: boolean) => {
-    setMaxTurnsEnabled(enabled)
+    setMaxTurnsEnabled(enabled);
 
     if (enabled) {
-      const sanitizedValue = Math.max(1, maxTurns)
-      setMaxTurns(sanitizedValue)
+      const sanitizedValue = Math.max(1, maxTurns);
+      setMaxTurns(sanitizedValue);
       await updateDoc(gameDocRef, {
         maxTurns: sanitizedValue,
-      })
+      });
     } else {
       await updateDoc(gameDocRef, {
         maxTurns: deleteField(),
-      })
+      });
     }
-  }
+  };
 
   // Handle hazard percentage configuration
   const handleHazardPercentageChange = async (newHazardPercentage: number) => {
-    const sanitizedValue = Math.max(0, Math.min(100, newHazardPercentage))
+    const sanitizedValue = Math.max(0, Math.min(100, newHazardPercentage));
     await updateDoc(gameDocRef, {
       hazardPercentage: sanitizedValue,
-    })
-    setHazardPercentage(sanitizedValue)
-  }
+    });
+    setHazardPercentage(sanitizedValue);
+  };
 
   const handleTeamClustersToggle = async (enabled: boolean) => {
-    setTeamClustersEnabled(enabled)
+    setTeamClustersEnabled(enabled);
     await updateDoc(gameDocRef, {
       teamClustersEnabled: enabled,
-    })
-  }
+    });
+  };
 
   // Handle max turn time configuration
   const handleSecondsPerTurnChange = async (newSeconds: number) => {
-    const sanitizedValue = Math.max(0.5, Math.min(300, newSeconds)) // Min 0.5s, max 5 minutes
-    setSecondsPerTurn(`${sanitizedValue}`)
+    const sanitizedValue = Math.max(0.5, Math.min(300, newSeconds)); // Min 0.5s, max 5 minutes
+    setSecondsPerTurn(`${sanitizedValue}`);
     await updateDoc(gameDocRef, {
       maxTurnTime: sanitizedValue,
-    })
-  }
+    });
+  };
 
   // Handler for selecting game type
   const handleGameTypeChange = async (event: SelectChangeEvent<GameType>) => {
-
-    const selectedGameType = event.target.value as GameType
-    setGameType(selectedGameType)
+    const selectedGameType = event.target.value as GameType;
+    setGameType(selectedGameType);
 
     // Update Firestore when game type is selected
     if (!gameSetup?.started) {
-      await updateDoc(gameDocRef, { gameType: selectedGameType })
+      await updateDoc(gameDocRef, { gameType: selectedGameType });
     }
-  }
+  };
 
   // Handler for selecting board size
   const handleBoardSizeChange = async (event: SelectChangeEvent<BoardSize>) => {
-    const selectedBoardSize = event.target.value as BoardSize
-    setBoardSize(selectedBoardSize)
+    const selectedBoardSize = event.target.value as BoardSize;
+    setBoardSize(selectedBoardSize);
 
-    const { width, height } = BOARD_SIZE_MAPPING[selectedBoardSize]
+    const { width, height } = BOARD_SIZE_MAPPING[selectedBoardSize];
 
     // Update Firestore when board size is selected
     if (!gameSetup?.started) {
       await updateDoc(gameDocRef, {
         boardWidth: width,
         boardHeight: height,
-      })
+      });
     }
-  }
+  };
 
-  if (gameState) return null
+  if (gameState) return null;
 
-  const { started, playersReady } = gameSetup
+  const { started, playersReady } = gameSetup;
   const notReadyPlayers = gameSetup.gamePlayers
     .filter((gamePlayer) => gamePlayer.type === "human")
     .filter((player) => !gameSetup.playersReady.includes(player.id))
     .map(
       (notReadyPlayer) =>
         players.find((player) => player.id === notReadyPlayer.id)?.name,
-    )
+    );
 
   // Validation for Team Snek and King Snek games
   const canStartGame = () => {
-    if (gameType !== 'teamsnek' && gameType !== 'kingsnek') return true;
-    
-    const populatedTeams = teams.filter(team => 
-      gameSetup.gamePlayers.some(player => player.teamID === team.id)
+    if (gameType !== "teamsnek" && gameType !== "kingsnek") return true;
+
+    const populatedTeams = teams.filter((team) =>
+      gameSetup.gamePlayers.some((player) => player.teamID === team.id),
     );
-    
+
     if (populatedTeams.length < 2) return false;
-    
-    if (gameType === 'kingsnek') {
-      const teamsWithKing = populatedTeams.filter(team =>
-        gameSetup.gamePlayers.some(player => player.teamID === team.id && player.isKing)
+
+    if (gameType === "kingsnek") {
+      const teamsWithKing = populatedTeams.filter((team) =>
+        gameSetup.gamePlayers.some(
+          (player) => player.teamID === team.id && player.isKing,
+        ),
       );
       return teamsWithKing.length === populatedTeams.length;
     }
-    
+
     return true;
   };
 
   const getTeamValidationMessage = () => {
-    if (gameType !== 'teamsnek' && gameType !== 'kingsnek') return '';
-    
-    const populatedTeams = teams.filter(team => 
-      gameSetup.gamePlayers.some(player => player.teamID === team.id)
+    if (gameType !== "teamsnek" && gameType !== "kingsnek") return "";
+
+    const populatedTeams = teams.filter((team) =>
+      gameSetup.gamePlayers.some((player) => player.teamID === team.id),
     );
-    
+
     if (populatedTeams.length === 0) {
-      return 'Assign players to teams before starting the game';
+      return "Assign players to teams before starting the game";
     } else if (populatedTeams.length === 1) {
-      return 'At least 2 teams must have players before starting the game';
+      return "At least 2 teams must have players before starting the game";
     }
-    
-    if (gameType === 'kingsnek') {
-      const teamsWithKing = populatedTeams.filter(team =>
-        gameSetup.gamePlayers.some(player => player.teamID === team.id && player.isKing)
+
+    if (gameType === "kingsnek") {
+      const teamsWithKing = populatedTeams.filter((team) =>
+        gameSetup.gamePlayers.some(
+          (player) => player.teamID === team.id && player.isKing,
+        ),
       );
       if (teamsWithKing.length < populatedTeams.length) {
-        return 'Each team must have a King selected before starting the game';
+        return "Each team must have a King selected before starting the game";
       }
     }
-    
-    return '';
+
+    return "";
   };
 
   return (
@@ -418,24 +428,26 @@ const GameSetup: React.FC = () => {
           >
             {gameSetup.playersReady.includes(userID) ? `Waiting` : "I'm ready!"}
           </Button>
-          {(gameType === 'teamsnek' || gameType === 'kingsnek') && !canStartGame() && getTeamValidationMessage() && (
-            <Typography color="error" sx={{ textAlign: 'center', mt: 1 }}>
-              {getTeamValidationMessage()}
-            </Typography>
-          )}
+          {(gameType === "teamsnek" || gameType === "kingsnek") &&
+            !canStartGame() &&
+            getTeamValidationMessage() && (
+              <Typography color="error" sx={{ textAlign: "center", mt: 1 }}>
+                {getTeamValidationMessage()}
+              </Typography>
+            )}
         </>
       ) : (
         <>
           <Button
             disabled={gameSetup.startRequested || !canStartGame()}
             onClick={handleStart}
-            sx={{ 
-              backgroundColor: canStartGame() ? colour : '#ccc', 
-              height: "70px", 
+            sx={{
+              backgroundColor: canStartGame() ? colour : "#ccc",
+              height: "70px",
               fontSize: "32px",
-              '&:hover': {
-                backgroundColor: canStartGame() ? colour : '#ccc'
-              }
+              "&:hover": {
+                backgroundColor: canStartGame() ? colour : "#ccc",
+              },
             }}
             className={canStartGame() ? "shake" : ""}
             fullWidth
@@ -443,7 +455,7 @@ const GameSetup: React.FC = () => {
             {gameSetup.startRequested ? "Game starting" : "Start game"}
           </Button>
           {!canStartGame() && getTeamValidationMessage() && (
-            <Typography color="error" sx={{ textAlign: 'center', mt: 1 }}>
+            <Typography color="error" sx={{ textAlign: "center", mt: 1 }}>
               {getTeamValidationMessage()}
             </Typography>
           )}
@@ -499,9 +511,9 @@ const GameSetup: React.FC = () => {
           type="number"
           value={secondsPerTurn}
           onChange={(e) => {
-            const value = parseFloat(e.target.value)
+            const value = parseFloat(e.target.value);
             if (!isNaN(value)) {
-              handleSecondsPerTurnChange(value)
+              handleSecondsPerTurnChange(value);
             }
           }}
           disabled={started}
@@ -550,23 +562,26 @@ const GameSetup: React.FC = () => {
             <Box sx={{ display: "flex", flexWrap: "wrap", gap: 2 }}>
               {bots.map((bot) => {
                 const botStatus = getBotStatus(bot.id);
-                const isDead = botStatus === 'dead';
-                
+                const isDead = botStatus === "dead";
+
                 return (
                   <Button
                     key={bot.name}
                     disabled={isDead}
                     sx={{
-                      backgroundColor: isDead ? '#ccc' : bot.colour,
+                      backgroundColor: isDead ? "#ccc" : bot.colour,
                       opacity: isDead ? 0.6 : 1,
                     }}
                     onClick={() => handleAddBot(bot.id)}
-                    title={isDead ? 'Bot is dead and cannot be added to game' : ''}
+                    title={
+                      isDead ? "Bot is dead and cannot be added to game" : ""
+                    }
                   >
-                    {bot.emoji}   {bot.name.length > 10
+                    {bot.emoji}{" "}
+                    {bot.name.length > 10
                       ? `${bot.name.slice(0, 10)}…`
                       : bot.name}
-                    {isDead && ' (DEAD)'}
+                    {isDead && " (DEAD)"}
                   </Button>
                 );
               })}
@@ -575,7 +590,9 @@ const GameSetup: React.FC = () => {
         </FormControl>
       )}
 
-      {(gameType === "snek" || gameType === "teamsnek" || gameType === "kingsnek") && (
+      {(gameType === "snek" ||
+        gameType === "teamsnek" ||
+        gameType === "kingsnek") && (
         <FormControl fullWidth variant="outlined" sx={{ mt: 2 }}>
           <InputLabel shrink sx={{ backgroundColor: "white", px: 1 }}>
             Snek Configuration
@@ -655,7 +672,8 @@ const GameSetup: React.FC = () => {
       )}
 
       {/* Players Table */}
-      {(gameType === "teamsnek" || gameType === "kingsnek") && teams.length > 0 ? (
+      {(gameType === "teamsnek" || gameType === "kingsnek") &&
+      teams.length > 0 ? (
         <FormControl fullWidth variant="outlined" sx={{ mt: 2 }}>
           <InputLabel shrink sx={{ backgroundColor: "white", px: 1 }}>
             Player Configuration
@@ -696,8 +714,8 @@ const GameSetup: React.FC = () => {
               {gameSetup.gamePlayers.map((gamePlayer) => {
                 const player = players.find(
                   (player) => player.id === gamePlayer.id,
-                )
-                if (!player) return null
+                );
+                if (!player) return null;
                 return (
                   <TableRow key={player.id}>
                     <TableCell sx={{ backgroundColor: player.colour }}>
@@ -712,20 +730,22 @@ const GameSetup: React.FC = () => {
                     <TableCell
                       align="right"
                       sx={{ backgroundColor: player.colour }}
-                      onClick={() => handlePlayerKick(player.id, gamePlayer.type)}
+                      onClick={() =>
+                        handlePlayerKick(player.id, gamePlayer.type)
+                      }
                     >
                       ❌
                     </TableCell>
                   </TableRow>
-                )
+                );
               })}
             </TableBody>
           </Table>
         </TableContainer>
       )}
     </Stack>
-  )
-}
+  );
+};
 
 const GameSetupWithProvider: React.FC = () => {
   return (
@@ -735,11 +755,11 @@ const GameSetupWithProvider: React.FC = () => {
   );
 };
 
-export default GameSetupWithProvider
+export default GameSetupWithProvider;
 
 // Function to insert keyframe and class rules separately
 const addStyles = () => {
-  const styleSheet = document.styleSheets[0]
+  const styleSheet = document.styleSheets[0];
 
   // Insert the keyframes animation
   styleSheet.insertRule(
@@ -753,7 +773,7 @@ const addStyles = () => {
     }
   `,
     styleSheet.cssRules.length,
-  )
+  );
 
   // Insert the shake class rule with infinite iterations
   styleSheet.insertRule(
@@ -763,5 +783,5 @@ const addStyles = () => {
     }
   `,
     styleSheet.cssRules.length,
-  )
-}
+  );
+};
