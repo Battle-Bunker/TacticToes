@@ -69,6 +69,9 @@
     hazardPercentage?: number // Percentage of the board to fill with hazards (defaults to 0)
     gameMode?: "individual" | "team"
     teamClustersEnabled?: boolean
+    fertileGroundEnabled?: boolean // Enable fertile ground tiles
+    fertileGroundDensity?: number // Percentage of tiles that are fertile (0-100)
+    foodSpawnRate?: number // Percentage chance of food spawning each turn (0-100, defaults to 50)
   }
 
   // Updated GameState interface with the new 'winners' structure
@@ -124,6 +127,7 @@
     turnNumber?: number // Optional: only for team games
     scoringUnit?: 'individual' | 'team' // How scores/winners are aggregated
     teamClusterFallback?: boolean // Optional: team clusters requested but fell back
+    fertileTiles?: number[] // Positions of fertile ground tiles
   }
 
   export interface Clash {

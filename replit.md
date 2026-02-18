@@ -4,6 +4,16 @@ Tactic Toes is a multiplayer game platform built with React/TypeScript frontend 
 
 # Recent Changes
 
+## Fertile Ground & Food Spawn Rate (February 18, 2026)
+- **New Feature**: Added "Fertile Ground" option to all snek game variants (snek, teamsnek, kingsnek)
+- **Fertile Ground**: When enabled, procedurally generates clustered green tiles using a fuzzy seed-and-spread algorithm that creates organic, grass-like patterns
+- **Density Control**: Configurable density percentage (5-80%) controls how much of the board becomes fertile
+- **Food Constraint**: When fertile ground is enabled, food only spawns on fertile tiles
+- **Food Spawn Rate**: New independent control (0-100%) for food spawn chance per turn, replacing the hardcoded 50% default
+- **Type Changes**: Added `fertileGroundEnabled`, `fertileGroundDensity`, `foodSpawnRate` to `GameSetup`; added `fertileTiles` to `Turn`
+- **Backward Compatibility**: All new fields are optional with sensible defaults; existing games unaffected
+- **Core Files Modified**: `shared/types/Game.ts`, `functions/src/gameprocessors/SnekProcessor.ts`, `frontend/src/components/SnekConfiguration.tsx`, `frontend/src/pages/GamePage/GameSetup.tsx`, `frontend/src/pages/GamePage/SnakeGameLogic.tsx`
+
 ## First Turn Time Configuration & Setup Cloning (November 12, 2025)
 - **Problem Solved**: Fixed timing mismatch where turn 0 had a hardcoded 60-second endTime but expired after 10 seconds (using maxTurnTime)
 - **New Field**: Added optional `firstTurnTime` field to GameSetup (defaults to 60 seconds)

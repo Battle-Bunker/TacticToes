@@ -106,7 +106,7 @@ const GameLogic = ({
     }
   }
 
-  const { playerPieces, allowedMoves, clashes, food, hazards, walls } =
+  const { playerPieces, allowedMoves, clashes, food, hazards, walls, fertileTiles } =
     selectedTurn
 
   // Map clashes to positions
@@ -329,6 +329,32 @@ const GameLogic = ({
     padding: 0,
     margin: 0,
     boxSizing: "border-box",
+  }
+
+  // Place fertile ground tiles (grass-like background)
+  if (fertileTiles && fertileTiles.length > 0) {
+    const fertileSet = new Set(fertileTiles)
+    const boardWidth = gameState.setup.boardWidth
+    fertileTiles.forEach((position) => {
+      if (!cellBackgroundMap[position]) {
+        const px = position % boardWidth
+        const py = Math.floor(position / boardWidth)
+        const adjacentCount = [
+          fertileSet.has(position - 1),
+          fertileSet.has(position + 1),
+          fertileSet.has(position - boardWidth),
+          fertileSet.has(position + boardWidth),
+          fertileSet.has(position - boardWidth - 1),
+          fertileSet.has(position - boardWidth + 1),
+          fertileSet.has(position + boardWidth - 1),
+          fertileSet.has(position + boardWidth + 1),
+        ].filter(Boolean).length
+        const noise = ((px * 7 + py * 13) % 5)
+        const lightness = adjacentCount >= 6 ? 38 + noise : adjacentCount >= 3 ? 42 + noise : 48 + noise
+        const saturation = adjacentCount >= 6 ? 55 : adjacentCount >= 3 ? 45 : 35
+        cellBackgroundMap[position] = `hsl(110, ${saturation}%, ${lightness}%)`
+      }
+    })
   }
 
   // Place food

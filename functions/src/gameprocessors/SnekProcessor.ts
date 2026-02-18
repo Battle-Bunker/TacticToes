@@ -26,12 +26,14 @@ interface SnakeGameState {
 }
 
 export class SnekProcessor extends GameProcessor {
-  private foodSpawnChance: number = 0.5 // 50% chance to spawn food
+  private foodSpawnChance: number
   protected maxTurns?: number
+  private fertileTiles: number[] = []
 
   constructor(gameState: GameState) {
     super(gameState)
     this.maxTurns = gameState.setup.maxTurns
+    this.foodSpawnChance = (gameState.setup.foodSpawnRate ?? 50) / 100
   }
 
   firstTurn(): Turn {
@@ -72,6 +74,9 @@ export class SnekProcessor extends GameProcessor {
       boardHeight,
       playerPieces,
     )
+
+    // Initialize fertile tiles
+    this.fertileTiles = this.generateFertileTiles(boardWidth, boardHeight, walls, hazards, playerPieces)
 
     // Initialize food positions
     const food = this.initializeFood(
@@ -115,6 +120,7 @@ export class SnekProcessor extends GameProcessor {
       moves: {},
       winners: [],
       teamClusterFallback,
+      fertileTiles: this.fertileTiles.length > 0 ? this.fertileTiles : undefined,
     }
 
     return firstTurn
@@ -122,6 +128,9 @@ export class SnekProcessor extends GameProcessor {
 
   applyMoves(currentTurn: Turn, moves: Move[]): Turn {
     try {
+      if (currentTurn.fertileTiles && currentTurn.fertileTiles.length > 0) {
+        this.fertileTiles = currentTurn.fertileTiles
+      }
       // 1. Setup
       const gameState = this.initializeGameState(currentTurn)
       
@@ -441,13 +450,17 @@ export class SnekProcessor extends GameProcessor {
 
   private generateNewFood(gameState: SnakeGameState): void {
       if (Math.random() < this.foodSpawnChance) {
-        const freePositions = this.getFreePositions(
+        let freePositions = this.getFreePositions(
         gameState.boardWidth,
         gameState.boardHeight,
         gameState.newSnakes,
         gameState.newFood,
         gameState.newHazards,
         )
+        if (this.gameSetup.fertileGroundEnabled && this.fertileTiles.length > 0) {
+          const fertileSet = new Set(this.fertileTiles)
+          freePositions = freePositions.filter(pos => fertileSet.has(pos))
+        }
         if (freePositions.length > 0) {
           const randomIndex = Math.floor(Math.random() * freePositions.length)
         gameState.newFood.push(freePositions[randomIndex])
@@ -565,6 +578,7 @@ export class SnekProcessor extends GameProcessor {
       clashes: gameState.clashes,
       moves: gameState.playerMoves,
       winners: winners,
+      fertileTiles: this.fertileTiles.length > 0 ? this.fertileTiles : undefined,
     }
   }
 
@@ -585,6 +599,102 @@ export class SnekProcessor extends GameProcessor {
     })
 
     return { playerPieces, teamClusterFallback }
+  }
+
+  private generateFertileTiles(
+    boardWidth: number,
+    boardHeight: number,
+    walls: number[],
+    hazards: number[],
+    playerPieces: { [playerID: string]: number[] },
+  ): number[] {
+    if (!this.gameSetup.fertileGroundEnabled) return []
+    const density = Math.max(0, Math.min(100, this.gameSetup.fertileGroundDensity ?? 30))
+    if (density === 0) return []
+
+    const wallSet = new Set(walls)
+    const hazardSet = new Set(hazards)
+
+    const candidates: number[] = []
+    for (let y = 1; y < boardHeight - 1; y++) {
+      for (let x = 1; x < boardWidth - 1; x++) {
+        const pos = y * boardWidth + x
+        if (!wallSet.has(pos) && !hazardSet.has(pos)) {
+          candidates.push(pos)
+        }
+      }
+    }
+
+    if (candidates.length === 0) return []
+
+    const targetCount = Math.max(1, Math.floor((candidates.length * density) / 100))
+    const numSeeds = Math.max(2, Math.floor(Math.sqrt(targetCount)))
+    const shuffled = [...candidates]
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1))
+      ;[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
+    }
+    const seeds = shuffled.slice(0, numSeeds)
+
+    const fertileSet = new Set<number>(seeds)
+    const frontier = [...seeds]
+
+    while (fertileSet.size < targetCount && frontier.length > 0) {
+      const idx = Math.floor(Math.random() * frontier.length)
+      const current = frontier[idx]
+      frontier.splice(idx, 1)
+
+      const cx = current % boardWidth
+      const cy = Math.floor(current / boardWidth)
+      const neighbors: number[] = []
+      const deltas = [
+        { dx: -1, dy: 0 }, { dx: 1, dy: 0 },
+        { dx: 0, dy: -1 }, { dx: 0, dy: 1 },
+        { dx: -1, dy: -1 }, { dx: 1, dy: -1 },
+        { dx: -1, dy: 1 }, { dx: 1, dy: 1 },
+      ]
+
+      for (const { dx, dy } of deltas) {
+        const nx = cx + dx
+        const ny = cy + dy
+        if (nx >= 1 && nx < boardWidth - 1 && ny >= 1 && ny < boardHeight - 1) {
+          const npos = ny * boardWidth + nx
+          if (!wallSet.has(npos) && !hazardSet.has(npos) && !fertileSet.has(npos)) {
+            neighbors.push(npos)
+          }
+        }
+      }
+
+      for (const n of neighbors) {
+        if (fertileSet.size >= targetCount) break
+        const adjacentFertile = this.countAdjacentFertile(n, boardWidth, fertileSet)
+        const spreadChance = 0.4 + (adjacentFertile * 0.15)
+        if (Math.random() < spreadChance) {
+          fertileSet.add(n)
+          frontier.push(n)
+        }
+      }
+
+      if (fertileSet.size < targetCount && frontier.length > 0) {
+        frontier.push(current)
+      }
+    }
+
+    return Array.from(fertileSet)
+  }
+
+  private countAdjacentFertile(pos: number, boardWidth: number, fertileSet: Set<number>): number {
+    const x = pos % boardWidth
+    const y = Math.floor(pos / boardWidth)
+    let count = 0
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dy === 0) continue
+        const npos = (y + dy) * boardWidth + (x + dx)
+        if (fertileSet.has(npos)) count++
+      }
+    }
+    return count
   }
 
   private initializeFood(

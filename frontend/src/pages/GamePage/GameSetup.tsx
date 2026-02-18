@@ -79,6 +79,15 @@ const GameSetup: React.FC = () => {
   const [teamClustersEnabled, setTeamClustersEnabled] = useState<boolean>(
     gameSetup?.teamClustersEnabled ?? false,
   );
+  const [fertileGroundEnabled, setFertileGroundEnabled] = useState<boolean>(
+    gameSetup?.fertileGroundEnabled ?? false,
+  );
+  const [fertileGroundDensity, setFertileGroundDensity] = useState<number>(
+    gameSetup?.fertileGroundDensity ?? 30,
+  );
+  const [foodSpawnRate, setFoodSpawnRate] = useState<number>(
+    gameSetup?.foodSpawnRate ?? 50,
+  );
 
   const { getBotStatus } = useBotHealth();
 
@@ -124,6 +133,9 @@ const GameSetup: React.FC = () => {
       }
 
       setTeamClustersEnabled(gameSetup.teamClustersEnabled ?? false);
+      setFertileGroundEnabled(gameSetup.fertileGroundEnabled ?? false);
+      setFertileGroundDensity(gameSetup.fertileGroundDensity ?? 30);
+      setFoodSpawnRate(gameSetup.foodSpawnRate ?? 50);
 
       //  Update teams
       if (gameSetup.teams) {
@@ -301,6 +313,29 @@ const GameSetup: React.FC = () => {
       hazardPercentage: sanitizedValue,
     });
     setHazardPercentage(sanitizedValue);
+  };
+
+  const handleFertileGroundToggle = async (enabled: boolean) => {
+    setFertileGroundEnabled(enabled);
+    await updateDoc(gameDocRef, {
+      fertileGroundEnabled: enabled,
+    });
+  };
+
+  const handleFertileGroundDensityChange = async (newDensity: number) => {
+    const sanitizedValue = Math.max(5, Math.min(80, newDensity));
+    setFertileGroundDensity(sanitizedValue);
+    await updateDoc(gameDocRef, {
+      fertileGroundDensity: sanitizedValue,
+    });
+  };
+
+  const handleFoodSpawnRateChange = async (newRate: number) => {
+    const sanitizedValue = Math.max(0, Math.min(100, newRate));
+    setFoodSpawnRate(sanitizedValue);
+    await updateDoc(gameDocRef, {
+      foodSpawnRate: sanitizedValue,
+    });
   };
 
   const handleTeamClustersToggle = async (enabled: boolean) => {
@@ -613,6 +648,12 @@ const GameSetup: React.FC = () => {
               onMaxTurnsChange={handleMaxTurnsChange}
               hazardPercentage={hazardPercentage}
               onHazardPercentageChange={handleHazardPercentageChange}
+              fertileGroundEnabled={fertileGroundEnabled}
+              onFertileGroundToggle={handleFertileGroundToggle}
+              fertileGroundDensity={fertileGroundDensity}
+              onFertileGroundDensityChange={handleFertileGroundDensityChange}
+              foodSpawnRate={foodSpawnRate}
+              onFoodSpawnRateChange={handleFoodSpawnRateChange}
             />
           </Box>
         </FormControl>
