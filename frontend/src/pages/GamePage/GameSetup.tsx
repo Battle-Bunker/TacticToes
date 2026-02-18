@@ -47,7 +47,7 @@ const BOARD_SIZE_MAPPING = {
   small: { width: 11, height: 11 },
   medium: { width: 13, height: 13 },
   large: { width: 17, height: 17 },
-  giant: { width: 25, height: 25 },
+  giant: { width: 21, height: 21 },
 };
 
 type BoardSize = keyof typeof BOARD_SIZE_MAPPING;
@@ -502,7 +502,7 @@ const GameSetup: React.FC = () => {
             <MenuItem value="small">Small (11x11)</MenuItem>
             <MenuItem value="medium">Medium (13x13)</MenuItem>
             <MenuItem value="large">Large (17x17)</MenuItem>
-            <MenuItem value="giant">Giant (25x25)</MenuItem>
+            <MenuItem value="giant">Giant (21x21)</MenuItem>
           </Select>
         </FormControl>
 
