@@ -619,86 +619,71 @@ export class SnekProcessor extends GameProcessor {
     const wallSet = new Set(walls)
     const hazardSet = new Set(hazards)
 
-    const candidates: number[] = []
+    const seedX = Math.random() * 1000
+    const seedY = Math.random() * 1000
+
+    const noiseValues: { pos: number; value: number }[] = []
     for (let y = 1; y < boardHeight - 1; y++) {
       for (let x = 1; x < boardWidth - 1; x++) {
         const pos = y * boardWidth + x
-        if (!wallSet.has(pos) && !hazardSet.has(pos)) {
-          candidates.push(pos)
-        }
+        if (wallSet.has(pos) || hazardSet.has(pos)) continue
+        const value = this.fractalNoise(x + seedX, y + seedY, 4)
+        noiseValues.push({ pos, value })
       }
     }
 
-    if (candidates.length === 0) return []
+    if (noiseValues.length === 0) return []
 
-    const targetCount = Math.max(1, Math.floor((candidates.length * density) / 100))
-    const numSeeds = Math.max(2, Math.floor(Math.sqrt(targetCount)))
-    const shuffled = [...candidates]
-    for (let i = shuffled.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1))
-      ;[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
-    }
-    const seeds = shuffled.slice(0, numSeeds)
-
-    const fertileSet = new Set<number>(seeds)
-    const frontier = [...seeds]
-
-    while (fertileSet.size < targetCount && frontier.length > 0) {
-      const idx = Math.floor(Math.random() * frontier.length)
-      const current = frontier[idx]
-      frontier.splice(idx, 1)
-
-      const cx = current % boardWidth
-      const cy = Math.floor(current / boardWidth)
-      const neighbors: number[] = []
-      const deltas = [
-        { dx: -1, dy: 0 }, { dx: 1, dy: 0 },
-        { dx: 0, dy: -1 }, { dx: 0, dy: 1 },
-        { dx: -1, dy: -1 }, { dx: 1, dy: -1 },
-        { dx: -1, dy: 1 }, { dx: 1, dy: 1 },
-      ]
-
-      for (const { dx, dy } of deltas) {
-        const nx = cx + dx
-        const ny = cy + dy
-        if (nx >= 1 && nx < boardWidth - 1 && ny >= 1 && ny < boardHeight - 1) {
-          const npos = ny * boardWidth + nx
-          if (!wallSet.has(npos) && !hazardSet.has(npos) && !fertileSet.has(npos)) {
-            neighbors.push(npos)
-          }
-        }
-      }
-
-      for (const n of neighbors) {
-        if (fertileSet.size >= targetCount) break
-        const adjacentFertile = this.countAdjacentFertile(n, boardWidth, fertileSet)
-        const spreadChance = 0.4 + (adjacentFertile * 0.15)
-        if (Math.random() < spreadChance) {
-          fertileSet.add(n)
-          frontier.push(n)
-        }
-      }
-
-      if (fertileSet.size < targetCount && frontier.length > 0) {
-        frontier.push(current)
-      }
-    }
-
-    return Array.from(fertileSet)
+    noiseValues.sort((a, b) => b.value - a.value)
+    const targetCount = Math.max(1, Math.floor((noiseValues.length * density) / 100))
+    return noiseValues.slice(0, targetCount).map(n => n.pos)
   }
 
-  private countAdjacentFertile(pos: number, boardWidth: number, fertileSet: Set<number>): number {
-    const x = pos % boardWidth
-    const y = Math.floor(pos / boardWidth)
-    let count = 0
-    for (let dy = -1; dy <= 1; dy++) {
-      for (let dx = -1; dx <= 1; dx++) {
-        if (dx === 0 && dy === 0) continue
-        const npos = (y + dy) * boardWidth + (x + dx)
-        if (fertileSet.has(npos)) count++
-      }
+  private fractalNoise(x: number, y: number, octaves: number): number {
+    let value = 0
+    let amplitude = 1
+    let frequency = 0.3
+    let maxAmplitude = 0
+    for (let i = 0; i < octaves; i++) {
+      value += this.perlinNoise(x * frequency, y * frequency) * amplitude
+      maxAmplitude += amplitude
+      amplitude *= 0.5
+      frequency *= 2.0
     }
-    return count
+    return value / maxAmplitude
+  }
+
+  private perlinNoise(x: number, y: number): number {
+    const x0 = Math.floor(x)
+    const y0 = Math.floor(y)
+    const dx = x - x0
+    const dy = y - y0
+    const sx = dx * dx * (3 - 2 * dx)
+    const sy = dy * dy * (3 - 2 * dy)
+
+    const n00 = this.dotGridGradient(x0, y0, x, y)
+    const n10 = this.dotGridGradient(x0 + 1, y0, x, y)
+    const n01 = this.dotGridGradient(x0, y0 + 1, x, y)
+    const n11 = this.dotGridGradient(x0 + 1, y0 + 1, x, y)
+
+    const ix0 = n00 + sx * (n10 - n00)
+    const ix1 = n01 + sx * (n11 - n01)
+    return ix0 + sy * (ix1 - ix0)
+  }
+
+  private dotGridGradient(ix: number, iy: number, x: number, y: number): number {
+    const hash = this.hashCoord(ix, iy)
+    const angle = hash * 2.0 * Math.PI
+    const gx = Math.cos(angle)
+    const gy = Math.sin(angle)
+    return gx * (x - ix) + gy * (y - iy)
+  }
+
+  private hashCoord(x: number, y: number): number {
+    let h = (x * 374761393 + y * 668265263 + 1013904223) & 0x7fffffff
+    h = ((h >> 13) ^ h) & 0x7fffffff
+    h = (h * 1274126177 + 1013904223) & 0x7fffffff
+    return (h & 0xffff) / 0xffff
   }
 
   private initializeFood(
