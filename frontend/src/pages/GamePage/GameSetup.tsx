@@ -499,10 +499,10 @@ const GameSetup: React.FC = () => {
             disabled={started}
             label="Board Size"
           >
-            <MenuItem value="small">Small</MenuItem>
-            <MenuItem value="medium">Medium</MenuItem>
-            <MenuItem value="large">Large</MenuItem>
-            <MenuItem value="giant">Giant</MenuItem>
+            <MenuItem value="small">Small (11x11)</MenuItem>
+            <MenuItem value="medium">Medium (13x13)</MenuItem>
+            <MenuItem value="large">Large (17x17)</MenuItem>
+            <MenuItem value="giant">Giant (25x25)</MenuItem>
           </Select>
         </FormControl>
 
