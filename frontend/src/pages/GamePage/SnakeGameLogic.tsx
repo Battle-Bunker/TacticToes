@@ -350,9 +350,10 @@ const GameLogic = ({
           fertileSet.has(position + boardWidth + 1),
         ].filter(Boolean).length
         const noise = ((px * 7 + py * 13) % 5)
-        const lightness = adjacentCount >= 6 ? 38 + noise : adjacentCount >= 3 ? 42 + noise : 48 + noise
-        const saturation = adjacentCount >= 6 ? 55 : adjacentCount >= 3 ? 45 : 35
-        cellBackgroundMap[position] = `hsl(110, ${saturation}%, ${lightness}%)`
+        const lightness = adjacentCount >= 6 ? 78 + noise : adjacentCount >= 3 ? 82 + noise : 86 + noise
+        const saturation = adjacentCount >= 6 ? 60 : adjacentCount >= 3 ? 50 : 40
+        const hue = 42 + (noise - 2)
+        cellBackgroundMap[position] = `hsl(${hue}, ${saturation}%, ${lightness}%)`
       }
     })
   }

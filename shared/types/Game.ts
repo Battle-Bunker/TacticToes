@@ -71,7 +71,7 @@
     teamClustersEnabled?: boolean
     fertileGroundEnabled?: boolean // Enable fertile ground tiles
     fertileGroundDensity?: number // Percentage of tiles that are fertile (0-100)
-    foodSpawnRate?: number // Percentage chance of food spawning each turn (0-100, defaults to 50)
+    foodSpawnRate?: number // Expected food spawned per turn (0-5, defaults to 0.5)
   }
 
   // Updated GameState interface with the new 'winners' structure

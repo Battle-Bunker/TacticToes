@@ -26,14 +26,15 @@ interface SnakeGameState {
 }
 
 export class SnekProcessor extends GameProcessor {
-  private foodSpawnChance: number
+  private foodSpawnRate: number
   protected maxTurns?: number
   private fertileTiles: number[] = []
 
   constructor(gameState: GameState) {
     super(gameState)
     this.maxTurns = gameState.setup.maxTurns
-    this.foodSpawnChance = (gameState.setup.foodSpawnRate ?? 50) / 100
+    const rawRate = gameState.setup.foodSpawnRate ?? 0.5
+    this.foodSpawnRate = rawRate > 5 ? rawRate / 100 : rawRate
   }
 
   firstTurn(): Turn {
@@ -449,13 +450,16 @@ export class SnekProcessor extends GameProcessor {
   }
 
   private generateNewFood(gameState: SnakeGameState): void {
-      if (Math.random() < this.foodSpawnChance) {
+      const guaranteedFood = Math.floor(this.foodSpawnRate)
+      const fractional = this.foodSpawnRate - guaranteedFood
+      const totalFood = guaranteedFood + (Math.random() < fractional ? 1 : 0)
+      for (let i = 0; i < totalFood; i++) {
         let freePositions = this.getFreePositions(
-        gameState.boardWidth,
-        gameState.boardHeight,
-        gameState.newSnakes,
-        gameState.newFood,
-        gameState.newHazards,
+          gameState.boardWidth,
+          gameState.boardHeight,
+          gameState.newSnakes,
+          gameState.newFood,
+          gameState.newHazards,
         )
         if (this.gameSetup.fertileGroundEnabled && this.fertileTiles.length > 0) {
           const fertileSet = new Set(this.fertileTiles)
@@ -463,9 +467,9 @@ export class SnekProcessor extends GameProcessor {
         }
         if (freePositions.length > 0) {
           const randomIndex = Math.floor(Math.random() * freePositions.length)
-        gameState.newFood.push(freePositions[randomIndex])
+          gameState.newFood.push(freePositions[randomIndex])
+        }
       }
-    }
   }
 
   protected calculateWinners(gameState: SnakeGameState): Winner[] {

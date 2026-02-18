@@ -62,16 +62,16 @@ export const SnekConfiguration: React.FC<SnekConfigurationProps> = ({
       </div>
       <Box sx={{ mt: 2 }}>
         <Typography variant="body2" gutterBottom>
-          Food Spawn Rate: {foodSpawnRate}%
+          Food Spawn Rate: {foodSpawnRate}/turn
         </Typography>
         <Slider
           value={foodSpawnRate}
           onChange={(_e, value) => onFoodSpawnRateChange(value as number)}
           min={0}
-          max={100}
-          step={5}
+          max={5}
+          step={0.25}
           valueLabelDisplay="auto"
-          valueLabelFormat={(v) => `${v}%`}
+          valueLabelFormat={(v) => `${v}/turn`}
           sx={{ mx: 1 }}
         />
       </Box>

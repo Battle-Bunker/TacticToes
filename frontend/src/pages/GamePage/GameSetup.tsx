@@ -86,7 +86,7 @@ const GameSetup: React.FC = () => {
     gameSetup?.fertileGroundDensity ?? 30,
   );
   const [foodSpawnRate, setFoodSpawnRate] = useState<number>(
-    gameSetup?.foodSpawnRate ?? 50,
+    gameSetup?.foodSpawnRate ?? 0.5,
   );
 
   const { getBotStatus } = useBotHealth();
@@ -135,7 +135,7 @@ const GameSetup: React.FC = () => {
       setTeamClustersEnabled(gameSetup.teamClustersEnabled ?? false);
       setFertileGroundEnabled(gameSetup.fertileGroundEnabled ?? false);
       setFertileGroundDensity(gameSetup.fertileGroundDensity ?? 30);
-      setFoodSpawnRate(gameSetup.foodSpawnRate ?? 50);
+      setFoodSpawnRate(gameSetup.foodSpawnRate ?? 0.5);
 
       //  Update teams
       if (gameSetup.teams) {
@@ -331,7 +331,7 @@ const GameSetup: React.FC = () => {
   };
 
   const handleFoodSpawnRateChange = async (newRate: number) => {
-    const sanitizedValue = Math.max(0, Math.min(100, newRate));
+    const sanitizedValue = Math.max(0, Math.min(5, Math.round(newRate * 4) / 4));
     setFoodSpawnRate(sanitizedValue);
     await updateDoc(gameDocRef, {
       foodSpawnRate: sanitizedValue,
