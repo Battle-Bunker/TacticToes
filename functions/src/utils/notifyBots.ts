@@ -161,11 +161,13 @@ export async function notifyBots(
           const y = Math.floor(pos / gameData.setup.boardWidth)
           return adjustPosition(x, y)
         }),
-        fertileTiles: (turnData.fertileTiles || []).map((pos) => {
-          const x = pos % gameData.setup.boardWidth
-          const y = Math.floor(pos / gameData.setup.boardWidth)
-          return adjustPosition(x, y)
-        }),
+        ...(turnData.fertileTiles ? {
+          fertileTiles: turnData.fertileTiles.map((pos) => {
+            const x = pos % gameData.setup.boardWidth
+            const y = Math.floor(pos / gameData.setup.boardWidth)
+            return adjustPosition(x, y)
+          }),
+        } : {}),
         snakes: Object.keys(turnData.playerPieces).map((player) => {
           const body = turnData.playerPieces[player].map((pos) => {
             const x = pos % gameData.setup.boardWidth
