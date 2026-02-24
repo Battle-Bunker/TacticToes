@@ -149,6 +149,16 @@ The Firebase CLI does NOT automatically grant IAM permissions when deploying. If
 - Pub/Sub (for Eventarc triggers)
 - Cloud Run (for Gen2 functions)
 
+## Organization vs Standalone Project IAM Differences
+
+**Key Insight (February 24, 2026):** Projects under a GCP Organization enforce stricter IAM than standalone ("No organisation") projects. Specifically:
+
+1. **Service account self-impersonation**: The Compute SA (used by Gen2 functions) must be explicitly granted `roles/iam.serviceAccountUser` on itself to schedule Cloud Tasks. Standalone projects allow this implicitly.
+2. **Cloud Run service-level invoker**: Project-level `roles/run.invoker` may not be sufficient for organization projects. Service-level `run.invoker` grants on specific Cloud Run services (e.g., `processturnexpirationtask`) may be required.
+3. **Domain Restricted Sharing**: Organization policies may block `allUsers` grants needed for callable functions.
+
+The bootstrap script (`scripts/bootstrap-gcp-project.sh`) now handles all three scenarios. For first-time setups, run the script twice — once before deploy and once after (Step 11 requires the Cloud Run services to exist).
+
 ## Organization Policy: Domain Restricted Sharing
 
 **Problem:** If your GCP project is under an organization with Domain Restricted Sharing enabled (`iam.allowedPolicyMemberDomains`), Firebase callable functions will fail with CORS errors. This is because:

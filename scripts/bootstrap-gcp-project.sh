@@ -244,8 +244,13 @@ echo "=========================================="
 echo "Step 8: Grant Service Account Impersonation for Cloud Tasks"
 echo "=========================================="
 
-echo "Cloud Functions need to schedule Cloud Tasks that run as the App Engine SA."
-echo "This requires 'iam.serviceAccounts.actAs' permission on the App Engine SA."
+echo "Cloud Functions need to schedule Cloud Tasks that run as specific service accounts."
+echo "This requires 'iam.serviceAccounts.actAs' permission on the target SA."
+echo ""
+echo "NOTE: Projects under a GCP Organization enforce stricter IAM checks than standalone"
+echo "projects. The Compute SA (used by Gen2 functions) must explicitly be granted permission"
+echo "to act as itself for Cloud Tasks scheduling. Standalone projects may work without this,"
+echo "but organization projects will fail with 'iam.serviceAccounts.actAs' permission errors."
 echo ""
 
 echo "Granting Compute SA permission to act as App Engine SA..."
@@ -258,6 +263,13 @@ gcloud iam service-accounts add-iam-policy-binding "$APPENGINE_SA" \
 echo "Granting App Engine SA permission to act as itself..."
 gcloud iam service-accounts add-iam-policy-binding "$APPENGINE_SA" \
     --member="serviceAccount:$APPENGINE_SA" \
+    --role="roles/iam.serviceAccountUser" \
+    --project="$PROJECT_ID" \
+    --quiet 2>/dev/null || echo "    (May not exist yet - will be created on first deploy)"
+
+echo "Granting Compute SA permission to act as itself (required for Gen2 functions scheduling Cloud Tasks)..."
+gcloud iam service-accounts add-iam-policy-binding "$COMPUTE_SA" \
+    --member="serviceAccount:$COMPUTE_SA" \
     --role="roles/iam.serviceAccountUser" \
     --project="$PROJECT_ID" \
     --quiet 2>/dev/null || echo "    (May not exist yet - will be created on first deploy)"
@@ -305,12 +317,47 @@ gcloud tasks queues create "$QUEUE_NAME" \
 
 echo ""
 echo "=========================================="
+echo "Step 11: Grant Cloud Run Invoker on Gen2 Function Services"
+echo "=========================================="
+echo ""
+echo "Gen2 Firebase Functions are deployed as Cloud Run services. Cloud Tasks must be"
+echo "able to invoke these services via HTTP. Projects under a GCP Organization enforce"
+echo "this more strictly than standalone projects — the project-level roles/run.invoker"
+echo "grant (Step 4) is not always sufficient; a service-level grant may also be needed."
+echo ""
+
+# IMPORTANT: Update this list when adding new Gen2 (onTaskDispatched, onRequest v2, etc.) functions.
+# Cloud Run service names are lowercase versions of the exported function names.
+GEN2_SERVICES=("processturnexpirationtask")
+
+for service in "${GEN2_SERVICES[@]}"; do
+    echo "Granting Compute SA run.invoker on Cloud Run service: $service..."
+    gcloud run services add-iam-policy-binding "$service" \
+        --region=us-central1 \
+        --member="serviceAccount:$COMPUTE_SA" \
+        --role="roles/run.invoker" \
+        --project="$PROJECT_ID" \
+        --quiet 2>/dev/null || echo "    (Service may not exist yet - run after first deploy)"
+
+    echo "Granting App Engine SA run.invoker on Cloud Run service: $service..."
+    gcloud run services add-iam-policy-binding "$service" \
+        --region=us-central1 \
+        --member="serviceAccount:$APPENGINE_SA" \
+        --role="roles/run.invoker" \
+        --project="$PROJECT_ID" \
+        --quiet 2>/dev/null || echo "    (Service may not exist yet - run after first deploy)"
+done
+
+echo ""
+echo "=========================================="
 echo "Bootstrap Complete!"
 echo "=========================================="
 echo ""
 echo "Next steps:"
 echo "  1. Run 'firebase use $PROJECT_ID' to select this project"
 echo "  2. Run 'firebase deploy' to deploy all resources"
+echo "  3. If this is the first deploy, re-run this script to complete Step 11"
+echo "     (Gen2 Cloud Run services must exist before service-level IAM can be granted)"
 echo ""
 echo "If you still encounter permission errors during deploy, check the"
 echo "Cloud Build logs in the GCP Console for specific missing permissions."
