@@ -4,6 +4,12 @@ Tactic Toes is a multiplayer game platform built with React/TypeScript frontend 
 
 # Recent Changes
 
+## Fertile Ground Bug Fix (February 24, 2026)
+- **Bug**: Games would hang at "Game starting" when fertile ground was unchecked
+- **Root Cause**: When `fertileTiles` was empty, the Turn object set `fertileTiles: undefined`. Firestore rejects `undefined` values in document writes, causing the `onGameStarted` transaction to crash silently. Toggling fertile ground ON would re-trigger `onGameStarted` with a non-empty `fertileTiles` array, allowing it to succeed.
+- **Fix**: Changed both Turn construction sites in `SnekProcessor.ts` (lines 124 and 585) from `fertileTiles: this.fertileTiles.length > 0 ? this.fertileTiles : undefined` to conditional spread `...(this.fertileTiles.length > 0 ? { fertileTiles: this.fertileTiles } : {})`, which omits the field entirely instead of setting it to `undefined`.
+- **Lesson**: Never assign `undefined` to a field in an object destined for Firestore — either omit the key entirely (conditional spread) or use `null` (if the field should exist but be empty).
+
 ## Fertile Ground & Food Spawn Rate (February 18, 2026)
 - **New Feature**: Added "Fertile Ground" option to all snek game variants (snek, teamsnek, kingsnek)
 - **Fertile Ground**: When enabled, procedurally generates clustered green tiles using a fuzzy seed-and-spread algorithm that creates organic, grass-like patterns

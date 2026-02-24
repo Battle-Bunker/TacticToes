@@ -121,7 +121,7 @@ export class SnekProcessor extends GameProcessor {
       moves: {},
       winners: [],
       teamClusterFallback,
-      fertileTiles: this.fertileTiles.length > 0 ? this.fertileTiles : undefined,
+      ...(this.fertileTiles.length > 0 ? { fertileTiles: this.fertileTiles } : {}),
     }
 
     return firstTurn
@@ -582,7 +582,7 @@ export class SnekProcessor extends GameProcessor {
       clashes: gameState.clashes,
       moves: gameState.playerMoves,
       winners: winners,
-      fertileTiles: this.fertileTiles.length > 0 ? this.fertileTiles : undefined,
+      ...(this.fertileTiles.length > 0 ? { fertileTiles: this.fertileTiles } : {}),
     }
   }
 
