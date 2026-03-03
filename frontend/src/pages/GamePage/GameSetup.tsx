@@ -91,7 +91,9 @@ const GameSetup: React.FC = () => {
   );
   const [useThisBoard, setUseThisBoard] = useState<boolean>(
     (gameSetup?.presetFertileTiles && gameSetup.presetFertileTiles.length > 0) ||
-    (gameSetup?.presetHazards && gameSetup.presetHazards.length > 0) || false,
+    (gameSetup?.presetHazards && gameSetup.presetHazards.length > 0) ||
+    (gameSetup?.presetPlayerPositions && Object.keys(gameSetup.presetPlayerPositions).length > 0) ||
+    (gameSetup?.presetFood && gameSetup.presetFood.length > 0) || false,
   );
   const [foodSpawnRate, setFoodSpawnRate] = useState<number>(
     gameSetup?.foodSpawnRate ?? 0.5,
@@ -355,17 +357,21 @@ const GameSetup: React.FC = () => {
     });
   };
 
-  const handleUseThisBoardChange = async (enabled: boolean, fertileTiles: number[], hazards: number[]) => {
+  const handleUseThisBoardChange = async (enabled: boolean, data: { fertileTiles: number[]; hazards: number[]; playerPositions: { [playerID: string]: number }; food: number[] }) => {
     setUseThisBoard(enabled);
     if (enabled) {
       await updateDoc(gameDocRef, {
-        presetFertileTiles: fertileTiles,
-        presetHazards: hazards,
+        presetFertileTiles: data.fertileTiles,
+        presetHazards: data.hazards,
+        presetPlayerPositions: data.playerPositions,
+        presetFood: data.food,
       });
     } else {
       await updateDoc(gameDocRef, {
         presetFertileTiles: [],
         presetHazards: [],
+        presetPlayerPositions: {},
+        presetFood: [],
       });
     }
   };
@@ -715,6 +721,10 @@ const GameSetup: React.FC = () => {
               boardHeight={gameSetup.boardHeight}
               useThisBoard={useThisBoard}
               onUseThisBoardChange={handleUseThisBoardChange}
+              gamePlayers={gameSetup.gamePlayers}
+              gameType={gameSetup.gameType}
+              teams={gameSetup.teams}
+              teamClustersEnabled={teamClustersEnabled}
             />
           </Box>
         </FormControl>

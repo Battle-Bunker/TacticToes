@@ -74,6 +74,8 @@
     fertileGroundClustering?: number // Clustering level 1-20 (1=scattered, 20=blobby, 10=default)
     presetFertileTiles?: number[] // Pre-generated fertile tile positions from preview
     presetHazards?: number[] // Pre-generated hazard positions from preview
+    presetPlayerPositions?: { [playerID: string]: number } // Pre-generated player head positions from preview
+    presetFood?: number[] // Pre-generated food positions from preview
     foodSpawnRate?: number // Expected food spawned per turn (0-5, defaults to 0.5)
     invulnerabilityPotionEnabled?: boolean
     invulnerabilityPotionSpawnRate?: number // 0.05 to 1, defaults to 0.15

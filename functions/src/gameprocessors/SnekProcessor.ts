@@ -68,7 +68,28 @@ export class SnekProcessor extends GameProcessor {
     const now = Date.now()
 
     // Initialize playerPieces
-    const { playerPieces, teamClusterFallback } = this.initializeSnakes()
+    let playerPieces: { [playerID: string]: number[] }
+    let teamClusterFallback: boolean
+    const presetPositions = this.gameSetup.presetPlayerPositions
+    if (presetPositions && Object.keys(presetPositions).length === gamePlayers.length) {
+      playerPieces = {}
+      teamClusterFallback = false
+      gamePlayers.forEach((player) => {
+        const pos = presetPositions[player.id]
+        if (pos !== undefined) {
+          playerPieces[player.id] = [pos, pos, pos]
+        }
+      })
+      if (Object.keys(playerPieces).length !== gamePlayers.length) {
+        const result = this.initializeSnakes()
+        playerPieces = result.playerPieces
+        teamClusterFallback = result.teamClusterFallback
+      }
+    } else {
+      const result = this.initializeSnakes()
+      playerPieces = result.playerPieces
+      teamClusterFallback = result.teamClusterFallback
+    }
 
     // Initialize walls
     const walls = this.getWallPositions(boardWidth, boardHeight)
@@ -84,12 +105,9 @@ export class SnekProcessor extends GameProcessor {
       : this.generateFertileTiles(boardWidth, boardHeight, walls, hazards, playerPieces)
 
     // Initialize food positions
-    const food = this.initializeFood(
-      boardWidth,
-      boardHeight,
-      playerPieces,
-      hazards,
-    )
+    const food = this.gameSetup.presetFood && this.gameSetup.presetFood.length > 0
+      ? this.gameSetup.presetFood
+      : this.initializeFood(boardWidth, boardHeight, playerPieces, hazards)
 
     // Initialize allowed moves
     const allowedMoves = this.calculateAllowedMoves(
