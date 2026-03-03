@@ -423,15 +423,17 @@ const GameLogic = ({
     }
   })
 
-  // Place clashes
+  // Place clashes (only where no living snake segment exists)
   clashes?.forEach((clash) => {
     const position = clash.index
-    cellContentMap[position] = (
-      <Box key={`clash-${position}`} sx={commonCellStyle}>
-        💀
-      </Box>
-    )
-    cellBackgroundMap[position] = "#d3d3d3" // light gray
+    if (!cellSnakeSegments[position]) {
+      cellContentMap[position] = (
+        <Box key={`clash-${position}`} sx={commonCellStyle}>
+          💀
+        </Box>
+      )
+      cellBackgroundMap[position] = "#d3d3d3"
+    }
   })
 
   return {
