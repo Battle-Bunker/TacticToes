@@ -796,7 +796,6 @@ const GameSetup: React.FC = () => {
               gamePlayers={gameSetup.gamePlayers}
               gameType={gameSetup.gameType}
               teams={gameSetup.teams}
-              teamClustersEnabled={teamClustersEnabled}
             />
           </Box>
         </FormControl>

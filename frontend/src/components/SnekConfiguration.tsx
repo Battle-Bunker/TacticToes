@@ -35,7 +35,6 @@ interface SnekConfigurationProps {
   gamePlayers: GamePlayer[]
   gameType: GameType
   teams?: Team[]
-  teamClustersEnabled: boolean
 }
 
 function getFertileTileColor(index: number, w: number, fertileSet: Set<number>): string {
@@ -76,7 +75,7 @@ export const SnekConfiguration: React.FC<SnekConfigurationProps> = ({
   usePreviewBoard, onUsePreviewBoardChange,
   syncedPreviewData,
   isGeneratingPreview, onRefreshPreview,
-  gamePlayers, gameType, teams, teamClustersEnabled,
+  gamePlayers, gameType, teams,
 }) => {
   const activePlayers = useMemo(() => {
     const isTeamGame = gameType === "teamsnek" || gameType === "kingsnek"
