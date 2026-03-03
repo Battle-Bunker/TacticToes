@@ -10,7 +10,7 @@ Tactic Toes is a multiplayer game platform built with React/TypeScript frontend 
 - **Invulnerability Tiers**: Collision resolution is tiered by `playerInvulnerabilityLevel`. Higher-level snakes categorically win all collision types over lower-level snakes. Same-level snakes use normal battlesnake rules
 - **Body Severing**: When a higher-invulnerability snake's head hits a lower-invulnerability snake's body, the body is severed at the struck segment (struck segment + everything after destroyed)
 - **Vulnerable Collision Trigger**: If any snake with invulnerability < 0 is hit in any way (wall, hazard, self, snake collision), all allies' invulnerability buffs are scheduled to expire at the start of the next turn
-- **Effect Duration**: Effects last 3 full turns of collision resolution (expiryTurn = collectionTurn + 4, with `<= currentTurn` expiry check)
+- **Effect Duration**: Effects last 3 full turns of collision resolution (expiryTurn = collectionTurn + 3, expiry runs at end of turn with `<= currentTurn` check)
 - **Configuration**: Game setup includes checkbox to enable and slider for spawn rate (0.05 to 1, step 0.05)
 - **Visual**: Potions rendered with custom icon image. Invulnerable snakes get bright blue outlines, vulnerable snakes get bright red outlines
 - **Type Changes**: Added `ActiveEffect` interface, `invulnerabilityPotions`, `playerInvulnerabilityLevel`, `activeEffects` to `Turn`, `invulnerabilityPotionEnabled` and `invulnerabilityPotionSpawnRate` to `GameSetup`

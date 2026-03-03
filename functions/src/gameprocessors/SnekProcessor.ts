@@ -148,27 +148,27 @@ export class SnekProcessor extends GameProcessor {
 
       // 1. Setup
       const gameState = this.initializeGameState(currentTurn)
-
-      // 2. Expire effects
-      this.expireEffects(gameState, currentTurnNumber)
       
-      // 3. Process moves
+      // 2. Process moves
       this.processPlayerMoves(gameState, moves)
       
-      // 4. Handle collisions (tiered by invulnerability level)
+      // 3. Handle collisions (tiered by invulnerability level)
       this.detectAndHandleCollisions(gameState)
       
-      // 5. Process food and health
+      // 4. Process food and health
       this.processFoodAndHealth(gameState)
 
-      // 6. Process invulnerability potion collection
+      // 5. Process invulnerability potion collection
       this.processInvulnerabilityPotionCollection(gameState, currentTurnNumber)
       
-      // 7. Generate new food
+      // 6. Generate new food
       this.generateNewFood(gameState)
 
-      // 8. Generate new invulnerability potions
+      // 7. Generate new invulnerability potions
       this.generateNewInvulnerabilityPotions(gameState)
+
+      // 8. Expire effects (end of turn so visual state matches next turn's collisions)
+      this.expireEffects(gameState, currentTurnNumber)
       
       // 9. Calculate winners
       const winners = this.calculateWinners(gameState)
@@ -620,7 +620,7 @@ export class SnekProcessor extends GameProcessor {
       allies.forEach(ally => {
         gameState.activeEffects.forEach(effect => {
           if (effect.playerID === ally.id && effect.type === 'invulnerability_buff') {
-            effect.expiryTurn = currentTurnNumber + 1
+            effect.expiryTurn = currentTurnNumber
           }
         })
       })
@@ -674,7 +674,7 @@ export class SnekProcessor extends GameProcessor {
         playerID,
         type: 'invulnerability_debuff',
         level: -1,
-        expiryTurn: currentTurnNumber + 4,
+        expiryTurn: currentTurnNumber + 3,
         sourcePlayerID: playerID,
       })
 
@@ -692,7 +692,7 @@ export class SnekProcessor extends GameProcessor {
             playerID: allyID,
             type: 'invulnerability_buff',
             level: 1,
-            expiryTurn: currentTurnNumber + 4,
+            expiryTurn: currentTurnNumber + 3,
             sourcePlayerID: playerID,
           })
         })
