@@ -358,19 +358,6 @@ const GameSetup: React.FC = () => {
     });
   };
 
-  const handlePreviewDataChange = async (data: { fertileTiles: number[]; hazards: number[]; playerPositions: { [playerID: string]: number }; food: number[] }, uncheckBoard: boolean) => {
-    const update: Record<string, unknown> = {
-      presetFertileTiles: data.fertileTiles,
-      presetHazards: data.hazards,
-      presetPlayerPositions: data.playerPositions,
-      presetFood: data.food,
-    };
-    if (uncheckBoard) {
-      update.usePreviewBoard = false;
-    }
-    await updateDoc(gameDocRef, update);
-  };
-
   const handleFoodSpawnRateChange = async (newRate: number) => {
     const sanitizedValue = Math.max(0, Math.min(5, Math.round(newRate * 4) / 4));
     setFoodSpawnRate(sanitizedValue);
@@ -716,7 +703,6 @@ const GameSetup: React.FC = () => {
               boardHeight={gameSetup.boardHeight}
               usePreviewBoard={usePreviewBoard}
               onUsePreviewBoardChange={handleUsePreviewBoardChange}
-              onPreviewDataChange={handlePreviewDataChange}
               syncedPreviewData={
                 gameSetup.presetFertileTiles || gameSetup.presetHazards || gameSetup.presetPlayerPositions || gameSetup.presetFood
                   ? {
@@ -731,6 +717,8 @@ const GameSetup: React.FC = () => {
               gameType={gameSetup.gameType}
               teams={gameSetup.teams}
               teamClustersEnabled={teamClustersEnabled}
+              sessionID={sessionName}
+              gameID={gameID}
             />
           </Box>
         </FormControl>

@@ -27,14 +27,16 @@ Tactic Toes is a multiplayer game platform built with React/TypeScript frontend 
 - **New Feature**: Added "Clustering" slider (1-20) to fertile ground configuration
 - **Parameter**: Controls the base frequency of the fractal Perlin noise algorithm. Low clustering (1) = high frequency = scattered tiles. High clustering (20) = low frequency = large blob. Default (10) preserves existing medium-cluster behavior
 - **Frequency Mapping**: Linear interpolation from 0.7553 (clustering=1) to 0.0662 (clustering=20), focused on the useful mid-range of the spectrum
-- **Preview Board**: Synced across all clients via Firestore. Preview data (fertile tiles, hazards, player positions, food) is written to Firestore on every local UI change and read by all clients for consistent display
+- **Preview Board**: Generated server-side via `generatePreviewBoard` Firebase callable function. All clients see the same preview via Firestore `onSnapshot`. No client-side generation code — the server reuses `SnekProcessor`'s existing generation methods (player placement, hazard generation, fertile tile Perlin noise, food placement)
 - **Hazard Slider**: Hazard percentage changed from TextField to Slider (0-100%)
-- **Synced Preview Architecture**: Preview data always stored in `presetFertileTiles`, `presetHazards`, `presetPlayerPositions`, `presetFood` fields. The `usePreviewBoard` boolean flag controls whether the backend uses the synced preview data at game start. Local changes trigger regeneration + Firestore upload; remote changes render from Firestore without local regeneration (tracked via `localChangeRef`)
-- **Player Placement Preview**: Shows player positions as X marks (colored by team or unique hue) using edge-placement algorithm with team clustering support. Food shown as orange dots (center + per-player diagonal). Spectators (unassigned players in team games) are excluded
+- **Server-Side Preview Architecture**: Frontend calls `generatePreviewBoard({ sessionID, gameID })` cloud function on setting changes (debounced 500ms). The function reads the current `GameSetup` from Firestore, creates a temporary `SnekProcessor`, calls `generatePreviewBoard()`, and writes the result (`presetFertileTiles`, `presetHazards`, `presetPlayerPositions`, `presetFood`) back to Firestore. All clients render from Firestore data
+- **`usePreviewBoard` flag**: Boolean on `GameSetup` controlling whether the backend uses the synced preview data at game start. Checked/unchecked via "Use this board" checkbox (synced across clients)
+- **Active Player Filtering**: The cloud function uses `ProcessorClass.filterActivePlayers()` to exclude spectators (unassigned players in team games) from the preview, matching the real game start behavior
+- **Player Placement Preview**: Shows player positions as X marks (colored by team or unique hue). Food shown as orange dots. Generation uses the same `SnekProcessor` methods used at game start (edge placement, team clustering, etc.)
 - **Type Changes**: Added `fertileGroundClustering`, `presetFertileTiles`, `presetHazards`, `presetPlayerPositions`, `presetFood`, `usePreviewBoard` to `GameSetup`
 - **Backward Compatibility**: All fields optional, defaults to 10 clustering (equivalent to previous hardcoded frequency of ~0.3), `usePreviewBoard` false/missing = normal generation
-- **Auto-uncheck**: "Use this board" unchecks on any local change: density, clustering, hazard%, board size, fertile toggle, player list changes, team assignments, game type, team clusters toggle, or refresh button
-- **Core Files Modified**: `shared/types/Game.ts`, `functions/src/gameprocessors/SnekProcessor.ts`, `frontend/src/components/SnekConfiguration.tsx`, `frontend/src/pages/GamePage/GameSetup.tsx`
+- **Auto-uncheck**: "Use this board" unchecks on any setting change that triggers preview regeneration
+- **Core Files Modified**: `shared/types/Game.ts`, `functions/src/gameprocessors/SnekProcessor.ts`, `functions/src/generatePreviewBoard.ts`, `functions/src/index.ts`, `frontend/src/components/SnekConfiguration.tsx`, `frontend/src/pages/GamePage/GameSetup.tsx`
 
 ## Fertile Ground & Food Spawn Rate (February 18, 2026)
 - **New Feature**: Added "Fertile Ground" option to all snek game variants (snek, teamsnek, kingsnek)

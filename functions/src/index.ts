@@ -4,6 +4,7 @@ import { onSessionCreated } from "./onSessionCreated"
 import { processTurnExpirationTask } from "./processTurnExpirationTask"
 import { wakeBot } from "./wakeBot"
 import { getPlayerPublicInfo } from "./getPlayerPublicInfo"
+import { generatePreviewBoard } from "./generatePreviewBoard"
 import * as admin from "firebase-admin"
 
 admin.initializeApp()
@@ -24,4 +25,5 @@ export {
   processTurnExpirationTask,
   wakeBot,
   getPlayerPublicInfo,
+  generatePreviewBoard,
 }

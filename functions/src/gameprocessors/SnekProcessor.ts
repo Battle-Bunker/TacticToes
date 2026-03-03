@@ -63,6 +63,32 @@ export class SnekProcessor extends GameProcessor {
     }
   }
 
+  generatePreviewBoard(): {
+    fertileTiles: number[]
+    hazards: number[]
+    playerPositions: { [playerID: string]: number }
+    food: number[]
+  } {
+    const { boardWidth, boardHeight, gamePlayers } = this.gameSetup
+
+    const { playerPieces } = this.initializeSnakes()
+
+    const walls = this.getWallPositions(boardWidth, boardHeight)
+    const hazards = this.generateHazardPositions(boardWidth, boardHeight, playerPieces)
+    const fertileTiles = this.generateFertileTiles(boardWidth, boardHeight, walls, hazards, playerPieces)
+    const food = this.initializeFood(boardWidth, boardHeight, playerPieces, hazards)
+
+    const playerPositions: { [playerID: string]: number } = {}
+    gamePlayers.forEach((player) => {
+      const snake = playerPieces[player.id]
+      if (snake && snake.length > 0) {
+        playerPositions[player.id] = snake[0]
+      }
+    })
+
+    return { fertileTiles, hazards, playerPositions, food }
+  }
+
   private initializeTurn(): Turn {
     const { boardWidth, boardHeight, gamePlayers, maxTurnTime } = this.gameSetup
     const now = Date.now()
