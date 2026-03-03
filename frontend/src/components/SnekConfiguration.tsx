@@ -1,5 +1,8 @@
 import React, { useMemo } from "react"
-import { Checkbox, FormControl, FormControlLabel, Slider, TextField, Typography, Box } from "@mui/material"
+import { Checkbox, FormControl, FormControlLabel, IconButton, Slider, TextField, Typography, Box } from "@mui/material"
+import { RefreshCw } from "lucide-react"
+
+const PREVIEW_SIZE = 17
 
 interface SnekConfigurationProps {
   maxTurns: number
@@ -69,15 +72,14 @@ function clusteringToFrequency(clustering: number): number {
 }
 
 function generatePreviewTiles(density: number, clustering: number, seed: number): Set<number> {
-  const boardSize = 10
   const baseFrequency = clusteringToFrequency(clustering)
   const seedX = seed * 1000
   const seedY = (seed * 577.215 + 0.331) * 1000 % 1000
 
   const noiseValues: { pos: number; value: number }[] = []
-  for (let y = 1; y < boardSize - 1; y++) {
-    for (let x = 1; x < boardSize - 1; x++) {
-      const pos = y * boardSize + x
+  for (let y = 1; y < PREVIEW_SIZE - 1; y++) {
+    for (let x = 1; x < PREVIEW_SIZE - 1; x++) {
+      const pos = y * PREVIEW_SIZE + x
       const value = fractalNoise(x + seedX, y + seedY, 4, baseFrequency)
       noiseValues.push({ pos, value })
     }
@@ -89,9 +91,29 @@ function generatePreviewTiles(density: number, clustering: number, seed: number)
 }
 
 function isBorderTile(index: number): boolean {
-  const x = index % 10
-  const y = Math.floor(index / 10)
-  return x === 0 || x === 9 || y === 0 || y === 9
+  const x = index % PREVIEW_SIZE
+  const y = Math.floor(index / PREVIEW_SIZE)
+  return x === 0 || x === PREVIEW_SIZE - 1 || y === 0 || y === PREVIEW_SIZE - 1
+}
+
+function getFertileTileColor(index: number, fertileSet: Set<number>): string {
+  const px = index % PREVIEW_SIZE
+  const py = Math.floor(index / PREVIEW_SIZE)
+  const adjacentCount = [
+    fertileSet.has(index - 1),
+    fertileSet.has(index + 1),
+    fertileSet.has(index - PREVIEW_SIZE),
+    fertileSet.has(index + PREVIEW_SIZE),
+    fertileSet.has(index - PREVIEW_SIZE - 1),
+    fertileSet.has(index - PREVIEW_SIZE + 1),
+    fertileSet.has(index + PREVIEW_SIZE - 1),
+    fertileSet.has(index + PREVIEW_SIZE + 1),
+  ].filter(Boolean).length
+  const noise = ((px * 7 + py * 13) % 5)
+  const lightness = adjacentCount >= 6 ? 78 + noise : adjacentCount >= 3 ? 82 + noise : 86 + noise
+  const saturation = adjacentCount >= 6 ? 60 : adjacentCount >= 3 ? 50 : 40
+  const hue = 42 + (noise - 2)
+  return `hsl(${hue}, ${saturation}%, ${lightness}%)`
 }
 
 export const SnekConfiguration: React.FC<SnekConfigurationProps> = ({
@@ -205,29 +227,60 @@ export const SnekConfiguration: React.FC<SnekConfigurationProps> = ({
               valueLabelDisplay="auto"
             />
             <Box sx={{ mt: 2 }}>
-              <Typography variant="body2" gutterBottom sx={{ color: "text.secondary" }}>
-                Preview (10×10)
-              </Typography>
-              <Box
-                sx={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(10, 1fr)",
-                  gap: "1px",
-                  width: "fit-content",
-                  border: "1px solid #555",
-                  backgroundColor: "#555",
-                }}
-              >
-                {Array.from({ length: 100 }, (_, i) => (
-                  <Box
-                    key={i}
-                    sx={{
-                      width: 20,
-                      height: 20,
-                      backgroundColor: isBorderTile(i) ? "#1a1a1a" : fertileTiles.has(i) ? "#4caf50" : "#2a2a2a",
-                    }}
-                  />
-                ))}
+              <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <Typography variant="body2" sx={{ color: "text.secondary" }}>
+                  Preview ({PREVIEW_SIZE}×{PREVIEW_SIZE})
+                </Typography>
+              </Box>
+              <Box sx={{ position: "relative", width: "fit-content" }}>
+                <Box
+                  sx={{
+                    display: "grid",
+                    gridTemplateColumns: `repeat(${PREVIEW_SIZE}, 1fr)`,
+                    gap: "1px",
+                    width: "fit-content",
+                    border: "1px solid #555",
+                    backgroundColor: "#555",
+                  }}
+                >
+                  {Array.from({ length: PREVIEW_SIZE * PREVIEW_SIZE }, (_, i) => {
+                    const isBorder = isBorderTile(i)
+                    const isFertile = fertileTiles.has(i)
+                    const bg = isBorder
+                      ? "#1a1a1a"
+                      : isFertile
+                        ? getFertileTileColor(i, fertileTiles)
+                        : "#2a2a2a"
+                    return (
+                      <Box
+                        key={i}
+                        sx={{
+                          width: 16,
+                          height: 16,
+                          backgroundColor: bg,
+                        }}
+                      />
+                    )
+                  })}
+                </Box>
+                <IconButton
+                  size="small"
+                  onClick={() => setPreviewSeed(Math.random())}
+                  sx={{
+                    position: "absolute",
+                    bottom: 2,
+                    right: 2,
+                    backgroundColor: "rgba(0,0,0,0.5)",
+                    color: "#aaa",
+                    padding: "3px",
+                    "&:hover": {
+                      backgroundColor: "rgba(0,0,0,0.7)",
+                      color: "#fff",
+                    },
+                  }}
+                >
+                  <RefreshCw size={14} />
+                </IconButton>
               </Box>
             </Box>
           </Box>
