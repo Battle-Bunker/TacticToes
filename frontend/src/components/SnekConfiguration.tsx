@@ -400,9 +400,15 @@ export const SnekConfiguration: React.FC<SnekConfigurationProps> = ({
     return generatePreviewFertileTiles(boardWidth, boardHeight, fertileGroundDensity, fertileGroundClustering, previewSeed, hazardTiles)
   }, [fertileGroundEnabled, fertileGroundDensity, fertileGroundClustering, previewSeed, boardWidth, boardHeight, hazardTiles])
 
+  const activePlayers = useMemo(() => {
+    const isTeamGame = gameType === "teamsnek" || gameType === "kingsnek"
+    if (!isTeamGame) return gamePlayers
+    return gamePlayers.filter(p => p.teamID)
+  }, [gamePlayers, gameType])
+
   const playerPositions = useMemo(() => {
-    return generatePlayerPositions(boardWidth, boardHeight, gamePlayers, gameType, teams, teamClustersEnabled, hazardTiles, placementSeed)
-  }, [boardWidth, boardHeight, gamePlayers, gameType, teams, teamClustersEnabled, hazardTiles, placementSeed])
+    return generatePlayerPositions(boardWidth, boardHeight, activePlayers, gameType, teams, teamClustersEnabled, hazardTiles, placementSeed)
+  }, [boardWidth, boardHeight, activePlayers, gameType, teams, teamClustersEnabled, hazardTiles, placementSeed])
 
   const foodTiles = useMemo(() => {
     return generatePreviewFood(boardWidth, boardHeight, playerPositions, hazardTiles, placementSeed)
@@ -509,10 +515,10 @@ export const SnekConfiguration: React.FC<SnekConfigurationProps> = ({
 
                 let content: React.ReactNode = null
                 if (isPlayer && playerId) {
-                  const player = gamePlayers.find(p => p.id === playerId)
+                  const player = activePlayers.find(p => p.id === playerId)
                   const teamColor = getTeamColor(player?.teamID, teams)
-                  const playerIdx = gamePlayers.findIndex(p => p.id === playerId)
-                  const color = teamColor || getPlayerColor(playerIdx, gamePlayers.length)
+                  const playerIdx = activePlayers.findIndex(p => p.id === playerId)
+                  const color = teamColor || getPlayerColor(playerIdx, activePlayers.length)
                   content = (
                     <Box sx={{
                       width: "100%", height: "100%",
