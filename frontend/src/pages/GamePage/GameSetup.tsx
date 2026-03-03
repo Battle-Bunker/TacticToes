@@ -326,10 +326,10 @@ const GameSetup: React.FC = () => {
   // Handle hazard percentage configuration
   const handleHazardPercentageChange = async (newHazardPercentage: number) => {
     const sanitizedValue = Math.max(0, Math.min(100, newHazardPercentage));
+    setHazardPercentage(sanitizedValue);
     await updateDoc(gameDocRef, {
       hazardPercentage: sanitizedValue,
     });
-    setHazardPercentage(sanitizedValue);
   };
 
   const handleFertileGroundToggle = async (enabled: boolean) => {
