@@ -89,6 +89,10 @@ const GameSetup: React.FC = () => {
   const [fertileGroundClustering, setFertileGroundClustering] = useState<number>(
     gameSetup?.fertileGroundClustering ?? 10,
   );
+  const [useThisBoard, setUseThisBoard] = useState<boolean>(
+    (gameSetup?.presetFertileTiles && gameSetup.presetFertileTiles.length > 0) ||
+    (gameSetup?.presetHazards && gameSetup.presetHazards.length > 0) || false,
+  );
   const [foodSpawnRate, setFoodSpawnRate] = useState<number>(
     gameSetup?.foodSpawnRate ?? 0.5,
   );
@@ -349,6 +353,21 @@ const GameSetup: React.FC = () => {
     await updateDoc(gameDocRef, {
       fertileGroundClustering: sanitizedValue,
     });
+  };
+
+  const handleUseThisBoardChange = async (enabled: boolean, fertileTiles: number[], hazards: number[]) => {
+    setUseThisBoard(enabled);
+    if (enabled) {
+      await updateDoc(gameDocRef, {
+        presetFertileTiles: fertileTiles,
+        presetHazards: hazards,
+      });
+    } else {
+      await updateDoc(gameDocRef, {
+        presetFertileTiles: [],
+        presetHazards: [],
+      });
+    }
   };
 
   const handleFoodSpawnRateChange = async (newRate: number) => {
@@ -692,6 +711,10 @@ const GameSetup: React.FC = () => {
               onFertileGroundClusteringChange={handleFertileGroundClusteringChange}
               foodSpawnRate={foodSpawnRate}
               onFoodSpawnRateChange={handleFoodSpawnRateChange}
+              boardWidth={gameSetup.boardWidth}
+              boardHeight={gameSetup.boardHeight}
+              useThisBoard={useThisBoard}
+              onUseThisBoardChange={handleUseThisBoardChange}
             />
           </Box>
         </FormControl>

@@ -74,14 +74,14 @@ export class SnekProcessor extends GameProcessor {
     const walls = this.getWallPositions(boardWidth, boardHeight)
 
     // Initialize hazards
-    const hazards = this.generateHazardPositions(
-      boardWidth,
-      boardHeight,
-      playerPieces,
-    )
+    const hazards = this.gameSetup.presetHazards && this.gameSetup.presetHazards.length > 0
+      ? this.gameSetup.presetHazards
+      : this.generateHazardPositions(boardWidth, boardHeight, playerPieces)
 
     // Initialize fertile tiles
-    this.fertileTiles = this.generateFertileTiles(boardWidth, boardHeight, walls, hazards, playerPieces)
+    this.fertileTiles = this.gameSetup.presetFertileTiles && this.gameSetup.presetFertileTiles.length > 0
+      ? this.gameSetup.presetFertileTiles
+      : this.generateFertileTiles(boardWidth, boardHeight, walls, hazards, playerPieces)
 
     // Initialize food positions
     const food = this.initializeFood(

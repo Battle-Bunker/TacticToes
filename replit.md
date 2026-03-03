@@ -27,9 +27,11 @@ Tactic Toes is a multiplayer game platform built with React/TypeScript frontend 
 - **New Feature**: Added "Clustering" slider (1-20) to fertile ground configuration
 - **Parameter**: Controls the base frequency of the fractal Perlin noise algorithm. Low clustering (1) = high frequency = scattered tiles. High clustering (20) = low frequency = large blob. Default (10) preserves existing medium-cluster behavior
 - **Frequency Mapping**: Linear interpolation from 0.7553 (clustering=1) to 0.0662 (clustering=20), focused on the useful mid-range of the spectrum
-- **Preview Board**: 10×10 simulated board appears when fertile ground is enabled, regenerates on density or clustering change. Uses same Perlin noise algorithm client-side
-- **Type Changes**: Added `fertileGroundClustering` to `GameSetup`
-- **Backward Compatibility**: Field is optional, defaults to 10 (equivalent to previous hardcoded frequency of ~0.3)
+- **Preview Board**: Simulated board matches selected board size, shows both fertile tiles and hazards (red). Appears when fertile ground or hazards are active. Refresh button regenerates with new seed. "Use this board" checkbox saves the exact preview layout for the next game
+- **Hazard Slider**: Hazard percentage changed from TextField to Slider (0-100%)
+- **Use This Board**: Checkbox saves `presetFertileTiles` and `presetHazards` arrays to GameSetup; backend uses presets instead of regenerating when present
+- **Type Changes**: Added `fertileGroundClustering`, `presetFertileTiles`, `presetHazards` to `GameSetup`
+- **Backward Compatibility**: All fields optional, defaults to 10 clustering (equivalent to previous hardcoded frequency of ~0.3), empty presets = normal generation
 - **Core Files Modified**: `shared/types/Game.ts`, `functions/src/gameprocessors/SnekProcessor.ts`, `frontend/src/components/SnekConfiguration.tsx`, `frontend/src/pages/GamePage/GameSetup.tsx`
 
 ## Fertile Ground & Food Spawn Rate (February 18, 2026)
