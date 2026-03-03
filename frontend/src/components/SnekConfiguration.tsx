@@ -67,8 +67,8 @@ function fractalNoise(x: number, y: number, octaves: number, baseFrequency: numb
 }
 
 function clusteringToFrequency(clustering: number): number {
-  const t = (clustering - 1) / 9
-  return 2.0 * Math.pow(0.025 / 2.0, t)
+  const t = (clustering - 1) / 19
+  return 0.7553 + t * (0.0662 - 0.7553)
 }
 
 function generatePreviewTiles(density: number, clustering: number, seed: number): Set<number> {
@@ -143,7 +143,7 @@ export const SnekConfiguration: React.FC<SnekConfigurationProps> = ({
     return generatePreviewTiles(fertileGroundDensity, fertileGroundClustering, previewSeed)
   }, [fertileGroundEnabled, fertileGroundDensity, fertileGroundClustering, previewSeed])
 
-  const clusteringLabel = fertileGroundClustering <= 3 ? "Scattered" : fertileGroundClustering <= 7 ? "Clustered" : "Blobby"
+  const clusteringLabel = fertileGroundClustering <= 6 ? "Scattered" : fertileGroundClustering <= 14 ? "Clustered" : "Blobby"
 
   return (
     <FormControl fullWidth margin="normal">
@@ -221,7 +221,7 @@ export const SnekConfiguration: React.FC<SnekConfigurationProps> = ({
               value={fertileGroundClustering}
               onChange={(_e, value) => onFertileGroundClusteringChange(value as number)}
               min={1}
-              max={10}
+              max={20}
               step={1}
               marks
               valueLabelDisplay="auto"

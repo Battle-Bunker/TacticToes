@@ -949,7 +949,7 @@ export class SnekProcessor extends GameProcessor {
     const density = Math.max(0, Math.min(100, this.gameSetup.fertileGroundDensity ?? 30))
     if (density === 0) return []
 
-    const clustering = Math.max(1, Math.min(10, this.gameSetup.fertileGroundClustering ?? 5))
+    const clustering = Math.max(1, Math.min(20, this.gameSetup.fertileGroundClustering ?? 10))
 
     const wallSet = new Set(walls)
     const hazardSet = new Set(hazards)
@@ -977,8 +977,8 @@ export class SnekProcessor extends GameProcessor {
   }
 
   private clusteringToFrequency(clustering: number): number {
-    const t = (clustering - 1) / 9
-    return 2.0 * Math.pow(0.025 / 2.0, t)
+    const t = (clustering - 1) / 19
+    return 0.7553 + t * (0.0662 - 0.7553)
   }
 
   private fractalNoise(x: number, y: number, octaves: number, baseFrequency: number = 0.3): number {

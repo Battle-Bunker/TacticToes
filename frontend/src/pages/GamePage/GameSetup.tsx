@@ -87,7 +87,7 @@ const GameSetup: React.FC = () => {
     gameSetup?.fertileGroundDensity ?? 30,
   );
   const [fertileGroundClustering, setFertileGroundClustering] = useState<number>(
-    gameSetup?.fertileGroundClustering ?? 5,
+    gameSetup?.fertileGroundClustering ?? 10,
   );
   const [foodSpawnRate, setFoodSpawnRate] = useState<number>(
     gameSetup?.foodSpawnRate ?? 0.5,
@@ -145,7 +145,7 @@ const GameSetup: React.FC = () => {
       setTeamClustersEnabled(gameSetup.teamClustersEnabled ?? false);
       setFertileGroundEnabled(gameSetup.fertileGroundEnabled ?? false);
       setFertileGroundDensity(gameSetup.fertileGroundDensity ?? 30);
-      setFertileGroundClustering(gameSetup.fertileGroundClustering ?? 5);
+      setFertileGroundClustering(gameSetup.fertileGroundClustering ?? 10);
       setFoodSpawnRate(gameSetup.foodSpawnRate ?? 0.5);
       setInvulnerabilityPotionEnabled(gameSetup.invulnerabilityPotionEnabled ?? false);
       setInvulnerabilityPotionSpawnRate(gameSetup.invulnerabilityPotionSpawnRate ?? 0.15);
@@ -344,7 +344,7 @@ const GameSetup: React.FC = () => {
   };
 
   const handleFertileGroundClusteringChange = async (newClustering: number) => {
-    const sanitizedValue = Math.max(1, Math.min(10, newClustering));
+    const sanitizedValue = Math.max(1, Math.min(20, newClustering));
     setFertileGroundClustering(sanitizedValue);
     await updateDoc(gameDocRef, {
       fertileGroundClustering: sanitizedValue,
