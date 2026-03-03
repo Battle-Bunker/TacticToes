@@ -89,11 +89,12 @@ const GameSetup: React.FC = () => {
   const [fertileGroundClustering, setFertileGroundClustering] = useState<number>(
     gameSetup?.fertileGroundClustering ?? 10,
   );
-  const useThisBoard =
+  const [useThisBoard, setUseThisBoard] = useState<boolean>(
     (gameSetup?.presetFertileTiles && gameSetup.presetFertileTiles.length > 0) ||
     (gameSetup?.presetHazards && gameSetup.presetHazards.length > 0) ||
     (gameSetup?.presetPlayerPositions && Object.keys(gameSetup.presetPlayerPositions).length > 0) ||
-    (gameSetup?.presetFood && gameSetup.presetFood.length > 0) || false;
+    (gameSetup?.presetFood && gameSetup.presetFood.length > 0) || false,
+  );
   const [foodSpawnRate, setFoodSpawnRate] = useState<number>(
     gameSetup?.foodSpawnRate ?? 0.5,
   );
@@ -208,8 +209,6 @@ const GameSetup: React.FC = () => {
     };
     await updateDoc(gameDocRef, {
       gamePlayers: arrayRemove(player),
-      placementSeed: Math.random(),
-      ...clearPresets,
     });
   };
 
@@ -233,16 +232,13 @@ const GameSetup: React.FC = () => {
 
     await updateDoc(gameDocRef, {
       gamePlayers: updatedGamePlayers,
-      placementSeed: Math.random(),
-      ...clearPresets,
     });
   };
 
+  // Handle team configuration changes
   const handleTeamsChange = async (newTeams: Team[]) => {
     await updateDoc(gameDocRef, {
       teams: newTeams,
-      placementSeed: Math.random(),
-      ...clearPresets,
     });
     setTeams(newTeams);
   };
@@ -298,8 +294,6 @@ const GameSetup: React.FC = () => {
 
     await updateDoc(gameDocRef, {
       gamePlayers: updatedGamePlayers,
-      placementSeed: Math.random(),
-      ...clearPresets,
     });
   };
 
@@ -332,20 +326,11 @@ const GameSetup: React.FC = () => {
   };
 
   // Handle hazard percentage configuration
-  const clearPresets = {
-    presetFertileTiles: [] as number[],
-    presetHazards: [] as number[],
-    presetPlayerPositions: {},
-    presetFood: [] as number[],
-  };
-
   const handleHazardPercentageChange = async (newHazardPercentage: number) => {
     const sanitizedValue = Math.max(0, Math.min(100, newHazardPercentage));
     setHazardPercentage(sanitizedValue);
     await updateDoc(gameDocRef, {
       hazardPercentage: sanitizedValue,
-      hazardSeed: Math.random(),
-      ...clearPresets,
     });
   };
 
@@ -353,7 +338,6 @@ const GameSetup: React.FC = () => {
     setFertileGroundEnabled(enabled);
     await updateDoc(gameDocRef, {
       fertileGroundEnabled: enabled,
-      ...clearPresets,
     });
   };
 
@@ -362,8 +346,6 @@ const GameSetup: React.FC = () => {
     setFertileGroundDensity(sanitizedValue);
     await updateDoc(gameDocRef, {
       fertileGroundDensity: sanitizedValue,
-      previewSeed: Math.random(),
-      ...clearPresets,
     });
   };
 
@@ -372,12 +354,11 @@ const GameSetup: React.FC = () => {
     setFertileGroundClustering(sanitizedValue);
     await updateDoc(gameDocRef, {
       fertileGroundClustering: sanitizedValue,
-      previewSeed: Math.random(),
-      ...clearPresets,
     });
   };
 
   const handleUseThisBoardChange = async (enabled: boolean, data: { fertileTiles: number[]; hazards: number[]; playerPositions: { [playerID: string]: number }; food: number[] }) => {
+    setUseThisBoard(enabled);
     if (enabled) {
       await updateDoc(gameDocRef, {
         presetFertileTiles: data.fertileTiles,
@@ -386,17 +367,13 @@ const GameSetup: React.FC = () => {
         presetFood: data.food,
       });
     } else {
-      await updateDoc(gameDocRef, clearPresets);
+      await updateDoc(gameDocRef, {
+        presetFertileTiles: [],
+        presetHazards: [],
+        presetPlayerPositions: {},
+        presetFood: [],
+      });
     }
-  };
-
-  const handleRefreshPreview = async () => {
-    await updateDoc(gameDocRef, {
-      previewSeed: Math.random(),
-      hazardSeed: Math.random(),
-      placementSeed: Math.random(),
-      ...clearPresets,
-    });
   };
 
   const handleFoodSpawnRateChange = async (newRate: number) => {
@@ -411,8 +388,6 @@ const GameSetup: React.FC = () => {
     setTeamClustersEnabled(enabled);
     await updateDoc(gameDocRef, {
       teamClustersEnabled: enabled,
-      placementSeed: Math.random(),
-      ...clearPresets,
     });
   };
 
@@ -463,10 +438,6 @@ const GameSetup: React.FC = () => {
       await updateDoc(gameDocRef, {
         boardWidth: width,
         boardHeight: height,
-        previewSeed: Math.random(),
-        hazardSeed: Math.random(),
-        placementSeed: Math.random(),
-        ...clearPresets,
       });
     }
   };
