@@ -49,8 +49,8 @@ function getFertileTileColor(index: number, w: number, fertileSet: Set<number>):
   const noise = ((px * 7 + py * 13) % 5)
   const lightness = adjacentCount >= 6 ? 78 + noise : adjacentCount >= 3 ? 82 + noise : 86 + noise
   const saturation = adjacentCount >= 6 ? 60 : adjacentCount >= 3 ? 50 : 40
-  const hueShift = ((px + py) % 3) * 5
-  return `hsl(${105 + hueShift}, ${saturation}%, ${lightness}%)`
+  const hue = 42 + (noise - 2)
+  return `hsl(${hue}, ${saturation}%, ${lightness}%)`
 }
 
 function getPlayerColor(index: number, total: number): string {
