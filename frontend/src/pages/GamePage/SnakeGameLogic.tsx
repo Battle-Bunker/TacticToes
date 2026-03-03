@@ -16,9 +16,10 @@ interface CellProps {
   sx?: SxProps<Theme>
   borders: BorderStyles
   onClick?: () => void
+  cornerColor?: string
 }
 
-const Cell: React.FC<CellProps> = ({ children, sx, onClick }) => (
+const Cell: React.FC<CellProps> = ({ children, sx, onClick, cornerColor = "white" }) => (
   <Box
     onClick={onClick}
     sx={{
@@ -45,7 +46,6 @@ const Cell: React.FC<CellProps> = ({ children, sx, onClick }) => (
       {children}
     </Box>
 
-    {/* Corner boxes */}
     {[
       { top: 0, left: 0 },
       { top: 0, right: 0 },
@@ -58,7 +58,7 @@ const Cell: React.FC<CellProps> = ({ children, sx, onClick }) => (
           position: "absolute",
           width: BORDER_WIDTH,
           height: BORDER_WIDTH,
-          backgroundColor: "white",
+          backgroundColor: cornerColor,
           zIndex: 2,
           ...position,
         }}
@@ -106,7 +106,7 @@ const GameLogic = ({
     }
   }
 
-  const { playerPieces, allowedMoves, clashes, food, hazards, walls, fertileTiles } =
+  const { playerPieces, allowedMoves, clashes, food, hazards, walls, fertileTiles, invulnerabilityPotions, playerInvulnerabilityLevel } =
     selectedTurn
 
   // Map clashes to positions
@@ -147,21 +147,28 @@ const GameLogic = ({
     return playerInfo?.colour || "white"
   }
 
-  // Helper function to determine snake segment borders
+  const getOutlineColor = (playerID: string): string => {
+    const level = playerInvulnerabilityLevel?.[playerID] ?? 0
+    if (level > 0) return "#00BFFF"
+    if (level < 0) return "#FF3333"
+    return "white"
+  }
+
   const getSnakeBorders = (
     position: number,
     index: number,
     positions: number[],
+    borderColor: string = "white",
   ): BorderStyles => {
     const gridWidth = gameState.setup.boardWidth
     const prevPos = index > 0 ? positions[index - 1] : null
     const nextPos = index < positions.length - 1 ? positions[index + 1] : null
 
     const borders: BorderStyles = {
-      borderTop: `${BORDER_WIDTH}px solid white`,
-      borderRight: `${BORDER_WIDTH}px solid white`,
-      borderBottom: `${BORDER_WIDTH}px solid white`,
-      borderLeft: `${BORDER_WIDTH}px solid white`,
+      borderTop: `${BORDER_WIDTH}px solid ${borderColor}`,
+      borderRight: `${BORDER_WIDTH}px solid ${borderColor}`,
+      borderBottom: `${BORDER_WIDTH}px solid ${borderColor}`,
+      borderLeft: `${BORDER_WIDTH}px solid ${borderColor}`,
     }
 
     if (prevPos !== null) {
@@ -218,15 +225,16 @@ const GameLogic = ({
     const position = parseInt(positionStr)
 
     Object.entries(playersInCell).forEach(([playerID, segmentInfo]) => {
-      // Use type assertion here
       const { hasHead, hasTail, count } = segmentInfo as SnakeSegmentInfo
       const playerInfo = players.find((p) => p.id === playerID)
       const positions = playerPieces[playerID]
 
+      const outlineColor = getOutlineColor(playerID)
       const borders = getSnakeBorders(
         position,
         positions.indexOf(position),
         positions,
+        outlineColor,
       )
 
       let content: JSX.Element | null = null
@@ -253,6 +261,7 @@ const GameLogic = ({
             key={`head-${playerID}-${position}-${selectedTurnIndex}`}
             sx={commonBoxStyle}
             borders={borders}
+            cornerColor={outlineColor}
           >
             <span
               style={{ fontSize: cellSize * 0.8, lineHeight: 1, zIndex: 2 }}
@@ -262,12 +271,12 @@ const GameLogic = ({
           </Cell>
         )
       } else if (positions[1] === position) {
-        // Snake length on the second body piece
         content = (
           <Cell
             key={`body-length-${playerID}-${position}-${selectedTurnIndex}`}
             sx={commonBoxStyle}
             borders={borders}
+            cornerColor={outlineColor}
           >
             <Box
               sx={{
@@ -283,12 +292,12 @@ const GameLogic = ({
           </Cell>
         )
       } else if (hasTail && count > 1) {
-        // Tail length indicator
         content = (
           <Cell
             key={`tail-${playerID}-${position}`}
             sx={commonBoxStyle}
             borders={borders}
+            cornerColor={outlineColor}
           >
             <Box
               sx={{
@@ -304,12 +313,12 @@ const GameLogic = ({
           </Cell>
         )
       } else {
-        // Regular body segment
         content = (
           <Cell
             key={`body-${playerID}-${position}`}
             sx={commonBoxStyle}
             borders={borders}
+            cornerColor={outlineColor}
           />
         )
       }
@@ -363,6 +372,23 @@ const GameLogic = ({
     cellContentMap[position] = (
       <Box key={`food-${position}`} sx={commonCellStyle}>
         🎃
+      </Box>
+    )
+  })
+
+  // Place invulnerability potions
+  invulnerabilityPotions?.forEach((position) => {
+    cellContentMap[position] = (
+      <Box key={`potion-${position}`} sx={commonCellStyle}>
+        <img
+          src="/invulnerability-potion.png"
+          alt="Invulnerability Potion"
+          style={{
+            width: cellSize * 0.8,
+            height: cellSize * 0.8,
+            objectFit: "contain",
+          }}
+        />
       </Box>
     )
   })

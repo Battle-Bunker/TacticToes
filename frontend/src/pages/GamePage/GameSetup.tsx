@@ -28,6 +28,7 @@ import {
   MenuItem,
   Select,
   SelectChangeEvent,
+  Slider,
   Stack,
   Table,
   TableBody,
@@ -88,6 +89,12 @@ const GameSetup: React.FC = () => {
   const [foodSpawnRate, setFoodSpawnRate] = useState<number>(
     gameSetup?.foodSpawnRate ?? 0.5,
   );
+  const [invulnerabilityPotionEnabled, setInvulnerabilityPotionEnabled] = useState<boolean>(
+    gameSetup?.invulnerabilityPotionEnabled ?? false,
+  );
+  const [invulnerabilityPotionSpawnRate, setInvulnerabilityPotionSpawnRate] = useState<number>(
+    gameSetup?.invulnerabilityPotionSpawnRate ?? 0.15,
+  );
 
   const { getBotStatus } = useBotHealth();
 
@@ -136,6 +143,8 @@ const GameSetup: React.FC = () => {
       setFertileGroundEnabled(gameSetup.fertileGroundEnabled ?? false);
       setFertileGroundDensity(gameSetup.fertileGroundDensity ?? 30);
       setFoodSpawnRate(gameSetup.foodSpawnRate ?? 0.5);
+      setInvulnerabilityPotionEnabled(gameSetup.invulnerabilityPotionEnabled ?? false);
+      setInvulnerabilityPotionSpawnRate(gameSetup.invulnerabilityPotionSpawnRate ?? 0.15);
 
       //  Update teams
       if (gameSetup.teams) {
@@ -342,6 +351,21 @@ const GameSetup: React.FC = () => {
     setTeamClustersEnabled(enabled);
     await updateDoc(gameDocRef, {
       teamClustersEnabled: enabled,
+    });
+  };
+
+  const handleInvulnerabilityPotionToggle = async (enabled: boolean) => {
+    setInvulnerabilityPotionEnabled(enabled);
+    await updateDoc(gameDocRef, {
+      invulnerabilityPotionEnabled: enabled,
+    });
+  };
+
+  const handleInvulnerabilityPotionSpawnRateChange = async (newRate: number) => {
+    const sanitizedValue = Math.max(0.05, Math.min(1, Math.round(newRate * 20) / 20));
+    setInvulnerabilityPotionSpawnRate(sanitizedValue);
+    await updateDoc(gameDocRef, {
+      invulnerabilityPotionSpawnRate: sanitizedValue,
     });
   };
 
@@ -685,6 +709,53 @@ const GameSetup: React.FC = () => {
               }
               label="Team cluster"
             />
+          </Box>
+        </FormControl>
+      )}
+
+      {/* Invulnerability Potions - Only show for team games */}
+      {(gameType === "teamsnek" || gameType === "kingsnek") && (
+        <FormControl fullWidth variant="outlined" sx={{ mt: 2 }}>
+          <InputLabel shrink sx={{ backgroundColor: "white", px: 1 }}>
+            (In)vulnerability Potions
+          </InputLabel>
+          <Box
+            sx={{
+              border: "2px solid black",
+              padding: 2,
+              borderRadius: "0px",
+              minHeight: "56px",
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={invulnerabilityPotionEnabled}
+                  onChange={(e) => handleInvulnerabilityPotionToggle(e.target.checked)}
+                  disabled={started}
+                />
+              }
+              label="(In)vulnerability Potions"
+            />
+            {invulnerabilityPotionEnabled && (
+              <Box sx={{ px: 2, pt: 1 }}>
+                <Typography variant="body2" gutterBottom>
+                  Spawn Rate: {invulnerabilityPotionSpawnRate.toFixed(2)}/turn
+                </Typography>
+                <Slider
+                  value={invulnerabilityPotionSpawnRate}
+                  onChange={(_, value) => handleInvulnerabilityPotionSpawnRateChange(value as number)}
+                  min={0.05}
+                  max={1}
+                  step={0.05}
+                  disabled={started}
+                  valueLabelDisplay="auto"
+                  valueLabelFormat={(value) => `${value.toFixed(2)}/turn`}
+                />
+              </Box>
+            )}
           </Box>
         </FormControl>
       )}

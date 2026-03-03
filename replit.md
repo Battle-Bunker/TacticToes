@@ -4,6 +4,19 @@ Tactic Toes is a multiplayer game platform built with React/TypeScript frontend 
 
 # Recent Changes
 
+## Invulnerability Potions Feature (March 3, 2026)
+- **New Feature**: Added "Potion of (In)vulnerability" item system to Team Snek and King Snek game modes
+- **Mechanic**: Potions randomly spawn on the board. When collected, the collector becomes vulnerable (invulnerability level -1) and all alive allies become invulnerable (invulnerability level +1) for 3 turns
+- **Invulnerability Tiers**: Collision resolution is tiered by `playerInvulnerabilityLevel`. Higher-level snakes categorically win all collision types over lower-level snakes. Same-level snakes use normal battlesnake rules
+- **Body Severing**: When a higher-invulnerability snake's head hits a lower-invulnerability snake's body, the body is severed at the struck segment (struck segment + everything after destroyed)
+- **Vulnerable Collision Trigger**: If any snake with invulnerability < 0 is hit in any way (wall, hazard, self, snake collision), all allies' invulnerability buffs are scheduled to expire at the start of the next turn
+- **Effect Duration**: Effects last 3 full turns of collision resolution (expiryTurn = collectionTurn + 4, with `<= currentTurn` expiry check)
+- **Configuration**: Game setup includes checkbox to enable and slider for spawn rate (0.05 to 1, step 0.05)
+- **Visual**: Potions rendered with custom icon image. Invulnerable snakes get bright blue outlines, vulnerable snakes get bright red outlines
+- **Type Changes**: Added `ActiveEffect` interface, `invulnerabilityPotions`, `playerInvulnerabilityLevel`, `activeEffects` to `Turn`, `invulnerabilityPotionEnabled` and `invulnerabilityPotionSpawnRate` to `GameSetup`
+- **Backward Compatibility**: All new fields are optional with sensible defaults. Games without potions enabled have zero-cost path through collision detection (fast-paths to normal collision logic when all levels are 0)
+- **Core Files Modified**: `shared/types/Game.ts`, `functions/src/gameprocessors/SnekProcessor.ts`, `frontend/src/pages/GamePage/GameSetup.tsx`, `frontend/src/pages/GamePage/SnakeGameLogic.tsx`
+
 ## Fertile Ground Bug Fix (February 24, 2026)
 - **Bug**: Games would hang at "Game starting" when fertile ground was unchecked
 - **Root Cause**: When `fertileTiles` was empty, the Turn object set `fertileTiles: undefined`. Firestore rejects `undefined` values in document writes, causing the `onGameStarted` transaction to crash silently. Toggling fertile ground ON would re-trigger `onGameStarted` with a non-empty `fertileTiles` array, allowing it to succeed.

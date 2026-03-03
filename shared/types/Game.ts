@@ -72,6 +72,8 @@
     fertileGroundEnabled?: boolean // Enable fertile ground tiles
     fertileGroundDensity?: number // Percentage of tiles that are fertile (0-100)
     foodSpawnRate?: number // Expected food spawned per turn (0-5, defaults to 0.5)
+    invulnerabilityPotionEnabled?: boolean
+    invulnerabilityPotionSpawnRate?: number // 0.05 to 1, defaults to 0.15
   }
 
   // Updated GameState interface with the new 'winners' structure
@@ -128,6 +130,17 @@
     scoringUnit?: 'individual' | 'team' // How scores/winners are aggregated
     teamClusterFallback?: boolean // Optional: team clusters requested but fell back
     fertileTiles?: number[] // Positions of fertile ground tiles
+    invulnerabilityPotions?: number[]
+    playerInvulnerabilityLevel?: { [playerID: string]: number }
+    activeEffects?: ActiveEffect[]
+  }
+
+  export interface ActiveEffect {
+    playerID: string
+    type: 'invulnerability_buff' | 'invulnerability_debuff'
+    level: number
+    expiryTurn: number
+    sourcePlayerID: string
   }
 
   export interface Clash {

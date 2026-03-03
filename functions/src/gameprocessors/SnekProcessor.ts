@@ -1,4 +1,4 @@
-import { Clash, GamePlayer, GameState, Move, Turn, Winner } from "@shared/types/Game"
+import { ActiveEffect, Clash, GamePlayer, GameState, Move, Turn, Winner } from "@shared/types/Game"
 import { Timestamp } from "firebase-admin/firestore"
 import { logger } from "../logger"
 import { GameProcessor } from "./GameProcessor"
@@ -14,11 +14,15 @@ interface SnakeGameState {
   newHazards: number[]
   newPlayerHealth: { [playerID: string]: number }
   newAlivePlayers: string[]
+  newInvulnerabilityPotions: number[]
+  playerInvulnerabilityLevel: { [playerID: string]: number }
+  activeEffects: ActiveEffect[]
   
   // Processing data
   playerMoves: { [playerID: string]: number }
   deadPlayers: Set<string>
   clashes: Clash[]
+  vulnerableSnakesCollided: Set<string>
   
   // Computed data
   newAllowedMoves: { [playerID: string]: number[] }
@@ -106,6 +110,11 @@ export class SnekProcessor extends GameProcessor {
       initialScores[player.id] = 3 // Initial snake length is 3
     })
 
+    const initialInvulnerabilityLevel: { [playerID: string]: number } = {}
+    gamePlayers.forEach((player) => {
+      initialInvulnerabilityLevel[player.id] = 0
+    })
+
     const firstTurn: Turn = {
       playerHealth: initialHealth,
       startTime: Timestamp.fromMillis(now),
@@ -122,6 +131,9 @@ export class SnekProcessor extends GameProcessor {
       winners: [],
       teamClusterFallback,
       ...(this.fertileTiles.length > 0 ? { fertileTiles: this.fertileTiles } : {}),
+      invulnerabilityPotions: [],
+      playerInvulnerabilityLevel: initialInvulnerabilityLevel,
+      activeEffects: [],
     }
 
     return firstTurn
@@ -132,25 +144,36 @@ export class SnekProcessor extends GameProcessor {
       if (currentTurn.fertileTiles && currentTurn.fertileTiles.length > 0) {
         this.fertileTiles = currentTurn.fertileTiles
       }
+      const currentTurnNumber = this.gameState.turns.length
+
       // 1. Setup
       const gameState = this.initializeGameState(currentTurn)
+
+      // 2. Expire effects
+      this.expireEffects(gameState, currentTurnNumber)
       
-      // 2. Process moves
+      // 3. Process moves
       this.processPlayerMoves(gameState, moves)
       
-      // 3. Handle collisions
+      // 4. Handle collisions (tiered by invulnerability level)
       this.detectAndHandleCollisions(gameState)
       
-      // 4. Process food and health
+      // 5. Process food and health
       this.processFoodAndHealth(gameState)
+
+      // 6. Process invulnerability potion collection
+      this.processInvulnerabilityPotionCollection(gameState, currentTurnNumber)
       
-      // 5. Generate new food
+      // 7. Generate new food
       this.generateNewFood(gameState)
+
+      // 8. Generate new invulnerability potions
+      this.generateNewInvulnerabilityPotions(gameState)
       
-      // 6. Calculate winners
+      // 9. Calculate winners
       const winners = this.calculateWinners(gameState)
       
-      // 7. Create new turn
+      // 10. Create new turn
       return this.createNewTurn(currentTurn, gameState, winners)
       
     } catch (error) {
@@ -175,6 +198,11 @@ export class SnekProcessor extends GameProcessor {
         newSnakes[playerID] = [...playerPieces[playerID]]
       })
 
+    const playerInvulnerabilityLevel: { [playerID: string]: number } = {}
+    alivePlayers.forEach((playerID) => {
+      playerInvulnerabilityLevel[playerID] = currentTurn.playerInvulnerabilityLevel?.[playerID] ?? 0
+    })
+
     return {
       boardWidth,
       boardHeight,
@@ -183,9 +211,13 @@ export class SnekProcessor extends GameProcessor {
       newHazards: [...hazards],
       newPlayerHealth: { ...playerHealth },
       newAlivePlayers: [...alivePlayers],
+      newInvulnerabilityPotions: [...(currentTurn.invulnerabilityPotions ?? [])],
+      playerInvulnerabilityLevel,
+      activeEffects: (currentTurn.activeEffects ?? []).map(e => ({ ...e })),
       playerMoves: {},
       deadPlayers: new Set(),
       clashes: [],
+      vulnerableSnakesCollided: new Set(),
       newAllowedMoves: {},
       newScores: {}
     }
@@ -261,8 +293,11 @@ export class SnekProcessor extends GameProcessor {
     // Self collisions
     this.checkSelfCollisions(gameState)
     
-    // Snake-to-snake collisions
-    this.checkSnakeCollisions(gameState)
+    // Snake-to-snake collisions (tiered by invulnerability level)
+    this.checkSnakeCollisionsTiered(gameState)
+
+    // Schedule ally buff expiry for any vulnerable snakes that collided
+    this.scheduleVulnerableCollisionBuffExpiry(gameState)
     
     // Remove dead players
     this.removeDeadPlayers(gameState)
@@ -277,6 +312,9 @@ export class SnekProcessor extends GameProcessor {
 
       if (gameState.newHazards.includes(headIndex)) {
         gameState.deadPlayers.add(playerID)
+        if ((gameState.playerInvulnerabilityLevel[playerID] ?? 0) < 0) {
+          gameState.vulnerableSnakesCollided.add(playerID)
+        }
         snake.forEach((position) => {
           gameState.clashes.push({
             index: position,
@@ -300,6 +338,9 @@ export class SnekProcessor extends GameProcessor {
       
       if (walls.includes(headIndex)) {
         gameState.deadPlayers.add(playerID)
+        if ((gameState.playerInvulnerabilityLevel[playerID] ?? 0) < 0) {
+          gameState.vulnerableSnakesCollided.add(playerID)
+        }
           snake.forEach((position) => {
           gameState.clashes.push({
               index: position,
@@ -322,6 +363,9 @@ export class SnekProcessor extends GameProcessor {
       // Self-collision check (snake hits its own body)
       if (snake.slice(1).includes(headIndex)) {
         gameState.deadPlayers.add(playerID)
+        if ((gameState.playerInvulnerabilityLevel[playerID] ?? 0) < 0) {
+          gameState.vulnerableSnakesCollided.add(playerID)
+        }
           snake.forEach((position) => {
           gameState.clashes.push({
               index: position,
@@ -336,71 +380,355 @@ export class SnekProcessor extends GameProcessor {
     })
   }
 
-  private checkSnakeCollisions(gameState: SnakeGameState): void {
-    // Build occupied positions and head positions
-      const newOccupiedPositions: { [position: number]: string[] } = {}
-      const headPositions: { [position: number]: string[] } = {}
+  private checkSnakeCollisionsTiered(gameState: SnakeGameState): void {
+    const alivePlayers = gameState.newAlivePlayers.filter(id => !gameState.deadPlayers.has(id))
+    if (alivePlayers.length === 0) return
 
-    Object.keys(gameState.newSnakes).forEach((playerID) => {
-      const snake = gameState.newSnakes[playerID]
-        snake.forEach((pos, index) => {
-          if (!newOccupiedPositions[pos]) {
-            newOccupiedPositions[pos] = []
-          }
-          newOccupiedPositions[pos].push(playerID)
+    const levels = new Set<number>()
+    alivePlayers.forEach(id => {
+      levels.add(gameState.playerInvulnerabilityLevel[id] ?? 0)
+    })
+    const sortedLevels = Array.from(levels).sort((a, b) => b - a)
 
-          if (index === 0) {
-            // Head position
-            if (!headPositions[pos]) {
-              headPositions[pos] = []
-            }
-            headPositions[pos].push(playerID)
+    const allHaveZero = sortedLevels.length === 1 && sortedLevels[0] === 0
+    if (allHaveZero) {
+      this.checkSnakeCollisionsNormal(gameState)
+      return
+    }
+
+    const severedPositions = new Set<number>()
+
+    for (const currentLevel of sortedLevels) {
+      const playersAtThisLevel = alivePlayers.filter(id =>
+        !gameState.deadPlayers.has(id) && (gameState.playerInvulnerabilityLevel[id] ?? 0) === currentLevel
+      )
+      if (playersAtThisLevel.length === 0) continue
+
+      const bodyPositions: { [position: number]: { playerID: string; segmentIndex: number }[] } = {}
+      alivePlayers.forEach(playerID => {
+        if (gameState.deadPlayers.has(playerID)) return
+        const snake = gameState.newSnakes[playerID]
+        if (!snake) return
+        snake.forEach((pos, idx) => {
+          if (idx > 0) {
+            if (!bodyPositions[pos]) bodyPositions[pos] = []
+            bodyPositions[pos].push({ playerID, segmentIndex: idx })
           }
         })
       })
 
-      // Detect head-to-head and head-to-body collisions
-      Object.keys(headPositions).forEach((posStr) => {
+      const headPositions: { [position: number]: string[] } = {}
+      playersAtThisLevel.forEach(playerID => {
+        const snake = gameState.newSnakes[playerID]
+        if (!snake) return
+        const headPos = snake[0]
+        if (!headPositions[headPos]) headPositions[headPos] = []
+        headPositions[headPos].push(playerID)
+      })
+
+      Object.keys(headPositions).forEach(posStr => {
         const position = parseInt(posStr)
-        const playersAtHead = headPositions[position]
+        const headsHere = headPositions[position]
 
-        if (playersAtHead.length > 1) {
-          // Head-on collision
-          let minLength = Infinity
-          playersAtHead.forEach((playerID) => {
-          minLength = Math.min(minLength, gameState.newSnakes[playerID].length)
-          })
+        const allHeadsAtPosition: string[] = []
+        alivePlayers.forEach(id => {
+          if (!gameState.deadPlayers.has(id) && gameState.newSnakes[id]?.[0] === position) {
+            allHeadsAtPosition.push(id)
+          }
+        })
 
-          playersAtHead.forEach((playerID) => {
-          if (gameState.newSnakes[playerID].length === minLength) {
-            gameState.deadPlayers.add(playerID)
-            gameState.newSnakes[playerID].forEach((pos) => {
-              gameState.clashes.push({
+        if (allHeadsAtPosition.length > 1) {
+          const maxLevel = Math.max(...allHeadsAtPosition.map(id => gameState.playerInvulnerabilityLevel[id] ?? 0))
+
+          allHeadsAtPosition.forEach(playerID => {
+            const playerLevel = gameState.playerInvulnerabilityLevel[playerID] ?? 0
+            if (playerLevel < maxLevel) {
+              gameState.deadPlayers.add(playerID)
+              if (playerLevel < 0) gameState.vulnerableSnakesCollided.add(playerID)
+              gameState.newSnakes[playerID]?.forEach(pos => {
+                gameState.clashes.push({
                   index: pos,
-                  playerIDs: playersAtHead,
-                  reason: "Head-on collision (shortest snake(s) died)",
+                  playerIDs: allHeadsAtPosition,
+                  reason: "Head-on collision (lower invulnerability level died)",
                 })
               })
             }
           })
-        } else {
-          const playerID = playersAtHead[0]
-          const otherPlayersAtPosition = newOccupiedPositions[position].filter(
-            (id) => id !== playerID,
-          )
 
-          if (otherPlayersAtPosition.length > 0) {
-          gameState.deadPlayers.add(playerID)
-          gameState.newSnakes[playerID].forEach((pos) => {
-            gameState.clashes.push({
-                index: pos,
-                playerIDs: [playerID, ...otherPlayersAtPosition],
-                reason: "Collided with another snake's body",
-              })
+          const survivorsAtMaxLevel = allHeadsAtPosition.filter(id =>
+            !gameState.deadPlayers.has(id) && (gameState.playerInvulnerabilityLevel[id] ?? 0) === maxLevel
+          )
+          if (survivorsAtMaxLevel.length > 1) {
+            let minLength = Infinity
+            survivorsAtMaxLevel.forEach(id => {
+              minLength = Math.min(minLength, gameState.newSnakes[id]?.length ?? 0)
+            })
+            survivorsAtMaxLevel.forEach(playerID => {
+              if ((gameState.newSnakes[playerID]?.length ?? 0) === minLength) {
+                gameState.deadPlayers.add(playerID)
+                const playerLevel = gameState.playerInvulnerabilityLevel[playerID] ?? 0
+                if (playerLevel < 0) gameState.vulnerableSnakesCollided.add(playerID)
+                gameState.newSnakes[playerID]?.forEach(pos => {
+                  gameState.clashes.push({
+                    index: pos,
+                    playerIDs: survivorsAtMaxLevel,
+                    reason: "Head-on collision (shortest snake(s) died)",
+                  })
+                })
+              }
             })
           }
         }
+
+        headsHere.forEach(playerID => {
+          if (gameState.deadPlayers.has(playerID)) return
+          const snake = gameState.newSnakes[playerID]
+          if (!snake) return
+          const headPos = snake[0]
+
+          const bodiesAtPos = bodyPositions[headPos]
+          if (!bodiesAtPos) return
+
+          bodiesAtPos.forEach(({ playerID: bodyOwnerID, segmentIndex }) => {
+            if (bodyOwnerID === playerID) return
+            if (gameState.deadPlayers.has(bodyOwnerID)) return
+            const bodyOwnerLevel = gameState.playerInvulnerabilityLevel[bodyOwnerID] ?? 0
+
+            if (currentLevel > bodyOwnerLevel) {
+              const targetSnake = gameState.newSnakes[bodyOwnerID]
+              if (!targetSnake) return
+              const currentSegIdx = targetSnake.indexOf(headPos, 1)
+              if (currentSegIdx === -1) return
+
+              const severedSegments = targetSnake.splice(currentSegIdx)
+              severedSegments.forEach(pos => {
+                severedPositions.add(pos)
+                gameState.clashes.push({
+                  index: pos,
+                  playerIDs: [playerID, bodyOwnerID],
+                  reason: `Body severed by invulnerable snake`,
+                })
+              })
+              logger.info(
+                `Snek: Player ${playerID} (level ${currentLevel}) severed player ${bodyOwnerID} (level ${bodyOwnerLevel}) at segment ${currentSegIdx}, removing ${severedSegments.length} segments.`,
+              )
+              if (bodyOwnerLevel < 0) gameState.vulnerableSnakesCollided.add(bodyOwnerID)
+            } else if (currentLevel === bodyOwnerLevel) {
+              gameState.deadPlayers.add(playerID)
+              if (currentLevel < 0) gameState.vulnerableSnakesCollided.add(playerID)
+              gameState.newSnakes[playerID]?.forEach(pos => {
+                gameState.clashes.push({
+                  index: pos,
+                  playerIDs: [playerID, bodyOwnerID],
+                  reason: "Collided with another snake's body",
+                })
+              })
+            } else {
+              gameState.deadPlayers.add(playerID)
+              if (currentLevel < 0) gameState.vulnerableSnakesCollided.add(playerID)
+              gameState.newSnakes[playerID]?.forEach(pos => {
+                gameState.clashes.push({
+                  index: pos,
+                  playerIDs: [playerID, bodyOwnerID],
+                  reason: "Collided with higher invulnerability snake's body",
+                })
+              })
+            }
+          })
+        })
       })
+    }
+  }
+
+  private checkSnakeCollisionsNormal(gameState: SnakeGameState): void {
+    const newOccupiedPositions: { [position: number]: string[] } = {}
+    const headPositions: { [position: number]: string[] } = {}
+
+    Object.keys(gameState.newSnakes).forEach((playerID) => {
+      if (gameState.deadPlayers.has(playerID)) return
+      const snake = gameState.newSnakes[playerID]
+      snake.forEach((pos, index) => {
+        if (!newOccupiedPositions[pos]) {
+          newOccupiedPositions[pos] = []
+        }
+        newOccupiedPositions[pos].push(playerID)
+
+        if (index === 0) {
+          if (!headPositions[pos]) {
+            headPositions[pos] = []
+          }
+          headPositions[pos].push(playerID)
+        }
+      })
+    })
+
+    Object.keys(headPositions).forEach((posStr) => {
+      const position = parseInt(posStr)
+      const playersAtHead = headPositions[position]
+
+      if (playersAtHead.length > 1) {
+        let minLength = Infinity
+        playersAtHead.forEach((playerID) => {
+          minLength = Math.min(minLength, gameState.newSnakes[playerID].length)
+        })
+
+        playersAtHead.forEach((playerID) => {
+          if (gameState.newSnakes[playerID].length === minLength) {
+            gameState.deadPlayers.add(playerID)
+            gameState.newSnakes[playerID].forEach((pos) => {
+              gameState.clashes.push({
+                index: pos,
+                playerIDs: playersAtHead,
+                reason: "Head-on collision (shortest snake(s) died)",
+              })
+            })
+          }
+        })
+      } else {
+        const playerID = playersAtHead[0]
+        const otherPlayersAtPosition = newOccupiedPositions[position].filter(
+          (id) => id !== playerID,
+        )
+
+        if (otherPlayersAtPosition.length > 0) {
+          gameState.deadPlayers.add(playerID)
+          gameState.newSnakes[playerID].forEach((pos) => {
+            gameState.clashes.push({
+              index: pos,
+              playerIDs: [playerID, ...otherPlayersAtPosition],
+              reason: "Collided with another snake's body",
+            })
+          })
+        }
+      }
+    })
+  }
+
+  private scheduleVulnerableCollisionBuffExpiry(gameState: SnakeGameState): void {
+    if (gameState.vulnerableSnakesCollided.size === 0) return
+    const currentTurnNumber = this.gameState.turns.length
+
+    gameState.vulnerableSnakesCollided.forEach(vulnerablePlayerID => {
+      const vulnerablePlayer = this.gameSetup.gamePlayers.find(p => p.id === vulnerablePlayerID)
+      if (!vulnerablePlayer?.teamID) return
+
+      const teamID = vulnerablePlayer.teamID
+      const allies = this.gameSetup.gamePlayers.filter(
+        p => p.teamID === teamID && p.id !== vulnerablePlayerID
+      )
+
+      allies.forEach(ally => {
+        gameState.activeEffects.forEach(effect => {
+          if (effect.playerID === ally.id && effect.type === 'invulnerability_buff') {
+            effect.expiryTurn = currentTurnNumber + 1
+          }
+        })
+      })
+
+      logger.info(
+        `Snek: Vulnerable snake ${vulnerablePlayerID} collided; ally invulnerability buffs on team ${teamID} set to expire next turn.`,
+      )
+    })
+  }
+
+  private expireEffects(gameState: SnakeGameState, currentTurnNumber: number): void {
+    const expiring = gameState.activeEffects.filter(e => e.expiryTurn <= currentTurnNumber)
+    if (expiring.length === 0) return
+
+    expiring.forEach(effect => {
+      if (gameState.playerInvulnerabilityLevel[effect.playerID] !== undefined) {
+        gameState.playerInvulnerabilityLevel[effect.playerID] -= effect.level
+      }
+    })
+
+    gameState.activeEffects = gameState.activeEffects.filter(e => e.expiryTurn > currentTurnNumber)
+
+    gameState.activeEffects = gameState.activeEffects.filter(e =>
+      gameState.newAlivePlayers.includes(e.playerID)
+    )
+
+    logger.info(`Snek: Expired ${expiring.length} effects at turn ${currentTurnNumber}.`)
+  }
+
+  private processInvulnerabilityPotionCollection(gameState: SnakeGameState, currentTurnNumber: number): void {
+    if (!this.gameSetup.invulnerabilityPotionEnabled) return
+
+    const collectors: { playerID: string; potionIndex: number }[] = []
+
+    gameState.newAlivePlayers.forEach(playerID => {
+      const snake = gameState.newSnakes[playerID]
+      if (!snake) return
+      const headPos = snake[0]
+      const potionIdx = gameState.newInvulnerabilityPotions.indexOf(headPos)
+      if (potionIdx !== -1) {
+        collectors.push({ playerID, potionIndex: potionIdx })
+      }
+    })
+
+    const indicesToRemove = new Set<number>()
+    collectors.forEach(({ playerID, potionIndex }) => {
+      indicesToRemove.add(potionIndex)
+
+      gameState.playerInvulnerabilityLevel[playerID] = (gameState.playerInvulnerabilityLevel[playerID] ?? 0) - 1
+      gameState.activeEffects.push({
+        playerID,
+        type: 'invulnerability_debuff',
+        level: -1,
+        expiryTurn: currentTurnNumber + 4,
+        sourcePlayerID: playerID,
+      })
+
+      const collector = this.gameSetup.gamePlayers.find(p => p.id === playerID)
+      if (collector?.teamID) {
+        const allies = gameState.newAlivePlayers.filter(allyID => {
+          if (allyID === playerID) return false
+          const allyPlayer = this.gameSetup.gamePlayers.find(p => p.id === allyID)
+          return allyPlayer?.teamID === collector.teamID
+        })
+
+        allies.forEach(allyID => {
+          gameState.playerInvulnerabilityLevel[allyID] = (gameState.playerInvulnerabilityLevel[allyID] ?? 0) + 1
+          gameState.activeEffects.push({
+            playerID: allyID,
+            type: 'invulnerability_buff',
+            level: 1,
+            expiryTurn: currentTurnNumber + 4,
+            sourcePlayerID: playerID,
+          })
+        })
+      }
+
+      logger.info(
+        `Snek: Player ${playerID} collected invulnerability potion. Level now ${gameState.playerInvulnerabilityLevel[playerID]}.`,
+      )
+    })
+
+    gameState.newInvulnerabilityPotions = gameState.newInvulnerabilityPotions.filter(
+      (_, idx) => !indicesToRemove.has(idx)
+    )
+  }
+
+  private generateNewInvulnerabilityPotions(gameState: SnakeGameState): void {
+    if (!this.gameSetup.invulnerabilityPotionEnabled) return
+
+    const spawnRate = this.gameSetup.invulnerabilityPotionSpawnRate ?? 0.15
+    const guaranteed = Math.floor(spawnRate)
+    const fractional = spawnRate - guaranteed
+    const total = guaranteed + (Math.random() < fractional ? 1 : 0)
+
+    for (let i = 0; i < total; i++) {
+      const freePositions = this.getFreePositions(
+        gameState.boardWidth,
+        gameState.boardHeight,
+        gameState.newSnakes,
+        [...gameState.newFood, ...gameState.newInvulnerabilityPotions],
+        gameState.newHazards,
+      )
+      if (freePositions.length > 0) {
+        const randomIndex = Math.floor(Math.random() * freePositions.length)
+        gameState.newInvulnerabilityPotions.push(freePositions[randomIndex])
+      }
+    }
   }
 
   private removeDeadPlayers(gameState: SnakeGameState): void {
@@ -411,6 +739,8 @@ export class SnekProcessor extends GameProcessor {
       }
       delete gameState.newSnakes[playerID]
       delete gameState.newPlayerHealth[playerID]
+      delete gameState.playerInvulnerabilityLevel[playerID]
+      gameState.activeEffects = gameState.activeEffects.filter(e => e.playerID !== playerID)
     })
   }
 
@@ -458,7 +788,7 @@ export class SnekProcessor extends GameProcessor {
           gameState.boardWidth,
           gameState.boardHeight,
           gameState.newSnakes,
-          gameState.newFood,
+          [...gameState.newFood, ...gameState.newInvulnerabilityPotions],
           gameState.newHazards,
         )
         if (this.gameSetup.fertileGroundEnabled && this.fertileTiles.length > 0) {
@@ -583,6 +913,9 @@ export class SnekProcessor extends GameProcessor {
       moves: gameState.playerMoves,
       winners: winners,
       ...(this.fertileTiles.length > 0 ? { fertileTiles: this.fertileTiles } : {}),
+      invulnerabilityPotions: gameState.newInvulnerabilityPotions,
+      playerInvulnerabilityLevel: gameState.playerInvulnerabilityLevel,
+      activeEffects: gameState.activeEffects,
     }
   }
 
