@@ -362,7 +362,7 @@ const GameSetup: React.FC = () => {
   };
 
   const handleInvulnerabilityPotionSpawnRateChange = async (newRate: number) => {
-    const sanitizedValue = Math.max(0.05, Math.min(1, Math.round(newRate * 20) / 20));
+    const sanitizedValue = Math.max(0.01, Math.min(0.2, Math.round(newRate * 100) / 100));
     setInvulnerabilityPotionSpawnRate(sanitizedValue);
     await updateDoc(gameDocRef, {
       invulnerabilityPotionSpawnRate: sanitizedValue,
@@ -747,9 +747,9 @@ const GameSetup: React.FC = () => {
                 <Slider
                   value={invulnerabilityPotionSpawnRate}
                   onChange={(_, value) => handleInvulnerabilityPotionSpawnRateChange(value as number)}
-                  min={0.05}
-                  max={1}
-                  step={0.05}
+                  min={0.01}
+                  max={0.2}
+                  step={0.01}
                   disabled={started}
                   valueLabelDisplay="auto"
                   valueLabelFormat={(value) => `${value.toFixed(2)}/turn`}
