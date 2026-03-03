@@ -1,9 +1,9 @@
-import React, { useMemo } from "react"
+import React, { useMemo, useRef, useEffect } from "react"
 import { Checkbox, FormControl, FormControlLabel, IconButton, Slider, TextField, Typography, Box } from "@mui/material"
 import { RefreshCw } from "lucide-react"
 import { GamePlayer, GameType, Team } from "../../../shared/types/Game"
 
-interface BoardPresetData {
+export interface BoardPresetData {
   fertileTiles: number[]
   hazards: number[]
   playerPositions: { [playerID: string]: number }
@@ -27,8 +27,10 @@ interface SnekConfigurationProps {
   onFoodSpawnRateChange: (rate: number) => void
   boardWidth: number
   boardHeight: number
-  useThisBoard: boolean
-  onUseThisBoardChange: (enabled: boolean, data: BoardPresetData) => void
+  usePreviewBoard: boolean
+  onUsePreviewBoardChange: (enabled: boolean) => void
+  onPreviewDataChange: (data: BoardPresetData, uncheckBoard: boolean) => void
+  syncedPreviewData: BoardPresetData | null
   gamePlayers: GamePlayer[]
   gameType: GameType
   teams?: Team[]
@@ -48,84 +50,77 @@ function dotGridGradient(ix: number, iy: number, x: number, y: number): number {
   return Math.cos(angle) * (x - ix) + Math.sin(angle) * (y - iy)
 }
 
-function perlinNoise(x: number, y: number): number {
-  const x0 = Math.floor(x)
-  const y0 = Math.floor(y)
-  const dx = x - x0
-  const dy = y - y0
-  const sx = dx * dx * (3 - 2 * dx)
-  const sy = dy * dy * (3 - 2 * dy)
+function perlin(x: number, y: number): number {
+  const x0 = Math.floor(x), y0 = Math.floor(y)
+  const x1 = x0 + 1, y1 = y0 + 1
+  const sx = x - x0, sy = y - y0
+  const tx = sx * sx * (3 - 2 * sx), ty = sy * sy * (3 - 2 * sy)
   const n00 = dotGridGradient(x0, y0, x, y)
-  const n10 = dotGridGradient(x0 + 1, y0, x, y)
-  const n01 = dotGridGradient(x0, y0 + 1, x, y)
-  const n11 = dotGridGradient(x0 + 1, y0 + 1, x, y)
-  const ix0 = n00 + sx * (n10 - n00)
-  const ix1 = n01 + sx * (n11 - n01)
-  return ix0 + sy * (ix1 - ix0)
+  const n10 = dotGridGradient(x1, y0, x, y)
+  const n01 = dotGridGradient(x0, y1, x, y)
+  const n11 = dotGridGradient(x1, y1, x, y)
+  return n00 * (1 - tx) * (1 - ty) + n10 * tx * (1 - ty) + n01 * (1 - tx) * ty + n11 * tx * ty
 }
 
-function fractalNoise(x: number, y: number, octaves: number, baseFrequency: number): number {
-  let value = 0
-  let amplitude = 1
-  let frequency = baseFrequency
-  let maxAmplitude = 0
+function fractalNoise(x: number, y: number, octaves: number, persistence: number): number {
+  let total = 0, amplitude = 1, maxValue = 0
+  let freq = 1
   for (let i = 0; i < octaves; i++) {
-    value += perlinNoise(x * frequency, y * frequency) * amplitude
-    maxAmplitude += amplitude
-    amplitude *= 0.5
-    frequency *= 2.0
+    total += perlin(x * freq, y * freq) * amplitude
+    maxValue += amplitude
+    amplitude *= persistence
+    freq *= 2
   }
-  return value / maxAmplitude
-}
-
-function clusteringToFrequency(clustering: number): number {
-  const t = (clustering - 1) / 19
-  return 0.7553 + t * (0.0662 - 0.7553)
+  return total / maxValue
 }
 
 function seededRandom(seed: number): () => number {
-  let s = Math.floor(seed)
+  let s = seed
   return () => {
-    s = (s * 1103515245 + 12345) & 0x7fffffff
-    return s / 0x7fffffff
+    s = (s * 16807 + 0) % 2147483647
+    return (s - 1) / 2147483646
   }
+}
+
+function clusteringToFrequency(c: number): number {
+  return 0.7553 + ((c - 1) / 19) * (0.0662 - 0.7553)
 }
 
 function generatePreviewFertileTiles(
   w: number, h: number, density: number, clustering: number, seed: number, hazardSet: Set<number>
 ): Set<number> {
-  const baseFrequency = clusteringToFrequency(clustering)
-  const seedX = seed * 1000
-  const seedY = (seed * 577.215 + 0.331) * 1000 % 1000
-  const noiseValues: { pos: number; value: number }[] = []
+  const baseFreq = clusteringToFrequency(clustering)
+  const offsetX = seed * 1000
+  const offsetY = seed * 2000
+  const innerTiles: { index: number; noise: number }[] = []
   for (let y = 1; y < h - 1; y++) {
     for (let x = 1; x < w - 1; x++) {
-      const pos = y * w + x
-      if (hazardSet.has(pos)) continue
-      const value = fractalNoise(x + seedX, y + seedY, 4, baseFrequency)
-      noiseValues.push({ pos, value })
+      const idx = y * w + x
+      if (hazardSet.has(idx)) continue
+      const n = fractalNoise((x + offsetX) * baseFreq, (y + offsetY) * baseFreq, 4, 0.5)
+      innerTiles.push({ index: idx, noise: n })
     }
   }
-  noiseValues.sort((a, b) => b.value - a.value)
-  const targetCount = Math.max(1, Math.floor((noiseValues.length * density) / 100))
-  return new Set(noiseValues.slice(0, targetCount).map(n => n.pos))
+  innerTiles.sort((a, b) => b.noise - a.noise)
+  const count = Math.round((density / 100) * innerTiles.length)
+  return new Set(innerTiles.slice(0, count).map(t => t.index))
 }
 
 function generatePreviewHazards(w: number, h: number, percentage: number, seed: number): Set<number> {
   if (percentage <= 0) return new Set()
-  const rand = seededRandom(seed * 100000)
-  const candidates: number[] = []
+  const innerTiles: number[] = []
   for (let y = 1; y < h - 1; y++) {
     for (let x = 1; x < w - 1; x++) {
-      candidates.push(y * w + x)
+      innerTiles.push(y * w + x)
     }
   }
-  for (let i = candidates.length - 1; i > 0; i--) {
-    const j = Math.floor(rand() * (i + 1))
-    ;[candidates[i], candidates[j]] = [candidates[j], candidates[i]]
+  const rng = seededRandom(Math.floor(seed * 100000))
+  for (let i = innerTiles.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [innerTiles[i], innerTiles[j]] = [innerTiles[j], innerTiles[i]]
   }
-  const targetCount = Math.max(0, Math.floor((candidates.length * percentage) / 100))
-  return new Set(candidates.slice(0, targetCount))
+  const count = Math.round((percentage / 100) * innerTiles.length)
+  return new Set(innerTiles.slice(0, count))
 }
 
 function generatePlayerPositions(
@@ -136,132 +131,119 @@ function generatePlayerPositions(
   const positions = new Map<string, number>()
   if (players.length === 0) return positions
 
-  const rand = seededRandom(seed * 77777)
-  const occupied = new Set<number>()
-
   const isTeamGame = gameType === "teamsnek" || gameType === "kingsnek"
+  const usedPositions = new Set<number>()
+
+  const isValidPos = (x: number, y: number): boolean => {
+    if (x < 1 || x >= w - 1 || y < 1 || y >= h - 1) return false
+    const idx = y * w + x
+    return !hazardSet.has(idx) && !usedPositions.has(idx)
+  }
+
+  const claimPos = (x: number, y: number, playerId: string): boolean => {
+    if (!isValidPos(x, y)) return false
+    const idx = y * w + x
+    usedPositions.add(idx)
+    positions.set(playerId, idx)
+    return true
+  }
 
   if (isTeamGame && teamClustersEnabled && teams && teams.length > 0) {
-    const teamMap = new Map<string, GamePlayer[]>()
+    const innerW = w - 2
+    const innerH = h - 2
+    const cx = innerW / 2 + 1
+    const cy = innerH / 2 + 1
+    const rx = (innerW - 2) / 2
+    const ry = (innerH - 2) / 2
+    const rng = seededRandom(Math.floor(seed * 100000))
+    const angleOffset = rng() * Math.PI * 2
+
+    const teamPlayers: Map<string, GamePlayer[]> = new Map()
     players.forEach(p => {
-      if (!p.teamID) return
-      const list = teamMap.get(p.teamID) || []
-      list.push(p)
-      teamMap.set(p.teamID, list)
+      const tid = p.teamID || "unassigned"
+      if (!teamPlayers.has(tid)) teamPlayers.set(tid, [])
+      teamPlayers.get(tid)!.push(p)
     })
 
-    const activeTeams = teams.filter(t => teamMap.has(t.id))
-    if (activeTeams.length > 0) {
-      const ringInset = Math.max(2, Math.floor(Math.min(w, h) / 2) - 6)
-      const ringPositions: { x: number; y: number }[] = []
+    const teamIds = Array.from(teamPlayers.keys())
+    const totalPlayers = players.length
+    let currentAngle = angleOffset
 
-      const x1 = ringInset
-      const y1 = ringInset
-      const x2 = w - 1 - ringInset
-      const y2 = h - 1 - ringInset
+    teamIds.forEach(tid => {
+      const tp = teamPlayers.get(tid)!
+      const segmentSize = (2 * Math.PI * tp.length) / totalPlayers
 
-      if (x2 > x1 && y2 > y1) {
-        for (let x = x1; x <= x2; x++) ringPositions.push({ x, y: y1 })
-        for (let y = y1 + 1; y <= y2; y++) ringPositions.push({ x: x2, y })
-        for (let x = x2 - 1; x >= x1; x--) ringPositions.push({ x, y: y2 })
-        for (let y = y2 - 1; y > y1; y--) ringPositions.push({ x: x1, y })
-
-        const rotation = Math.floor(rand() * ringPositions.length)
-        const rotated = [...ringPositions.slice(rotation), ...ringPositions.slice(0, rotation)]
-        const segmentLength = Math.floor(rotated.length / activeTeams.length)
-
-        let allPlaced = true
-        activeTeams.forEach((team, teamIdx) => {
-          const teamPlayers = teamMap.get(team.id) || []
-          const segStart = teamIdx * segmentLength
-          const segEnd = teamIdx === activeTeams.length - 1 ? rotated.length : (teamIdx + 1) * segmentLength
-          const segPositions = rotated.slice(segStart, segEnd)
-
-          const spacing = Math.max(1, Math.floor(segPositions.length / (teamPlayers.length + 1)))
-          teamPlayers.forEach((player, pIdx) => {
-            const ringIdx = Math.min(spacing * (pIdx + 1), segPositions.length - 1)
-            const pos = segPositions[ringIdx]
-            if (pos) {
-              const idx = pos.y * w + pos.x
-              if (!hazardSet.has(idx) && !occupied.has(idx)) {
-                positions.set(player.id, idx)
-                occupied.add(idx)
-              } else {
-                allPlaced = false
+      tp.forEach((player, i) => {
+        const angle = currentAngle + (segmentSize * (i + 0.5)) / tp.length
+        const x = Math.round(cx + rx * Math.cos(angle))
+        const y = Math.round(cy + ry * Math.sin(angle))
+        if (!claimPos(x, y, player.id)) {
+          for (let r = 1; r <= 3; r++) {
+            for (let dx = -r; dx <= r; dx++) {
+              for (let dy = -r; dy <= r; dy++) {
+                if (claimPos(x + dx, y + dy, player.id)) return
               }
-            } else {
-              allPlaced = false
             }
-          })
-        })
+          }
+        }
+      })
 
-        if (allPlaced && positions.size === players.length) return positions
-      }
+      currentAngle += segmentSize
+    })
 
-      positions.clear()
-      occupied.clear()
-    }
+    if (positions.size === players.length) return positions
+    positions.clear()
+    usedPositions.clear()
   }
-
-  const startX = (w - 1) % 4 === 0 ? 2 : 1
-  const startY = (h - 1) % 4 === 0 ? 2 : 1
-  const endX = w - startX - 1
-  const endY = h - startY - 1
 
   const edgePositions: { x: number; y: number }[] = []
-  const addUnique = (pos: { x: number; y: number }) => {
-    if (!edgePositions.some(p => p.x === pos.x && p.y === pos.y)) {
-      edgePositions.push(pos)
-    }
-  }
 
-  addUnique({ x: startX, y: startY })
-  addUnique({ x: endX, y: startY })
-  addUnique({ x: startX, y: endY })
-  addUnique({ x: endX, y: endY })
-
-  const edges = [
-    { start: { x: startX, y: startY }, end: { x: endX, y: startY } },
-    { start: { x: endX, y: startY }, end: { x: endX, y: endY } },
-    { start: { x: endX, y: endY }, end: { x: startX, y: endY } },
-    { start: { x: startX, y: endY }, end: { x: startX, y: startY } },
+  const corners = [
+    { x: 1, y: 1 }, { x: w - 2, y: 1 },
+    { x: 1, y: h - 2 }, { x: w - 2, y: h - 2 },
   ]
+  corners.forEach(c => { if (isValidPos(c.x, c.y)) edgePositions.push(c) })
 
-  let depth = 0
-  while (edgePositions.length < players.length && depth < 10) {
-    for (const edge of edges) {
-      const midpoints = getMidpoints(edge.start, edge.end, depth)
-      midpoints.forEach(p => addUnique(p))
+  const getMidpoints = (points: { x: number; y: number }[], depth: number): { x: number; y: number }[] => {
+    if (depth <= 0) return []
+    const mids: { x: number; y: number }[] = []
+    for (let i = 0; i < points.length; i++) {
+      const a = points[i], b = points[(i + 1) % points.length]
+      const mx = Math.round((a.x + b.x) / 2)
+      const my = Math.round((a.y + b.y) / 2)
+      if (isValidPos(mx, my) && !edgePositions.some(p => p.x === mx && p.y === my)) {
+        mids.push({ x: mx, y: my })
+      }
     }
-    depth++
+    mids.forEach(m => { if (!edgePositions.some(p => p.x === m.x && p.y === m.y)) edgePositions.push(m) })
+    return mids.length > 0 ? getMidpoints([...points, ...mids].sort((a, b) => {
+      const angleA = Math.atan2(a.y - h / 2, a.x - w / 2)
+      const angleB = Math.atan2(b.y - h / 2, b.x - w / 2)
+      return angleA - angleB
+    }), depth - 1) : []
   }
+
+  if (edgePositions.length < players.length) {
+    getMidpoints(corners, 4)
+  }
+
+  const fillInnerPositions = () => {
+    for (let y = 2; y < h - 2; y++) {
+      for (let x = 2; x < w - 2; x++) {
+        if (isValidPos(x, y)) edgePositions.push({ x, y })
+        if (edgePositions.length >= players.length) return
+      }
+    }
+  }
+  if (edgePositions.length < players.length) fillInnerPositions()
 
   players.forEach((player, i) => {
     if (i < edgePositions.length) {
-      const pos = edgePositions[i]
-      const idx = pos.y * w + pos.x
-      if (!hazardSet.has(idx)) {
-        positions.set(player.id, idx)
-        occupied.add(idx)
-      }
+      claimPos(edgePositions[i].x, edgePositions[i].y, player.id)
     }
   })
 
   return positions
-}
-
-function getMidpoints(
-  start: { x: number; y: number }, end: { x: number; y: number }, depth: number
-): { x: number; y: number }[] {
-  const count = Math.pow(2, depth)
-  const results: { x: number; y: number }[] = []
-  for (let i = 1; i <= count; i++) {
-    const t = i / (count + 1)
-    const x = Math.round(start.x + t * (end.x - start.x))
-    const y = Math.round(start.y + t * (end.y - start.y))
-    results.push({ x, y })
-  }
-  return results
 }
 
 function generatePreviewFood(
@@ -269,31 +251,27 @@ function generatePreviewFood(
   hazardSet: Set<number>, _seed: number
 ): Set<number> {
   const food = new Set<number>()
-  const occupied = new Set<number>([...hazardSet, ...playerPositions.values()])
+  const occupied = new Set<number>()
 
-  for (let x = 0; x < w; x++) {
-    occupied.add(x)
-    occupied.add((h - 1) * w + x)
-  }
-  for (let y = 0; y < h; y++) {
-    occupied.add(y * w)
-    occupied.add(y * w + w - 1)
-  }
+  for (let x = 0; x < w; x++) { occupied.add(x); occupied.add((h - 1) * w + x) }
+  for (let y = 0; y < h; y++) { occupied.add(y * w); occupied.add(y * w + w - 1) }
+  hazardSet.forEach(h => occupied.add(h))
+  playerPositions.forEach(pos => occupied.add(pos))
 
   const centerX = Math.floor(w / 2)
   const centerY = Math.floor(h / 2)
-  const centerPos = centerY * w + centerX
-  if (!occupied.has(centerPos)) {
-    food.add(centerPos)
-    occupied.add(centerPos)
+  const centerIdx = centerY * w + centerX
+  if (!occupied.has(centerIdx)) {
+    food.add(centerIdx)
+    occupied.add(centerIdx)
   }
 
-  playerPositions.forEach((headPos) => {
-    const headX = headPos % w
-    const headY = Math.floor(headPos / w)
+  playerPositions.forEach((pos) => {
+    const headX = pos % w
+    const headY = Math.floor(pos / w)
     const diags = [
-      { dx: 1, dy: 1 }, { dx: 1, dy: -1 },
-      { dx: -1, dy: 1 }, { dx: -1, dy: -1 },
+      { dx: 1, dy: 1 }, { dx: -1, dy: -1 },
+      { dx: 1, dy: -1 }, { dx: -1, dy: 1 },
     ]
     for (const { dx, dy } of diags) {
       const fx = headX + dx
@@ -324,8 +302,8 @@ function getFertileTileColor(index: number, w: number, fertileSet: Set<number>):
   const noise = ((px * 7 + py * 13) % 5)
   const lightness = adjacentCount >= 6 ? 78 + noise : adjacentCount >= 3 ? 82 + noise : 86 + noise
   const saturation = adjacentCount >= 6 ? 60 : adjacentCount >= 3 ? 50 : 40
-  const hue = 42 + (noise - 2)
-  return `hsl(${hue}, ${saturation}%, ${lightness}%)`
+  const hueShift = ((px + py) % 3) * 5
+  return `hsl(${105 + hueShift}, ${saturation}%, ${lightness}%)`
 }
 
 function getPlayerColor(index: number, total: number): string {
@@ -347,58 +325,70 @@ export const SnekConfiguration: React.FC<SnekConfigurationProps> = ({
   fertileGroundClustering, onFertileGroundClusteringChange,
   foodSpawnRate, onFoodSpawnRateChange,
   boardWidth, boardHeight,
-  useThisBoard, onUseThisBoardChange,
+  usePreviewBoard, onUsePreviewBoardChange,
+  onPreviewDataChange, syncedPreviewData,
   gamePlayers, gameType, teams, teamClustersEnabled,
 }) => {
   const [previewSeed, setPreviewSeed] = React.useState(() => Math.random())
   const [hazardSeed, setHazardSeed] = React.useState(() => Math.random())
   const [placementSeed, setPlacementSeed] = React.useState(() => Math.random())
+  const localChangeRef = useRef(false)
+  const didMountRef = useRef(false)
 
-  const emptyPreset: BoardPresetData = { fertileTiles: [], hazards: [], playerPositions: {}, food: [] }
+  useEffect(() => {
+    didMountRef.current = true
+  }, [])
 
-  const uncheckBoard = React.useCallback(() => {
-    if (useThisBoard) onUseThisBoardChange(false, emptyPreset)
-  }, [useThisBoard, onUseThisBoardChange])
-
-  React.useEffect(() => { uncheckBoard() }, [fertileGroundEnabled])
+  const markLocalChange = () => { localChangeRef.current = true }
 
   React.useEffect(() => {
+    if (!didMountRef.current) return
+    markLocalChange()
     setPreviewSeed(Math.random())
-    uncheckBoard()
+  }, [fertileGroundEnabled])
+
+  React.useEffect(() => {
+    if (!didMountRef.current) return
+    markLocalChange()
+    setPreviewSeed(Math.random())
   }, [fertileGroundDensity, fertileGroundClustering])
 
   React.useEffect(() => {
+    if (!didMountRef.current) return
+    markLocalChange()
     setHazardSeed(Math.random())
-    uncheckBoard()
   }, [hazardPercentage])
 
   React.useEffect(() => {
+    if (!didMountRef.current) return
+    markLocalChange()
     setPreviewSeed(Math.random())
     setHazardSeed(Math.random())
     setPlacementSeed(Math.random())
-    uncheckBoard()
   }, [boardWidth, boardHeight])
 
   React.useEffect(() => {
+    if (!didMountRef.current) return
+    markLocalChange()
     setPlacementSeed(Math.random())
-    uncheckBoard()
   }, [gamePlayers.length, teamClustersEnabled, gameType])
 
   const playerIds = gamePlayers.map(p => p.id).sort().join(",")
   const teamIds = gamePlayers.map(p => p.teamID || "").sort().join(",")
   React.useEffect(() => {
+    if (!didMountRef.current) return
+    markLocalChange()
     setPlacementSeed(Math.random())
-    uncheckBoard()
   }, [playerIds, teamIds])
 
-  const hazardTiles = useMemo(() => {
+  const localHazardTiles = useMemo(() => {
     return generatePreviewHazards(boardWidth, boardHeight, hazardPercentage, hazardSeed)
   }, [boardWidth, boardHeight, hazardPercentage, hazardSeed])
 
-  const fertileTiles = useMemo(() => {
+  const localFertileTiles = useMemo(() => {
     if (!fertileGroundEnabled) return new Set<number>()
-    return generatePreviewFertileTiles(boardWidth, boardHeight, fertileGroundDensity, fertileGroundClustering, previewSeed, hazardTiles)
-  }, [fertileGroundEnabled, fertileGroundDensity, fertileGroundClustering, previewSeed, boardWidth, boardHeight, hazardTiles])
+    return generatePreviewFertileTiles(boardWidth, boardHeight, fertileGroundDensity, fertileGroundClustering, previewSeed, localHazardTiles)
+  }, [fertileGroundEnabled, fertileGroundDensity, fertileGroundClustering, previewSeed, boardWidth, boardHeight, localHazardTiles])
 
   const activePlayers = useMemo(() => {
     const isTeamGame = gameType === "teamsnek" || gameType === "kingsnek"
@@ -406,20 +396,53 @@ export const SnekConfiguration: React.FC<SnekConfigurationProps> = ({
     return gamePlayers.filter(p => p.teamID)
   }, [gamePlayers, gameType])
 
-  const playerPositions = useMemo(() => {
-    return generatePlayerPositions(boardWidth, boardHeight, activePlayers, gameType, teams, teamClustersEnabled, hazardTiles, placementSeed)
-  }, [boardWidth, boardHeight, activePlayers, gameType, teams, teamClustersEnabled, hazardTiles, placementSeed])
+  const localPlayerPositions = useMemo(() => {
+    return generatePlayerPositions(boardWidth, boardHeight, activePlayers, gameType, teams, teamClustersEnabled, localHazardTiles, placementSeed)
+  }, [boardWidth, boardHeight, activePlayers, gameType, teams, teamClustersEnabled, localHazardTiles, placementSeed])
 
-  const foodTiles = useMemo(() => {
-    return generatePreviewFood(boardWidth, boardHeight, playerPositions, hazardTiles, placementSeed)
-  }, [boardWidth, boardHeight, playerPositions, hazardTiles, placementSeed])
+  const localFoodTiles = useMemo(() => {
+    return generatePreviewFood(boardWidth, boardHeight, localPlayerPositions, localHazardTiles, placementSeed)
+  }, [boardWidth, boardHeight, localPlayerPositions, localHazardTiles, placementSeed])
+
+  useEffect(() => {
+    if (!localChangeRef.current) return
+    localChangeRef.current = false
+
+    const posObj: { [id: string]: number } = {}
+    localPlayerPositions.forEach((pos, id) => { posObj[id] = pos })
+    onPreviewDataChange({
+      fertileTiles: Array.from(localFertileTiles),
+      hazards: Array.from(localHazardTiles),
+      playerPositions: posObj,
+      food: Array.from(localFoodTiles),
+    }, usePreviewBoard)
+  }, [localFertileTiles, localHazardTiles, localPlayerPositions, localFoodTiles])
+
+  const displayData = useMemo(() => {
+    if (syncedPreviewData && !localChangeRef.current) {
+      return {
+        fertileTiles: new Set(syncedPreviewData.fertileTiles),
+        hazardTiles: new Set(syncedPreviewData.hazards),
+        playerPositions: new Map(Object.entries(syncedPreviewData.playerPositions).map(([id, pos]) => [id, pos])),
+        foodTiles: new Set(syncedPreviewData.food),
+      }
+    }
+    return {
+      fertileTiles: localFertileTiles,
+      hazardTiles: localHazardTiles,
+      playerPositions: localPlayerPositions,
+      foodTiles: localFoodTiles,
+    }
+  }, [syncedPreviewData, localFertileTiles, localHazardTiles, localPlayerPositions, localFoodTiles])
+
+  const { fertileTiles, hazardTiles, playerPositions, foodTiles } = displayData
 
   const handleRefresh = React.useCallback(() => {
+    markLocalChange()
     setPreviewSeed(Math.random())
     setHazardSeed(Math.random())
     setPlacementSeed(Math.random())
-    if (useThisBoard) onUseThisBoardChange(false, emptyPreset)
-  }, [useThisBoard, onUseThisBoardChange])
+  }, [])
 
   const playerPosToId = useMemo(() => {
     const map = new Map<number, string>()
@@ -506,7 +529,7 @@ export const SnekConfiguration: React.FC<SnekConfigurationProps> = ({
                 if (isBorder) {
                   bg = "#1a1a1a"
                 } else if (isHazard) {
-                  bg = "#b71c1c"
+                  bg = "#c0392b"
                 } else if (isFertile) {
                   bg = getFertileTileColor(i, boardWidth, fertileTiles)
                 } else {
@@ -531,7 +554,7 @@ export const SnekConfiguration: React.FC<SnekConfigurationProps> = ({
                   content = (
                     <Box sx={{
                       width: "60%", height: "60%",
-                      backgroundColor: "#ff9800", borderRadius: "50%",
+                      backgroundColor: "#e67e22", borderRadius: "50%",
                       margin: "auto",
                     }} />
                   )
@@ -565,22 +588,8 @@ export const SnekConfiguration: React.FC<SnekConfigurationProps> = ({
           <FormControlLabel
             control={
               <Checkbox
-                checked={useThisBoard}
-                onChange={(e) => {
-                  const checked = e.target.checked
-                  if (checked) {
-                    const posObj: { [id: string]: number } = {}
-                    playerPositions.forEach((pos, id) => { posObj[id] = pos })
-                    onUseThisBoardChange(true, {
-                      fertileTiles: Array.from(fertileTiles),
-                      hazards: Array.from(hazardTiles),
-                      playerPositions: posObj,
-                      food: Array.from(foodTiles),
-                    })
-                  } else {
-                    onUseThisBoardChange(false, emptyPreset)
-                  }
-                }}
+                checked={usePreviewBoard}
+                onChange={(e) => onUsePreviewBoardChange(e.target.checked)}
               />
             }
             label="Use this board"

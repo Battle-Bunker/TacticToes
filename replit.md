@@ -27,13 +27,13 @@ Tactic Toes is a multiplayer game platform built with React/TypeScript frontend 
 - **New Feature**: Added "Clustering" slider (1-20) to fertile ground configuration
 - **Parameter**: Controls the base frequency of the fractal Perlin noise algorithm. Low clustering (1) = high frequency = scattered tiles. High clustering (20) = low frequency = large blob. Default (10) preserves existing medium-cluster behavior
 - **Frequency Mapping**: Linear interpolation from 0.7553 (clustering=1) to 0.0662 (clustering=20), focused on the useful mid-range of the spectrum
-- **Preview Board**: Simulated board matches selected board size, shows both fertile tiles and hazards (red). Appears when fertile ground or hazards are active. Refresh button regenerates with new seed. "Use this board" checkbox saves the exact preview layout for the next game
+- **Preview Board**: Synced across all clients via Firestore. Preview data (fertile tiles, hazards, player positions, food) is written to Firestore on every local UI change and read by all clients for consistent display
 - **Hazard Slider**: Hazard percentage changed from TextField to Slider (0-100%)
-- **Use This Board**: Checkbox saves `presetFertileTiles`, `presetHazards`, `presetPlayerPositions`, and `presetFood` to GameSetup; backend uses all presets instead of regenerating when present
-- **Player Placement Preview**: Shows player positions (colored by team or unique hue) using edge-placement algorithm with team clustering support. Food shown as orange dots (center + per-player diagonal)
-- **Type Changes**: Added `fertileGroundClustering`, `presetFertileTiles`, `presetHazards`, `presetPlayerPositions`, `presetFood` to `GameSetup`
-- **Backward Compatibility**: All fields optional, defaults to 10 clustering (equivalent to previous hardcoded frequency of ~0.3), empty/missing presets = normal generation
-- **Auto-uncheck**: "Use this board" unchecks on any change: density, clustering, hazard%, board size, fertile toggle, player list changes, team assignments, game type, team clusters toggle, or refresh button
+- **Synced Preview Architecture**: Preview data always stored in `presetFertileTiles`, `presetHazards`, `presetPlayerPositions`, `presetFood` fields. The `usePreviewBoard` boolean flag controls whether the backend uses the synced preview data at game start. Local changes trigger regeneration + Firestore upload; remote changes render from Firestore without local regeneration (tracked via `localChangeRef`)
+- **Player Placement Preview**: Shows player positions as X marks (colored by team or unique hue) using edge-placement algorithm with team clustering support. Food shown as orange dots (center + per-player diagonal). Spectators (unassigned players in team games) are excluded
+- **Type Changes**: Added `fertileGroundClustering`, `presetFertileTiles`, `presetHazards`, `presetPlayerPositions`, `presetFood`, `usePreviewBoard` to `GameSetup`
+- **Backward Compatibility**: All fields optional, defaults to 10 clustering (equivalent to previous hardcoded frequency of ~0.3), `usePreviewBoard` false/missing = normal generation
+- **Auto-uncheck**: "Use this board" unchecks on any local change: density, clustering, hazard%, board size, fertile toggle, player list changes, team assignments, game type, team clusters toggle, or refresh button
 - **Core Files Modified**: `shared/types/Game.ts`, `functions/src/gameprocessors/SnekProcessor.ts`, `frontend/src/components/SnekConfiguration.tsx`, `frontend/src/pages/GamePage/GameSetup.tsx`
 
 ## Fertile Ground & Food Spawn Rate (February 18, 2026)

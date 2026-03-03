@@ -67,11 +67,12 @@ export class SnekProcessor extends GameProcessor {
     const { boardWidth, boardHeight, gamePlayers, maxTurnTime } = this.gameSetup
     const now = Date.now()
 
-    // Initialize playerPieces
+    const usePreview = this.gameSetup.usePreviewBoard === true
+
     let playerPieces: { [playerID: string]: number[] }
     let teamClusterFallback: boolean
     const presetPositions = this.gameSetup.presetPlayerPositions
-    if (presetPositions && Object.keys(presetPositions).length === gamePlayers.length) {
+    if (usePreview && presetPositions && Object.keys(presetPositions).length === gamePlayers.length) {
       playerPieces = {}
       teamClusterFallback = false
       gamePlayers.forEach((player) => {
@@ -91,21 +92,17 @@ export class SnekProcessor extends GameProcessor {
       teamClusterFallback = result.teamClusterFallback
     }
 
-    // Initialize walls
     const walls = this.getWallPositions(boardWidth, boardHeight)
 
-    // Initialize hazards
-    const hazards = this.gameSetup.presetHazards && this.gameSetup.presetHazards.length > 0
+    const hazards = usePreview && this.gameSetup.presetHazards && this.gameSetup.presetHazards.length > 0
       ? this.gameSetup.presetHazards
       : this.generateHazardPositions(boardWidth, boardHeight, playerPieces)
 
-    // Initialize fertile tiles
-    this.fertileTiles = this.gameSetup.presetFertileTiles && this.gameSetup.presetFertileTiles.length > 0
+    this.fertileTiles = usePreview && this.gameSetup.presetFertileTiles && this.gameSetup.presetFertileTiles.length > 0
       ? this.gameSetup.presetFertileTiles
       : this.generateFertileTiles(boardWidth, boardHeight, walls, hazards, playerPieces)
 
-    // Initialize food positions
-    const food = this.gameSetup.presetFood && this.gameSetup.presetFood.length > 0
+    const food = usePreview && this.gameSetup.presetFood && this.gameSetup.presetFood.length > 0
       ? this.gameSetup.presetFood
       : this.initializeFood(boardWidth, boardHeight, playerPieces, hazards)
 
