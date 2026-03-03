@@ -7,9 +7,10 @@ import {
   doc,
   updateDoc,
 } from "firebase/firestore";
-import React, { useEffect, useState } from "react";
+import { httpsCallable } from "firebase/functions";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useUser } from "../../context/UserContext";
-import { db } from "../../firebaseConfig";
+import { db, functions } from "../../firebaseConfig";
 import { TeamConfiguration } from "../../components/TeamConfiguration";
 import { SnekConfiguration } from "../../components/SnekConfiguration";
 import { PlayerConfiguration } from "../../components/PlayerConfiguration";
@@ -104,6 +105,68 @@ const GameSetup: React.FC = () => {
 
   const gameDocRef = doc(db, "sessions", sessionName, "setups", gameID);
 
+  const generatePreviewBoardFn = httpsCallable(functions, "generatePreviewBoard");
+  const [isGeneratingPreview, setIsGeneratingPreview] = useState(false);
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const usePreviewBoardRef = useRef(usePreviewBoard);
+  useEffect(() => { usePreviewBoardRef.current = usePreviewBoard; }, [usePreviewBoard]);
+
+  const isSnekGame = gameType === "snek" || gameType === "teamsnek" || gameType === "kingsnek";
+
+  const requestCounterRef = useRef(0);
+  const initialGenerationDoneRef = useRef(false);
+
+  const firePreviewRequest = useCallback(async (shouldUncheck: boolean) => {
+    if (!isSnekGame) return;
+    if (shouldUncheck && usePreviewBoardRef.current) {
+      updateDoc(gameDocRef, { usePreviewBoard: false });
+    }
+    const requestId = ++requestCounterRef.current;
+    setIsGeneratingPreview(true);
+    try {
+      await generatePreviewBoardFn({ sessionID: sessionName, gameID });
+    } catch (err) {
+      console.error("Failed to generate preview board:", err);
+    } finally {
+      if (requestCounterRef.current === requestId) {
+        setIsGeneratingPreview(false);
+      }
+    }
+  }, [isSnekGame, sessionName, gameID]);
+
+  const debouncedRegeneratePreview = useCallback(() => {
+    if (!isSnekGame) return;
+    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+    setIsGeneratingPreview(true);
+    debounceTimerRef.current = setTimeout(() => {
+      firePreviewRequest(true);
+    }, 500);
+  }, [firePreviewRequest, isSnekGame]);
+
+  const immediateRegeneratePreview = useCallback(() => {
+    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+    firePreviewRequest(true);
+  }, [firePreviewRequest]);
+
+  useEffect(() => {
+    if (!gameSetup || initialGenerationDoneRef.current) return;
+    const isCurrentlySnekGame = gameSetup.gameType === "snek" || gameSetup.gameType === "teamsnek" || gameSetup.gameType === "kingsnek";
+    if (!isCurrentlySnekGame) return;
+    const hasPreviewData = gameSetup.presetFertileTiles || gameSetup.presetHazards || gameSetup.presetPlayerPositions || gameSetup.presetFood;
+    if (!hasPreviewData) {
+      initialGenerationDoneRef.current = true;
+      firePreviewRequest(false);
+    } else {
+      initialGenerationDoneRef.current = true;
+    }
+  }, [gameSetup]);
+
+  useEffect(() => {
+    return () => {
+      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+    };
+  }, []);
+
   // Inject the shake animation styles once the component mounts
   React.useEffect(() => {
     addStyles();
@@ -187,6 +250,7 @@ const GameSetup: React.FC = () => {
     await updateDoc(gameDocRef, {
       gamePlayers: arrayUnion(bot),
     });
+    debouncedRegeneratePreview();
   };
 
   // Start game
@@ -205,6 +269,7 @@ const GameSetup: React.FC = () => {
     await updateDoc(gameDocRef, {
       gamePlayers: arrayRemove(player),
     });
+    debouncedRegeneratePreview();
   };
 
   // Handle team assignment for a player
@@ -228,6 +293,7 @@ const GameSetup: React.FC = () => {
     await updateDoc(gameDocRef, {
       gamePlayers: updatedGamePlayers,
     });
+    debouncedRegeneratePreview();
   };
 
   // Handle team configuration changes
@@ -265,6 +331,7 @@ const GameSetup: React.FC = () => {
     await updateDoc(gameDocRef, {
       gamePlayers: reorderedPlayers,
     });
+    debouncedRegeneratePreview();
   };
 
   const handlePlayerTeamKick = async (playerID: string, teamID: string) => {
@@ -290,6 +357,7 @@ const GameSetup: React.FC = () => {
     await updateDoc(gameDocRef, {
       gamePlayers: updatedGamePlayers,
     });
+    debouncedRegeneratePreview();
   };
 
   // Handle max turns configuration
@@ -327,6 +395,7 @@ const GameSetup: React.FC = () => {
     await updateDoc(gameDocRef, {
       hazardPercentage: sanitizedValue,
     });
+    debouncedRegeneratePreview();
   };
 
   const handleFertileGroundToggle = async (enabled: boolean) => {
@@ -334,6 +403,7 @@ const GameSetup: React.FC = () => {
     await updateDoc(gameDocRef, {
       fertileGroundEnabled: enabled,
     });
+    debouncedRegeneratePreview();
   };
 
   const handleFertileGroundDensityChange = async (newDensity: number) => {
@@ -342,6 +412,7 @@ const GameSetup: React.FC = () => {
     await updateDoc(gameDocRef, {
       fertileGroundDensity: sanitizedValue,
     });
+    debouncedRegeneratePreview();
   };
 
   const handleFertileGroundClusteringChange = async (newClustering: number) => {
@@ -350,6 +421,7 @@ const GameSetup: React.FC = () => {
     await updateDoc(gameDocRef, {
       fertileGroundClustering: sanitizedValue,
     });
+    debouncedRegeneratePreview();
   };
 
   const handleUsePreviewBoardChange = async (enabled: boolean) => {
@@ -371,6 +443,7 @@ const GameSetup: React.FC = () => {
     await updateDoc(gameDocRef, {
       teamClustersEnabled: enabled,
     });
+    debouncedRegeneratePreview();
   };
 
   const handleInvulnerabilityPotionToggle = async (enabled: boolean) => {
@@ -406,6 +479,10 @@ const GameSetup: React.FC = () => {
     if (!gameSetup?.started) {
       await updateDoc(gameDocRef, { gameType: selectedGameType });
     }
+    const snekTypes = ["snek", "teamsnek", "kingsnek"];
+    if (snekTypes.includes(selectedGameType)) {
+      debouncedRegeneratePreview();
+    }
   };
 
   // Handler for selecting board size
@@ -422,6 +499,7 @@ const GameSetup: React.FC = () => {
         boardHeight: height,
       });
     }
+    debouncedRegeneratePreview();
   };
 
   if (gameState) return null;
@@ -713,12 +791,12 @@ const GameSetup: React.FC = () => {
                     }
                   : null
               }
+              isGeneratingPreview={isGeneratingPreview}
+              onRefreshPreview={immediateRegeneratePreview}
               gamePlayers={gameSetup.gamePlayers}
               gameType={gameSetup.gameType}
               teams={gameSetup.teams}
               teamClustersEnabled={teamClustersEnabled}
-              sessionID={sessionName}
-              gameID={gameID}
             />
           </Box>
         </FormControl>

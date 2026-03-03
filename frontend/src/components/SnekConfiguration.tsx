@@ -1,8 +1,6 @@
-import React, { useMemo, useRef, useEffect, useCallback } from "react"
+import React, { useMemo } from "react"
 import { Checkbox, FormControl, FormControlLabel, IconButton, Slider, TextField, Typography, Box } from "@mui/material"
 import { RefreshCw } from "lucide-react"
-import { httpsCallable } from "firebase/functions"
-import { functions } from "../firebaseConfig"
 import { GamePlayer, GameType, Team } from "../../../shared/types/Game"
 
 export interface BoardPresetData {
@@ -32,12 +30,12 @@ interface SnekConfigurationProps {
   usePreviewBoard: boolean
   onUsePreviewBoardChange: (enabled: boolean) => void
   syncedPreviewData: BoardPresetData | null
+  isGeneratingPreview: boolean
+  onRefreshPreview: () => void
   gamePlayers: GamePlayer[]
   gameType: GameType
   teams?: Team[]
   teamClustersEnabled: boolean
-  sessionID: string
-  gameID: string
 }
 
 function getFertileTileColor(index: number, w: number, fertileSet: Set<number>): string {
@@ -67,8 +65,6 @@ function getTeamColor(teamID: string | undefined, teams: Team[] | undefined): st
   return team?.color || null
 }
 
-const generatePreviewBoardFn = httpsCallable(functions, "generatePreviewBoard")
-
 export const SnekConfiguration: React.FC<SnekConfigurationProps> = ({
   maxTurns, maxTurnsEnabled, onMaxTurnsToggle, onMaxTurnsChange,
   hazardPercentage, onHazardPercentageChange,
@@ -79,79 +75,9 @@ export const SnekConfiguration: React.FC<SnekConfigurationProps> = ({
   boardWidth, boardHeight,
   usePreviewBoard, onUsePreviewBoardChange,
   syncedPreviewData,
+  isGeneratingPreview, onRefreshPreview,
   gamePlayers, gameType, teams, teamClustersEnabled,
-  sessionID, gameID,
 }) => {
-  const mountedRef = useRef(false)
-  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const pendingUncheckRef = useRef(false)
-  const usePreviewBoardRef = useRef(usePreviewBoard)
-  useEffect(() => { usePreviewBoardRef.current = usePreviewBoard }, [usePreviewBoard])
-
-  const firePreviewRequest = useCallback(async (shouldUncheck: boolean) => {
-    if (shouldUncheck && usePreviewBoardRef.current) {
-      onUsePreviewBoardChange(false)
-    }
-    try {
-      await generatePreviewBoardFn({ sessionID, gameID })
-    } catch (err) {
-      console.error("Failed to generate preview board:", err)
-    }
-  }, [sessionID, gameID, onUsePreviewBoardChange])
-
-  const debouncedPreview = useCallback((shouldUncheck: boolean) => {
-    if (shouldUncheck) pendingUncheckRef.current = true
-    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current)
-    debounceTimerRef.current = setTimeout(() => {
-      const uncheck = pendingUncheckRef.current
-      pendingUncheckRef.current = false
-      firePreviewRequest(uncheck)
-    }, 500)
-  }, [firePreviewRequest])
-
-  useEffect(() => {
-    if (!syncedPreviewData) {
-      firePreviewRequest(false)
-    }
-    const frameId = requestAnimationFrame(() => { mountedRef.current = true })
-    return () => {
-      cancelAnimationFrame(frameId)
-      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current)
-    }
-  }, [])
-
-  useEffect(() => {
-    if (!mountedRef.current) return
-    debouncedPreview(true)
-  }, [fertileGroundEnabled])
-
-  useEffect(() => {
-    if (!mountedRef.current) return
-    debouncedPreview(true)
-  }, [fertileGroundDensity, fertileGroundClustering])
-
-  useEffect(() => {
-    if (!mountedRef.current) return
-    debouncedPreview(true)
-  }, [hazardPercentage])
-
-  useEffect(() => {
-    if (!mountedRef.current) return
-    debouncedPreview(true)
-  }, [boardWidth, boardHeight])
-
-  useEffect(() => {
-    if (!mountedRef.current) return
-    debouncedPreview(true)
-  }, [gamePlayers.length, teamClustersEnabled, gameType])
-
-  const playerIds = gamePlayers.map(p => p.id).sort().join(",")
-  const teamIds = gamePlayers.map(p => p.teamID || "").sort().join(",")
-  useEffect(() => {
-    if (!mountedRef.current) return
-    debouncedPreview(true)
-  }, [playerIds, teamIds])
-
   const activePlayers = useMemo(() => {
     const isTeamGame = gameType === "teamsnek" || gameType === "kingsnek"
     if (!isTeamGame) return gamePlayers
@@ -174,12 +100,6 @@ export const SnekConfiguration: React.FC<SnekConfigurationProps> = ({
     displayData.playerPositions.forEach((pos, id) => map.set(pos, id))
     return map
   }, [displayData])
-
-  const handleRefresh = useCallback(() => {
-    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current)
-    pendingUncheckRef.current = false
-    firePreviewRequest(true)
-  }, [firePreviewRequest])
 
   const showPreview = fertileGroundEnabled || hazardPercentage > 0 || gamePlayers.length > 0
   const clusteringLabel = fertileGroundClustering <= 6 ? "Scattered" : fertileGroundClustering <= 14 ? "Clustered" : "Blobby"
@@ -316,12 +236,30 @@ export const SnekConfiguration: React.FC<SnekConfigurationProps> = ({
                 <Typography variant="body2">Generating preview...</Typography>
               </Box>
             )}
+            {isGeneratingPreview && displayData && (
+              <Box sx={{
+                position: "absolute", top: 0, left: 0, right: 0, bottom: 0,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                backgroundColor: "rgba(0,0,0,0.4)",
+                zIndex: 1,
+              }}>
+                <RefreshCw
+                  size={20}
+                  style={{
+                    color: "#fff",
+                    animation: "spin 1s linear infinite",
+                  }}
+                />
+                <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+              </Box>
+            )}
             <IconButton
-              size="small" onClick={handleRefresh}
+              size="small" onClick={onRefreshPreview}
               sx={{
                 position: "absolute", bottom: 2, right: 2,
                 backgroundColor: "rgba(0,0,0,0.5)", color: "#aaa", padding: "3px",
                 "&:hover": { backgroundColor: "rgba(0,0,0,0.7)", color: "#fff" },
+                zIndex: 2,
               }}
             >
               <RefreshCw size={14} />
