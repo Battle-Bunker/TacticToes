@@ -949,18 +949,22 @@ export class SnekProcessor extends GameProcessor {
     const density = Math.max(0, Math.min(100, this.gameSetup.fertileGroundDensity ?? 30))
     if (density === 0) return []
 
+    const clustering = Math.max(1, Math.min(10, this.gameSetup.fertileGroundClustering ?? 5))
+
     const wallSet = new Set(walls)
     const hazardSet = new Set(hazards)
 
     const seedX = Math.random() * 1000
     const seedY = Math.random() * 1000
 
+    const baseFrequency = this.clusteringToFrequency(clustering)
+
     const noiseValues: { pos: number; value: number }[] = []
     for (let y = 1; y < boardHeight - 1; y++) {
       for (let x = 1; x < boardWidth - 1; x++) {
         const pos = y * boardWidth + x
         if (wallSet.has(pos) || hazardSet.has(pos)) continue
-        const value = this.fractalNoise(x + seedX, y + seedY, 4)
+        const value = this.fractalNoise(x + seedX, y + seedY, 4, baseFrequency)
         noiseValues.push({ pos, value })
       }
     }
@@ -972,10 +976,15 @@ export class SnekProcessor extends GameProcessor {
     return noiseValues.slice(0, targetCount).map(n => n.pos)
   }
 
-  private fractalNoise(x: number, y: number, octaves: number): number {
+  private clusteringToFrequency(clustering: number): number {
+    const t = (clustering - 1) / 9
+    return 2.0 * Math.pow(0.025 / 2.0, t)
+  }
+
+  private fractalNoise(x: number, y: number, octaves: number, baseFrequency: number = 0.3): number {
     let value = 0
     let amplitude = 1
-    let frequency = 0.3
+    let frequency = baseFrequency
     let maxAmplitude = 0
     for (let i = 0; i < octaves; i++) {
       value += this.perlinNoise(x * frequency, y * frequency) * amplitude
