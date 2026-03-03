@@ -516,8 +516,10 @@ export const SnekConfiguration: React.FC<SnekConfigurationProps> = ({
                   content = (
                     <Box sx={{
                       width: "100%", height: "100%",
-                      backgroundColor: color, borderRadius: "2px",
-                    }} />
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      fontSize: Math.max(8, cellSize - 2), fontWeight: "bold",
+                      color, lineHeight: 1,
+                    }}>✕</Box>
                   )
                 } else if (isFood) {
                   content = (
