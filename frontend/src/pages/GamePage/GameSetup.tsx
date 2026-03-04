@@ -877,7 +877,7 @@ const GameSetup: React.FC = () => {
                 <Button
                   onClick={handleScheduledStartTimeSet}
                   disabled={!scheduledStartInput || isConfigDisabled}
-                  variant="contained"
+                  variant="outlined"
                   size="small"
                 >
                   Set
