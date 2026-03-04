@@ -328,7 +328,7 @@ echo ""
 
 # IMPORTANT: Update this list when adding new Gen2 (onTaskDispatched, onRequest v2, etc.) functions.
 # Cloud Run service names are lowercase versions of the exported function names.
-GEN2_SERVICES=("processturnexpirationtask")
+GEN2_SERVICES=("processturnexpirationtask" "processscheduledgamestart")
 
 for service in "${GEN2_SERVICES[@]}"; do
     echo "Granting Compute SA run.invoker on Cloud Run service: $service..."

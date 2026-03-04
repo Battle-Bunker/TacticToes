@@ -253,6 +253,10 @@ const GameSetup: React.FC = () => {
       setTournamentCountdown("");
       return;
     }
+    if (gameSetup.remainingRounds !== undefined && gameSetup.remainingRounds <= 0) {
+      setTournamentCountdown("");
+      return;
+    }
     const scheduledTs = gameSetup.scheduledStartTime as unknown as { seconds: number };
     if (!scheduledTs?.seconds) {
       setTournamentCountdown("");
@@ -273,7 +277,7 @@ const GameSetup: React.FC = () => {
     update();
     const interval = setInterval(update, 1000);
     return () => clearInterval(interval);
-  }, [gameSetup?.tournamentMode, gameSetup?.scheduledStartTime]);
+  }, [gameSetup?.tournamentMode, gameSetup?.scheduledStartTime, gameSetup?.remainingRounds]);
 
   useEffect(() => {
     setRulesComponent(() => getRulesComponent(gameSetup?.gameType));
@@ -682,7 +686,7 @@ const GameSetup: React.FC = () => {
             textAlign: "center",
           }}
         >
-          {gameSetup.scheduledStartTime ? (
+          {gameSetup.scheduledStartTime && !(gameSetup.remainingRounds !== undefined && gameSetup.remainingRounds <= 0) ? (
             <Typography variant="h5" sx={{ fontFamily: "monospace" }}>
               {tournamentCountdown || "Scheduled"}
             </Typography>
