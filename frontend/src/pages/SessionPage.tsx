@@ -10,6 +10,7 @@ import React, { useEffect, useState, useRef } from "react"
 import { useNavigate, useParams, useLocation } from "react-router-dom"
 import { db } from "../firebaseConfig"
 import { EmojiCycler } from "../components/EmojiCycler"
+import { useUser } from "../context/UserContext"
 
 const Sessionpage: React.FC = () => {
   const { sessionName } = useParams<{ sessionName: string }>()
@@ -17,6 +18,7 @@ const Sessionpage: React.FC = () => {
   const navigate = useNavigate()
   const location = useLocation()
   const hasNavigated = useRef(false)
+  const { userID } = useUser()
 
   useEffect(() => {
     const createAndSubscribeToSession = async () => {
@@ -34,6 +36,7 @@ const Sessionpage: React.FC = () => {
             const newSession: Session = {
               latestGameID: null,
               timeCreated: serverTimestamp(),
+              owner: userID,
             }
 
             transaction.set(sessionDocRef, newSession)
@@ -56,7 +59,7 @@ const Sessionpage: React.FC = () => {
     }
 
     createAndSubscribeToSession()
-  }, [sessionName])
+  }, [sessionName, userID])
 
   // Modified navigation effect
   useEffect(() => {

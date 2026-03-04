@@ -44,6 +44,12 @@ export interface ProcessTurnResult {
   newTurnCreated: boolean
   newTurnNumber?: number
   turnDurationSeconds?: number
+  tournamentSchedule?: {
+    sessionID: string
+    gameID: string
+    delaySeconds: number
+    expectedScheduledStartMillis: number
+  }
 }
 
 const DEFAULT_MMR = 1000
@@ -378,13 +384,13 @@ export async function processTurn(
 
 
       // Create new game
-      await createNewGame(transaction, sessionID, gameState.setup)
+      const createResult = await createNewGame(transaction, sessionID, gameState.setup)
 
       logger.info(`Game ${gameID} finished and rankings updated.`, {
         winners: nextTurn.winners,
       })
       
-      return { newTurnCreated: false }
+      return { newTurnCreated: false, tournamentSchedule: createResult.tournamentSchedule }
     } else {
       // normal turn
       transaction.update(gameStateRef, {

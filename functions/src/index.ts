@@ -2,6 +2,7 @@ import { onGameStarted } from "./onGameStarted"
 import { onMoveCreated } from "./onMoveCreated"
 import { onSessionCreated } from "./onSessionCreated"
 import { processTurnExpirationTask } from "./processTurnExpirationTask"
+import { processScheduledGameStart } from "./processScheduledGameStart"
 import { wakeBot } from "./wakeBot"
 import { getPlayerPublicInfo } from "./getPlayerPublicInfo"
 import { generatePreviewBoard } from "./generatePreviewBoard"
@@ -23,6 +24,7 @@ export {
   onGameStarted,
   onSessionCreated,
   processTurnExpirationTask,
+  processScheduledGameStart,
   wakeBot,
   getPlayerPublicInfo,
   generatePreviewBoard,

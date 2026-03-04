@@ -26,6 +26,43 @@ export const onGameStarted = functions.firestore
       return
     }
 
+    if (afterData.tournamentMode) {
+      logger.info(`Game ${gameID} is in tournament mode — skipping normal ready/start workflow.`)
+
+      if (
+        afterData.scheduledStartTime &&
+        !afterData.started &&
+        (!beforeData.scheduledStartTime ||
+          (beforeData.scheduledStartTime as Timestamp).toMillis?.() !==
+            (afterData.scheduledStartTime as Timestamp).toMillis?.())
+      ) {
+        const scheduledTime = afterData.scheduledStartTime as Timestamp
+        const nowMillis = Date.now()
+        const delaySeconds = Math.max(0, Math.round((scheduledTime.toMillis() - nowMillis) / 1000))
+
+        logger.info(
+          `[onGameStarted] Tournament mode: scheduling game start for game ${gameID} in ${delaySeconds}s`,
+          { sessionID, gameID, scheduledMillis: scheduledTime.toMillis(), delaySeconds }
+        )
+
+        try {
+          const queue = getFunctions().taskQueue("processScheduledGameStart")
+          await queue.enqueue(
+            { sessionID, gameID, expectedScheduledStartMillis: scheduledTime.toMillis() },
+            { scheduleDelaySeconds: delaySeconds }
+          )
+          logger.info(
+            `[onGameStarted] Successfully enqueued processScheduledGameStart for game ${gameID}`,
+            { sessionID, gameID, delaySeconds }
+          )
+        } catch (error) {
+          logger.error(`[onGameStarted] Error scheduling tournament game start`, { gameID, error })
+        }
+      }
+
+      return
+    }
+
     // Check if all playerIDs are in playersReady
     const allPlayersReady = afterData.gamePlayers
       .filter((gamePlayer) => gamePlayer.type === "human")

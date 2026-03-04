@@ -43,6 +43,7 @@
   export interface Session {
     latestGameID: string | null
     timeCreated: Timestamp | FieldValue
+    owner?: string | null
   }
 
   // Team type
@@ -80,6 +81,10 @@
     foodSpawnRate?: number // Expected food spawned per turn (0-5, defaults to 0.5)
     invulnerabilityPotionEnabled?: boolean
     invulnerabilityPotionSpawnRate?: number // 0.05 to 1, defaults to 0.15
+    tournamentMode?: boolean
+    scheduledStartTime?: Timestamp | null
+    remainingRounds?: number
+    interludeDuration?: number
   }
 
   // Updated GameState interface with the new 'winners' structure

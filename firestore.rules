@@ -70,8 +70,20 @@ service cloud.firestore {
         (!('gameMode' in setup.keys()) || (setup.gameMode is string && setup.gameMode in ['individual', 'team'])) &&
         (!('firstTurnTime' in setup.keys()) || (setup.firstTurnTime is int && setup.firstTurnTime > 0))
       );
+
+      let validTournamentFields = (
+        (!('tournamentMode' in setup.keys()) || setup.tournamentMode is bool) &&
+        (!('scheduledStartTime' in setup.keys()) || setup.scheduledStartTime == null || setup.scheduledStartTime is timestamp) &&
+        (!('remainingRounds' in setup.keys()) || (setup.remainingRounds is int && setup.remainingRounds >= 0)) &&
+        (!('interludeDuration' in setup.keys()) || (setup.interludeDuration is int && setup.interludeDuration >= 0))
+      );
       
-      return hasRequiredFields && validBaseFields && validOptionalFields;
+      return hasRequiredFields && validBaseFields && validOptionalFields && validTournamentFields;
+    }
+
+    function getSessionOwner(sessionId) {
+      let sessionData = get(/databases/$(database)/documents/sessions/$(sessionId)).data;
+      return ('owner' in sessionData && sessionData.owner != null) ? sessionData.owner : null;
     }
 
     function isValidPrivateMove(move) {
@@ -120,11 +132,47 @@ service cloud.firestore {
     match /sessions/{sessionId} {
       allow read: if true;
       allow create: if isAuthenticated();
+      allow update: if isAuthenticated() && (
+        !('owner' in resource.data) || resource.data.owner == null || resource.data.owner == request.auth.uid
+      ) && (
+        !('owner' in request.resource.data) || request.resource.data.owner == null || request.resource.data.owner == resource.data.owner
+      );
 
       // Setups Subcollection
       match /setups/{setupId} {
         allow read: if true;
-        allow create, update: if isAuthenticated() && isValidSetup(request.resource.data);
+        allow create: if isAuthenticated() && isValidSetup(request.resource.data);
+        allow update: if isAuthenticated() && (
+          getSessionOwner(sessionId) == null ||
+          getSessionOwner(sessionId) == request.auth.uid ||
+          (
+            isValidSetup(request.resource.data) &&
+            request.resource.data.gameType == resource.data.gameType &&
+            request.resource.data.boardWidth == resource.data.boardWidth &&
+            request.resource.data.boardHeight == resource.data.boardHeight &&
+            request.resource.data.maxTurnTime == resource.data.maxTurnTime &&
+            request.resource.data.startRequested == resource.data.startRequested &&
+            request.resource.data.started == resource.data.started &&
+            request.resource.data.timeCreated == resource.data.timeCreated &&
+            (!('tournamentMode' in request.resource.data) || request.resource.data.tournamentMode == resource.data.tournamentMode) &&
+            (!('scheduledStartTime' in request.resource.data) || request.resource.data.scheduledStartTime == resource.data.scheduledStartTime) &&
+            (!('remainingRounds' in request.resource.data) || request.resource.data.remainingRounds == resource.data.remainingRounds) &&
+            (!('interludeDuration' in request.resource.data) || request.resource.data.interludeDuration == resource.data.interludeDuration) &&
+            (!('maxTurns' in request.resource.data) || request.resource.data.maxTurns == resource.data.maxTurns) &&
+            (!('hazardPercentage' in request.resource.data) || request.resource.data.hazardPercentage == resource.data.hazardPercentage) &&
+            (!('gameMode' in request.resource.data) || request.resource.data.gameMode == resource.data.gameMode) &&
+            (!('firstTurnTime' in request.resource.data) || request.resource.data.firstTurnTime == resource.data.firstTurnTime) &&
+            (!('teamClustersEnabled' in request.resource.data) || request.resource.data.teamClustersEnabled == resource.data.teamClustersEnabled) &&
+            (!('fertileGroundEnabled' in request.resource.data) || request.resource.data.fertileGroundEnabled == resource.data.fertileGroundEnabled) &&
+            (!('fertileGroundDensity' in request.resource.data) || request.resource.data.fertileGroundDensity == resource.data.fertileGroundDensity) &&
+            (!('fertileGroundClustering' in request.resource.data) || request.resource.data.fertileGroundClustering == resource.data.fertileGroundClustering) &&
+            (!('foodSpawnRate' in request.resource.data) || request.resource.data.foodSpawnRate == resource.data.foodSpawnRate) &&
+            (!('usePreviewBoard' in request.resource.data) || request.resource.data.usePreviewBoard == resource.data.usePreviewBoard) &&
+            (!('invulnerabilityPotionEnabled' in request.resource.data) || request.resource.data.invulnerabilityPotionEnabled == resource.data.invulnerabilityPotionEnabled) &&
+            (!('invulnerabilityPotionSpawnRate' in request.resource.data) || request.resource.data.invulnerabilityPotionSpawnRate == resource.data.invulnerabilityPotionSpawnRate) &&
+            (!('teams' in request.resource.data) || request.resource.data.teams == resource.data.teams)
+          )
+        );
       }
 
       // Games Subcollection

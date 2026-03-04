@@ -99,6 +99,23 @@ export const processTurnExpirationTask = onTaskDispatched(
       })
     }
 
+    if (result?.tournamentSchedule) {
+      const { sessionID: schedSessionID, gameID: schedGameID, delaySeconds, expectedScheduledStartMillis } = result.tournamentSchedule
+      try {
+        const queue = getFunctions().taskQueue("processScheduledGameStart")
+        await queue.enqueue(
+          { sessionID: schedSessionID, gameID: schedGameID, expectedScheduledStartMillis },
+          { scheduleDelaySeconds: delaySeconds }
+        )
+        logger.info(
+          `[processTurnExpirationTask] Scheduled next tournament game start`,
+          { sessionID: schedSessionID, gameID: schedGameID, delaySeconds }
+        )
+      } catch (error) {
+        logger.error(`[processTurnExpirationTask] Error scheduling tournament game start`, { schedGameID, error })
+      }
+    }
+
     logger.info(
       `[processTurnExpirationTask] Task completed for game ${gameID}, turn ${turnNumber}`
     )

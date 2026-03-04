@@ -26,6 +26,9 @@ interface PlayerConfigurationProps {
   getBotStatus?: (botId: string) => "unknown" | "loading" | "alive" | "dead" | "error";
   gameType?: GameType;
   onKingToggle?: (playerID: string, teamID: string) => void;
+  isOwner?: boolean;
+  hasOwner?: boolean;
+  userID?: string;
 }
 
 export const PlayerConfiguration: React.FC<PlayerConfigurationProps> = ({
@@ -39,8 +42,43 @@ export const PlayerConfiguration: React.FC<PlayerConfigurationProps> = ({
   getBotStatus,
   gameType,
   onKingToggle,
+  isOwner = false,
+  hasOwner = false,
+  userID,
 }) => {
   const isKingSnek = gameType === 'kingsnek';
+  const isConfigDisabled = hasOwner && !isOwner;
+
+  const userTeamID = gamePlayers.find((p) => p.id === userID)?.teamID;
+
+  const canKickFromTeam = (gamePlayer: GamePlayer) => {
+    if (!hasOwner) return true;
+    if (isOwner) return true;
+    if (gamePlayer.type === "bot" && gamePlayer.teamID === userTeamID && userTeamID) return true;
+    return false;
+  };
+
+  const canKickFromGame = (_gamePlayer: GamePlayer) => {
+    if (!hasOwner) return true;
+    if (isOwner) return true;
+    return false;
+  };
+
+  const canChangeTeam = (gamePlayer: GamePlayer) => {
+    if (!hasOwner) return true;
+    if (isOwner) return true;
+    if (gamePlayer.id === userID) return true;
+    if (gamePlayer.type === "bot" && !gamePlayer.teamID && userTeamID) return true;
+    return false;
+  };
+
+  const getAvailableTeamsForPlayer = (gamePlayer: GamePlayer) => {
+    if (!hasOwner || isOwner || gamePlayer.id === userID) return teams;
+    if (gamePlayer.type === "bot" && !gamePlayer.teamID && userTeamID) {
+      return teams.filter((t) => t.id === userTeamID);
+    }
+    return teams;
+  };
   // Group players by team
   const playersByTeam = teams.map((team) => ({
     team,
@@ -109,7 +147,7 @@ export const PlayerConfiguration: React.FC<PlayerConfigurationProps> = ({
                             onChange={(e) =>
                               onTeamChange(player.id, e.target.value)
                             }
-                            disabled={gamePlayer.type === 'bot' && getBotStatus?.(player.id) === 'dead'}
+                            disabled={(gamePlayer.type === 'bot' && getBotStatus?.(player.id) === 'dead') || !canChangeTeam(gamePlayer)}
                             sx={{ minWidth: 120 }}
                           >
                             {teams.map((team) => (
@@ -144,6 +182,7 @@ export const PlayerConfiguration: React.FC<PlayerConfigurationProps> = ({
                           <Checkbox
                             checked={gamePlayer.isKing || false}
                             onChange={() => onKingToggle?.(player.id, gamePlayer.teamID || "")}
+                            disabled={isConfigDisabled}
                             checkedIcon={<span>👑</span>}
                             icon={<span style={{ opacity: 0.3 }}>👑</span>}
                             sx={{ padding: 0 }}
@@ -156,14 +195,21 @@ export const PlayerConfiguration: React.FC<PlayerConfigurationProps> = ({
                       >
                         {playersReady.includes(player.id) ? "Yeah" : "Nah"}
                       </TableCell>
-                      <TableCell
-                        align="right"
-                        sx={{ backgroundColor: player.colour }}
-                        onClick={() => onPlayerTeamKick(player.id,gamePlayer.teamID || "")}
-                        style={{ cursor: "pointer" }}
-                      >
-                        ❌
-                      </TableCell>
+                      {canKickFromTeam(gamePlayer) ? (
+                        <TableCell
+                          align="right"
+                          sx={{ backgroundColor: player.colour }}
+                          onClick={() => onPlayerTeamKick(player.id,gamePlayer.teamID || "")}
+                          style={{ cursor: "pointer" }}
+                        >
+                          ❌
+                        </TableCell>
+                      ) : (
+                        <TableCell
+                          align="right"
+                          sx={{ backgroundColor: player.colour }}
+                        />
+                      )}
                     </TableRow>
                   );
                 })}
@@ -209,13 +255,13 @@ export const PlayerConfiguration: React.FC<PlayerConfigurationProps> = ({
                             onChange={(e) =>
                               onTeamChange(player.id, e.target.value)
                             }
-                            disabled={gamePlayer.type === 'bot' && getBotStatus?.(player.id) === 'dead'}
+                            disabled={(gamePlayer.type === 'bot' && getBotStatus?.(player.id) === 'dead') || !canChangeTeam(gamePlayer)}
                             sx={{ minWidth: 120 }}
                           >
                             <MenuItem value="">
                               <em>Select team</em>
                             </MenuItem>
-                            {teams.map((team) => (
+                            {getAvailableTeamsForPlayer(gamePlayer).map((team) => (
                               <MenuItem key={team.id} value={team.id}>
                                 <div
                                   style={{
@@ -253,14 +299,21 @@ export const PlayerConfiguration: React.FC<PlayerConfigurationProps> = ({
                       >
                         {playersReady.includes(player.id) ? "Yeah" : "Nah"}
                       </TableCell>
-                      <TableCell
-                        align="right"
-                        sx={{ backgroundColor: player.colour }}
-                        onClick={() => onPlayerKick(player.id, gamePlayer.type)}
-                        style={{ cursor: "pointer" }}
-                      >
-                        ❌
-                      </TableCell>
+                      {canKickFromGame(gamePlayer) ? (
+                        <TableCell
+                          align="right"
+                          sx={{ backgroundColor: player.colour }}
+                          onClick={() => onPlayerKick(player.id, gamePlayer.type)}
+                          style={{ cursor: "pointer" }}
+                        >
+                          ❌
+                        </TableCell>
+                      ) : (
+                        <TableCell
+                          align="right"
+                          sx={{ backgroundColor: player.colour }}
+                        />
+                      )}
                     </TableRow>
                   );
                 })}

@@ -5,6 +5,16 @@ import * as admin from "firebase-admin"
 import { Timestamp, Transaction } from "firebase-admin/firestore"
 import { logger } from "../logger"
 
+export interface CreateNewGameResult {
+  newGameID: string
+  tournamentSchedule?: {
+    sessionID: string
+    gameID: string
+    delaySeconds: number
+    expectedScheduledStartMillis: number
+  }
+}
+
 /**
  * Creates a new game after determining the winner(s).
  * @param transaction Firestore transaction object.
@@ -14,7 +24,7 @@ export async function createNewGame(
   transaction: Transaction,
   sessionName: string,
   previousSetup: GameSetup | null,
-): Promise<void> {
+): Promise<CreateNewGameResult> {
   try {
     // Copy all fields from previous setup (if exists) and override only what must be reset
     const newGameSetup: GameSetup = previousSetup
@@ -42,6 +52,17 @@ export async function createNewGame(
           timeCreated: Timestamp.now(),
         }
 
+    if (previousSetup?.tournamentMode && newGameSetup.remainingRounds !== undefined) {
+      const decremented = newGameSetup.remainingRounds - 1
+      newGameSetup.remainingRounds = decremented
+
+      if (decremented > 0 && newGameSetup.interludeDuration !== undefined) {
+        const nowMs = Date.now()
+        const scheduledMs = nowMs + newGameSetup.interludeDuration * 1000
+        newGameSetup.scheduledStartTime = Timestamp.fromMillis(scheduledMs)
+      }
+    }
+
     // Reference to the current session document
     const sessionRef = admin.firestore().collection("sessions").doc(sessionName)
     // Generate a new unique game ID
@@ -59,6 +80,26 @@ export async function createNewGame(
         sessionName: sessionName,
       },
     )
+
+    const result: CreateNewGameResult = { newGameID: newGameSetupRef.id }
+
+    if (
+      previousSetup?.tournamentMode &&
+      newGameSetup.remainingRounds !== undefined &&
+      newGameSetup.remainingRounds > 0 &&
+      newGameSetup.interludeDuration !== undefined &&
+      newGameSetup.scheduledStartTime
+    ) {
+      const scheduledMillis = (newGameSetup.scheduledStartTime as Timestamp).toMillis()
+      result.tournamentSchedule = {
+        sessionID: sessionName,
+        gameID: newGameSetupRef.id,
+        delaySeconds: Math.max(0, newGameSetup.interludeDuration),
+        expectedScheduledStartMillis: scheduledMillis,
+      }
+    }
+
+    return result
   } catch (error) {
     logger.error(`Error creating new game for session ${sessionName}:`, error)
     throw error

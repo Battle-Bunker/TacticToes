@@ -108,5 +108,22 @@ export const onMoveCreated = functions.firestore
       })
     }
 
+    if (result?.tournamentSchedule) {
+      const { sessionID: schedSessionID, gameID: schedGameID, delaySeconds, expectedScheduledStartMillis } = result.tournamentSchedule
+      try {
+        const queue = getFunctions().taskQueue("processScheduledGameStart")
+        await queue.enqueue(
+          { sessionID: schedSessionID, gameID: schedGameID, expectedScheduledStartMillis },
+          { scheduleDelaySeconds: delaySeconds }
+        )
+        logger.info(
+          `[onMoveCreated] Scheduled next tournament game start`,
+          { sessionID: schedSessionID, gameID: schedGameID, delaySeconds }
+        )
+      } catch (error) {
+        logger.error(`[onMoveCreated] Error scheduling tournament game start`, { schedGameID, error })
+      }
+    }
+
     logger.info(`[onMoveCreated] Completed`, { gameID, moveNumber })
   })

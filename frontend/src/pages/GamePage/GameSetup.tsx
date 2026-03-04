@@ -5,6 +5,7 @@ import {
   arrayUnion,
   deleteField,
   doc,
+  Timestamp,
   updateDoc,
 } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
@@ -65,7 +66,12 @@ const GameSetup: React.FC = () => {
     sessionName,
     gameID,
     gameState,
+    session,
+    isOwner,
   } = useGameStateContext();
+
+  const hasOwner = session?.owner != null;
+  const isConfigDisabled = hasOwner && !isOwner;
 
   const [secondsPerTurn, setSecondsPerTurn] = useState<string>("10");
   const [RulesComponent, setRulesComponent] = useState<React.FC | null>(null);
@@ -101,9 +107,26 @@ const GameSetup: React.FC = () => {
     gameSetup?.invulnerabilityPotionSpawnRate ?? 0.15,
   );
 
+  const [tournamentMode, setTournamentMode] = useState<boolean>(
+    gameSetup?.tournamentMode ?? false,
+  );
+  const [remainingRounds, setRemainingRounds] = useState<number>(
+    gameSetup?.remainingRounds ?? 1,
+  );
+  const [interludeDuration, setInterludeDuration] = useState<number>(
+    gameSetup?.interludeDuration ?? 30,
+  );
+  const [scheduledStartInput, setScheduledStartInput] = useState<string>("");
+  const [tournamentCountdown, setTournamentCountdown] = useState<string>("");
+
   const { getBotStatus } = useBotHealth();
 
   const gameDocRef = doc(db, "sessions", sessionName, "setups", gameID);
+  const sessionDocRef = doc(db, "sessions", sessionName);
+
+  const handleAbdicate = async () => {
+    await updateDoc(sessionDocRef, { owner: null });
+  };
 
   const generatePreviewBoardFn = httpsCallable(functions, "generatePreviewBoard");
   const [isGeneratingPreview, setIsGeneratingPreview] = useState(false);
@@ -214,12 +237,43 @@ const GameSetup: React.FC = () => {
       setInvulnerabilityPotionEnabled(gameSetup.invulnerabilityPotionEnabled ?? false);
       setInvulnerabilityPotionSpawnRate(gameSetup.invulnerabilityPotionSpawnRate ?? 0.15);
 
+      setTournamentMode(gameSetup.tournamentMode ?? false);
+      setRemainingRounds(gameSetup.remainingRounds ?? 1);
+      setInterludeDuration(gameSetup.interludeDuration ?? 30);
+
       //  Update teams
       if (gameSetup.teams) {
         setTeams(gameSetup.teams);
       }
     }
   }, [gameSetup, setGameType]);
+
+  useEffect(() => {
+    if (!gameSetup?.tournamentMode || !gameSetup?.scheduledStartTime) {
+      setTournamentCountdown("");
+      return;
+    }
+    const scheduledTs = gameSetup.scheduledStartTime as unknown as { seconds: number };
+    if (!scheduledTs?.seconds) {
+      setTournamentCountdown("");
+      return;
+    }
+    const targetMs = scheduledTs.seconds * 1000;
+    const update = () => {
+      const diff = targetMs - Date.now();
+      if (diff <= 0) {
+        setTournamentCountdown("Starting...");
+        return;
+      }
+      const totalSecs = Math.ceil(diff / 1000);
+      const mins = Math.floor(totalSecs / 60);
+      const secs = totalSecs % 60;
+      setTournamentCountdown(`${mins}:${secs.toString().padStart(2, "0")}`);
+    };
+    update();
+    const interval = setInterval(update, 1000);
+    return () => clearInterval(interval);
+  }, [gameSetup?.tournamentMode, gameSetup?.scheduledStartTime]);
 
   useEffect(() => {
     setRulesComponent(() => getRulesComponent(gameSetup?.gameType));
@@ -461,6 +515,50 @@ const GameSetup: React.FC = () => {
     });
   };
 
+  const handleTournamentModeToggle = async (enabled: boolean) => {
+    setTournamentMode(enabled);
+    if (enabled) {
+      await updateDoc(gameDocRef, {
+        tournamentMode: true,
+        remainingRounds: remainingRounds,
+        interludeDuration: interludeDuration,
+      });
+    } else {
+      await updateDoc(gameDocRef, {
+        tournamentMode: false,
+        scheduledStartTime: deleteField(),
+        remainingRounds: deleteField(),
+        interludeDuration: deleteField(),
+      });
+      setScheduledStartInput("");
+    }
+  };
+
+  const handleRemainingRoundsChange = async (value: number) => {
+    const sanitized = Math.max(0, Math.round(value));
+    setRemainingRounds(sanitized);
+    await updateDoc(gameDocRef, { remainingRounds: sanitized });
+  };
+
+  const handleInterludeDurationChange = async (value: number) => {
+    const sanitized = Math.max(0, Math.round(value));
+    setInterludeDuration(sanitized);
+    await updateDoc(gameDocRef, { interludeDuration: sanitized });
+  };
+
+  const handleScheduledStartTimeSet = async () => {
+    if (!scheduledStartInput) return;
+    const date = new Date(scheduledStartInput);
+    if (isNaN(date.getTime())) return;
+    const ts = Timestamp.fromDate(date);
+    await updateDoc(gameDocRef, { scheduledStartTime: ts });
+  };
+
+  const handleClearScheduledStart = async () => {
+    setScheduledStartInput("");
+    await updateDoc(gameDocRef, { scheduledStartTime: deleteField() });
+  };
+
   // Handle max turn time configuration
   const handleSecondsPerTurnChange = async (newSeconds: number) => {
     const sanitizedValue = Math.max(0.5, Math.min(300, newSeconds)); // Min 0.5s, max 5 minutes
@@ -564,56 +662,94 @@ const GameSetup: React.FC = () => {
 
   return (
     <Stack spacing={2} pt={2}>
-      {/* Ready Section */}
-      {!gameSetup.gamePlayers
-        .filter((gamePlayer) => gamePlayer.type === "human")
-        .map((human) => human.id)
-        .every((player) => gameSetup.playersReady.includes(player)) ? (
-        <>
-          <Button
-            disabled={
-              started ||
-              gameSetup.boardWidth < 5 ||
-              gameSetup.boardWidth > 25 ||
-              parseInt(secondsPerTurn) <= 0 ||
-              gameSetup.playersReady.includes(userID)
-            }
-            onClick={handleReady}
-            sx={{ backgroundColor: colour, height: "70px", fontSize: "32px" }}
-            fullWidth
-          >
-            {gameSetup.playersReady.includes(userID) ? `Waiting` : "I'm ready!"}
-          </Button>
-          {(gameType === "teamsnek" || gameType === "kingsnek") &&
-            !canStartGame() &&
-            getTeamValidationMessage() && (
-              <Typography color="error" sx={{ textAlign: "center", mt: 1 }}>
-                {getTeamValidationMessage()}
-              </Typography>
-            )}
-        </>
+      {isOwner && (
+        <Button
+          onClick={handleAbdicate}
+          variant="outlined"
+          color="warning"
+          fullWidth
+        >
+          Abdicate Ownership
+        </Button>
+      )}
+      {/* Ready / Start / Tournament Section */}
+      {tournamentMode ? (
+        <Box
+          sx={{
+            border: "2px solid black",
+            padding: 2,
+            borderRadius: "0px",
+            textAlign: "center",
+          }}
+        >
+          {gameSetup.scheduledStartTime ? (
+            <Typography variant="h5" sx={{ fontFamily: "monospace" }}>
+              {tournamentCountdown || "Scheduled"}
+            </Typography>
+          ) : (
+            <Typography variant="h6" color="text.secondary">
+              Waiting for schedule...
+            </Typography>
+          )}
+          {gameSetup.remainingRounds !== undefined && (
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+              Remaining rounds: {gameSetup.remainingRounds}
+            </Typography>
+          )}
+        </Box>
       ) : (
         <>
-          <Button
-            disabled={gameSetup.startRequested || !canStartGame()}
-            onClick={handleStart}
-            sx={{
-              backgroundColor: canStartGame() ? colour : "#ccc",
-              height: "70px",
-              fontSize: "32px",
-              "&:hover": {
-                backgroundColor: canStartGame() ? colour : "#ccc",
-              },
-            }}
-            className={canStartGame() ? "shake" : ""}
-            fullWidth
-          >
-            {gameSetup.startRequested ? "Game starting" : "Start game"}
-          </Button>
-          {!canStartGame() && getTeamValidationMessage() && (
-            <Typography color="error" sx={{ textAlign: "center", mt: 1 }}>
-              {getTeamValidationMessage()}
-            </Typography>
+          {!gameSetup.gamePlayers
+            .filter((gamePlayer) => gamePlayer.type === "human")
+            .map((human) => human.id)
+            .every((player) => gameSetup.playersReady.includes(player)) ? (
+            <>
+              <Button
+                disabled={
+                  started ||
+                  gameSetup.boardWidth < 5 ||
+                  gameSetup.boardWidth > 25 ||
+                  parseInt(secondsPerTurn) <= 0 ||
+                  gameSetup.playersReady.includes(userID)
+                }
+                onClick={handleReady}
+                sx={{ backgroundColor: colour, height: "70px", fontSize: "32px" }}
+                fullWidth
+              >
+                {gameSetup.playersReady.includes(userID) ? `Waiting` : "I'm ready!"}
+              </Button>
+              {(gameType === "teamsnek" || gameType === "kingsnek") &&
+                !canStartGame() &&
+                getTeamValidationMessage() && (
+                  <Typography color="error" sx={{ textAlign: "center", mt: 1 }}>
+                    {getTeamValidationMessage()}
+                  </Typography>
+                )}
+            </>
+          ) : (
+            <>
+              <Button
+                disabled={gameSetup.startRequested || !canStartGame() || isConfigDisabled}
+                onClick={handleStart}
+                sx={{
+                  backgroundColor: canStartGame() ? colour : "#ccc",
+                  height: "70px",
+                  fontSize: "32px",
+                  "&:hover": {
+                    backgroundColor: canStartGame() ? colour : "#ccc",
+                  },
+                }}
+                className={canStartGame() ? "shake" : ""}
+                fullWidth
+              >
+                {gameSetup.startRequested ? "Game starting" : "Start game"}
+              </Button>
+              {!canStartGame() && getTeamValidationMessage() && (
+                <Typography color="error" sx={{ textAlign: "center", mt: 1 }}>
+                  {getTeamValidationMessage()}
+                </Typography>
+              )}
+            </>
           )}
         </>
       )}
@@ -631,7 +767,7 @@ const GameSetup: React.FC = () => {
             labelId="game-type-label"
             value={gameType}
             onChange={handleGameTypeChange}
-            disabled={started}
+            disabled={started || isConfigDisabled}
             label="Game Type"
           >
             <MenuItem value="snek">Snek</MenuItem>
@@ -652,7 +788,7 @@ const GameSetup: React.FC = () => {
             labelId="board-size-label"
             value={boardSize}
             onChange={handleBoardSizeChange}
-            disabled={started}
+            disabled={started || isConfigDisabled}
             label="Board Size"
           >
             <MenuItem value="small">Small (11x11)</MenuItem>
@@ -673,7 +809,7 @@ const GameSetup: React.FC = () => {
               handleSecondsPerTurnChange(value);
             }
           }}
-          disabled={started}
+          disabled={started || isConfigDisabled}
           sx={{ flex: 1 }}
           inputProps={{ min: 0.5, max: 300, step: 0.1 }}
         />
@@ -698,6 +834,91 @@ const GameSetup: React.FC = () => {
           }}
         >
           {RulesComponent && <RulesComponent />}
+        </Box>
+      </FormControl>
+      {/* Tournament Mode */}
+      <FormControl fullWidth variant="outlined" sx={{ mt: 2 }}>
+        <InputLabel shrink sx={{ backgroundColor: "white", px: 1 }}>
+          Tournament Mode
+        </InputLabel>
+        <Box
+          sx={{
+            border: "2px solid black",
+            padding: 2,
+            borderRadius: "0px",
+            minHeight: "56px",
+            display: "flex",
+            flexDirection: "column",
+          }}
+        >
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={tournamentMode}
+                onChange={(e) => handleTournamentModeToggle(e.target.checked)}
+                disabled={started || isConfigDisabled}
+              />
+            }
+            label="Tournament Mode"
+          />
+          {tournamentMode && (
+            <Stack spacing={2} sx={{ mt: 1 }}>
+              <Box sx={{ display: "flex", gap: 2, alignItems: "flex-end" }}>
+                <TextField
+                  label="Scheduled Start Time"
+                  type="datetime-local"
+                  value={scheduledStartInput}
+                  onChange={(e) => setScheduledStartInput(e.target.value)}
+                  disabled={isConfigDisabled}
+                  sx={{ flex: 1 }}
+                  InputLabelProps={{ shrink: true }}
+                  inputProps={{ step: 1 }}
+                />
+                <Button
+                  onClick={handleScheduledStartTimeSet}
+                  disabled={!scheduledStartInput || isConfigDisabled}
+                  variant="contained"
+                  size="small"
+                >
+                  Set
+                </Button>
+                <Button
+                  onClick={handleClearScheduledStart}
+                  disabled={isConfigDisabled}
+                  variant="outlined"
+                  size="small"
+                >
+                  Clear
+                </Button>
+              </Box>
+              <Box sx={{ display: "flex", gap: 2 }}>
+                <TextField
+                  label="Remaining Rounds"
+                  type="number"
+                  value={remainingRounds}
+                  onChange={(e) => {
+                    const val = parseInt(e.target.value);
+                    if (!isNaN(val)) handleRemainingRoundsChange(val);
+                  }}
+                  disabled={isConfigDisabled}
+                  sx={{ flex: 1 }}
+                  inputProps={{ min: 0, step: 1 }}
+                />
+                <TextField
+                  label="Interlude Duration (s)"
+                  type="number"
+                  value={interludeDuration}
+                  onChange={(e) => {
+                    const val = parseInt(e.target.value);
+                    if (!isNaN(val)) handleInterludeDurationChange(val);
+                  }}
+                  disabled={isConfigDisabled}
+                  sx={{ flex: 1 }}
+                  inputProps={{ min: 0, step: 1 }}
+                />
+              </Box>
+            </Stack>
+          )}
         </Box>
       </FormControl>
       {/* Bots List */}
@@ -762,41 +983,43 @@ const GameSetup: React.FC = () => {
               minHeight: "56px",
             }}
           >
-            <SnekConfiguration
-              maxTurns={maxTurns}
-              maxTurnsEnabled={maxTurnsEnabled}
-              onMaxTurnsToggle={handleMaxTurnsToggle}
-              onMaxTurnsChange={handleMaxTurnsChange}
-              hazardPercentage={hazardPercentage}
-              onHazardPercentageChange={handleHazardPercentageChange}
-              fertileGroundEnabled={fertileGroundEnabled}
-              onFertileGroundToggle={handleFertileGroundToggle}
-              fertileGroundDensity={fertileGroundDensity}
-              onFertileGroundDensityChange={handleFertileGroundDensityChange}
-              fertileGroundClustering={fertileGroundClustering}
-              onFertileGroundClusteringChange={handleFertileGroundClusteringChange}
-              foodSpawnRate={foodSpawnRate}
-              onFoodSpawnRateChange={handleFoodSpawnRateChange}
-              boardWidth={gameSetup.boardWidth}
-              boardHeight={gameSetup.boardHeight}
-              usePreviewBoard={usePreviewBoard}
-              onUsePreviewBoardChange={handleUsePreviewBoardChange}
-              syncedPreviewData={
-                gameSetup.presetFertileTiles || gameSetup.presetHazards || gameSetup.presetPlayerPositions || gameSetup.presetFood
-                  ? {
-                      fertileTiles: gameSetup.presetFertileTiles || [],
-                      hazards: gameSetup.presetHazards || [],
-                      playerPositions: gameSetup.presetPlayerPositions || {},
-                      food: gameSetup.presetFood || [],
-                    }
-                  : null
-              }
-              isGeneratingPreview={isGeneratingPreview}
-              onRefreshPreview={immediateRegeneratePreview}
-              gamePlayers={gameSetup.gamePlayers}
-              gameType={gameSetup.gameType}
-              teams={gameSetup.teams}
-            />
+            <Box sx={isConfigDisabled ? { pointerEvents: 'none', opacity: 0.6 } : {}}>
+              <SnekConfiguration
+                maxTurns={maxTurns}
+                maxTurnsEnabled={maxTurnsEnabled}
+                onMaxTurnsToggle={handleMaxTurnsToggle}
+                onMaxTurnsChange={handleMaxTurnsChange}
+                hazardPercentage={hazardPercentage}
+                onHazardPercentageChange={handleHazardPercentageChange}
+                fertileGroundEnabled={fertileGroundEnabled}
+                onFertileGroundToggle={handleFertileGroundToggle}
+                fertileGroundDensity={fertileGroundDensity}
+                onFertileGroundDensityChange={handleFertileGroundDensityChange}
+                fertileGroundClustering={fertileGroundClustering}
+                onFertileGroundClusteringChange={handleFertileGroundClusteringChange}
+                foodSpawnRate={foodSpawnRate}
+                onFoodSpawnRateChange={handleFoodSpawnRateChange}
+                boardWidth={gameSetup.boardWidth}
+                boardHeight={gameSetup.boardHeight}
+                usePreviewBoard={usePreviewBoard}
+                onUsePreviewBoardChange={handleUsePreviewBoardChange}
+                syncedPreviewData={
+                  gameSetup.presetFertileTiles || gameSetup.presetHazards || gameSetup.presetPlayerPositions || gameSetup.presetFood
+                    ? {
+                        fertileTiles: gameSetup.presetFertileTiles || [],
+                        hazards: gameSetup.presetHazards || [],
+                        playerPositions: gameSetup.presetPlayerPositions || {},
+                        food: gameSetup.presetFood || [],
+                      }
+                    : null
+                }
+                isGeneratingPreview={isGeneratingPreview}
+                onRefreshPreview={immediateRegeneratePreview}
+                gamePlayers={gameSetup.gamePlayers}
+                gameType={gameSetup.gameType}
+                teams={gameSetup.teams}
+              />
+            </Box>
           </Box>
         </FormControl>
       )}
@@ -822,7 +1045,7 @@ const GameSetup: React.FC = () => {
                 <Checkbox
                   checked={teamClustersEnabled}
                   onChange={(e) => handleTeamClustersToggle(e.target.checked)}
-                  disabled={started}
+                  disabled={started || isConfigDisabled}
                 />
               }
               label="Team cluster"
@@ -852,7 +1075,7 @@ const GameSetup: React.FC = () => {
                 <Checkbox
                   checked={invulnerabilityPotionEnabled}
                   onChange={(e) => handleInvulnerabilityPotionToggle(e.target.checked)}
-                  disabled={started}
+                  disabled={started || isConfigDisabled}
                 />
               }
               label="(In)vulnerability Potions"
@@ -868,7 +1091,7 @@ const GameSetup: React.FC = () => {
                   min={0.01}
                   max={0.2}
                   step={0.01}
-                  disabled={started}
+                  disabled={started || isConfigDisabled}
                   valueLabelDisplay="auto"
                   valueLabelFormat={(value) => `${value.toFixed(2)}/turn`}
                 />
@@ -892,12 +1115,14 @@ const GameSetup: React.FC = () => {
               minHeight: "56px",
             }}
           >
-            <TeamConfiguration
-              teams={teams}
-              onTeamsChange={handleTeamsChange}
-              bots={bots}
-              gamePlayers={gameSetup?.gamePlayers || []}
-            />
+            <Box sx={isConfigDisabled ? { pointerEvents: 'none', opacity: 0.6 } : {}}>
+              <TeamConfiguration
+                teams={teams}
+                onTeamsChange={handleTeamsChange}
+                bots={bots}
+                gamePlayers={gameSetup?.gamePlayers || []}
+              />
+            </Box>
           </Box>
         </FormControl>
       )}
@@ -928,6 +1153,9 @@ const GameSetup: React.FC = () => {
               getBotStatus={getBotStatus}
               gameType={gameType}
               onKingToggle={handleKingToggle}
+              isOwner={isOwner}
+              hasOwner={hasOwner}
+              userID={userID}
             />
           </Box>
         </FormControl>
@@ -958,15 +1186,23 @@ const GameSetup: React.FC = () => {
                     >
                       {playersReady.includes(player.id) ? "Yeah" : "Nah"}
                     </TableCell>
-                    <TableCell
-                      align="right"
-                      sx={{ backgroundColor: player.colour }}
-                      onClick={() =>
-                        handlePlayerKick(player.id, gamePlayer.type)
-                      }
-                    >
-                      ❌
-                    </TableCell>
+                    {(!hasOwner || isOwner) ? (
+                      <TableCell
+                        align="right"
+                        sx={{ backgroundColor: player.colour }}
+                        onClick={() =>
+                          handlePlayerKick(player.id, gamePlayer.type)
+                        }
+                        style={{ cursor: "pointer" }}
+                      >
+                        ❌
+                      </TableCell>
+                    ) : (
+                      <TableCell
+                        align="right"
+                        sx={{ backgroundColor: player.colour }}
+                      />
+                    )}
                   </TableRow>
                 );
               })}

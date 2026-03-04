@@ -60,6 +60,7 @@ interface GameStateContextType {
   gameSetup: GameSetup | null
   latestMoveStatus: MoveStatus | null
   session: Session | null
+  isOwner: boolean
   connectivityStatus: 'connected' | 'disconnected'
   queryTimedOut: boolean
 }
@@ -653,6 +654,7 @@ export const GameStateProvider: React.FC<{
     gameSetup,
     latestMoveStatus,
     session,
+    isOwner: userID !== "" && session?.owner != null && userID === session.owner,
     connectivityStatus,
     queryTimedOut,
   }

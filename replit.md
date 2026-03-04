@@ -4,6 +4,35 @@ Tactic Toes is a multiplayer game platform built with React/TypeScript frontend 
 
 # Recent Changes
 
+## Room Owner & Tournament Mode (March 4, 2026)
+
+### Room Owner Feature
+- **Owner Assignment**: The player who first creates a session becomes the room owner (stored as `owner` field on the `Session` document)
+- **Access Control**: When an owner is set, only the owner can: change game config (game type, board size, turn time, snek config, team config), remove players, start the game, or modify tournament settings
+- **Non-Owner Capabilities**: Non-owners can still: declare ready, assign themselves to a team, add bots, assign unassigned bots to their own team, remove bots from their own team
+- **Abdicate Ownership**: Owner sees an "Abdicate Ownership" button at the top of setup that sets `owner: null`, reverting to open-access rules
+- **Firestore Security Rules**: Full server-side enforcement — non-owners are blocked from changing restricted fields at the database level
+- **Backward Compatibility**: When `owner` is null/missing, all existing open-access behavior is preserved
+- **Type Changes**: Added `owner?: string | null` to `Session` interface
+- **Core Files Modified**: `shared/types/Game.ts`, `frontend/src/pages/SessionPage.tsx`, `frontend/src/context/GameStateContext.tsx`, `frontend/src/pages/GamePage/GameSetup.tsx`, `frontend/src/components/PlayerConfiguration.tsx`, `firestore.rules`
+
+### Tournament Mode Feature
+- **Tournament Mode Checkbox**: Owner-only control that enables tournament scheduling and disables the normal ready/start workflow
+- **Scheduled Start Time**: Datetime picker with second precision. Sets a Cloud Task that fires `processScheduledGameStart` at the scheduled time
+- **Idempotency Guard**: Scheduled tasks validate that `scheduledStartTime` still matches (within 30s) when they fire — stale tasks from rescheduling are safely ignored
+- **Remaining Rounds**: Configurable number of tournament rounds (default 1). Decremented automatically when each game ends
+- **Interlude Duration**: Seconds between tournament games. When a game ends with `remainingRounds > 0`, the next game's `scheduledStartTime` is set to `now + interludeDuration`
+- **Auto-Stop**: When `remainingRounds` reaches 0, no new scheduled start is set — the tournament stops until the owner intervenes
+- **Backend Flow**: `processScheduledGameStart` bypasses ready checks, starts the game with whatever players are in the room
+- **Game End Chaining**: `createNewGame` returns tournament scheduling metadata; callers (`processTurnExpirationTask`, `onMoveCreated`) enqueue the next game's scheduled start task after transaction commits
+- **Normal Flow Guard**: `onGameStarted` returns early for tournament mode setups, preventing the normal ready/start workflow from interfering
+- **Type Changes**: Added `tournamentMode?: boolean`, `scheduledStartTime?: Timestamp | null`, `remainingRounds?: number`, `interludeDuration?: number` to `GameSetup`
+- **New Cloud Function**: `processScheduledGameStart` — task queue function for starting tournament games
+- **Core Files Modified**: `shared/types/Game.ts`, `functions/src/processScheduledGameStart.ts`, `functions/src/index.ts`, `functions/src/onGameStarted.ts`, `functions/src/utils/createNewGame.ts`, `functions/src/gameprocessors/processTurn.ts`, `functions/src/processTurnExpirationTask.ts`, `functions/src/onMoveCreated.ts`, `frontend/src/pages/GamePage/GameSetup.tsx`, `firestore.rules`
+
+### Infrastructure Note
+- The `processScheduledGameStart` Cloud Task queue must be created in GCP. Update `scripts/bootstrap-gcp-project.sh` if deploying to a new environment to ensure the queue exists and has proper IAM permissions.
+
 ## Invulnerability Potions Feature (March 3, 2026)
 - **New Feature**: Added "Potion of (In)vulnerability" item system to Team Snek and King Snek game modes
 - **Mechanic**: Potions randomly spawn on the board. When collected, the collector becomes vulnerable (invulnerability level -1) and all alive allies become invulnerable (invulnerability level +1) for 3 turns
