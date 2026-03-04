@@ -4,6 +4,22 @@ Tactic Toes is a multiplayer game platform built with React/TypeScript frontend 
 
 # Recent Changes
 
+## Skip Confirmation & Timezone Display (March 4, 2026)
+
+### Skip Confirmation Checkbox
+- **New Feature**: Checkbox in the Rules section to skip the confirmation dialog at game start
+- **Owner-Only Control**: When an owner is set, only the owner can toggle this setting (enforced via `isConfigDisabled` in UI and Firestore security rules)
+- **Behavior**: When enabled, the rules dialog is not shown when the game starts — players go straight to gameplay
+- **Type Changes**: Added `skipConfirmation?: boolean` to `GameSetup`
+- **Firestore Rules**: Added validation (`skipConfirmation` must be bool) and non-owner immutability guard
+- **Core Files Modified**: `shared/types/Game.ts`, `frontend/src/pages/GamePage/GameSetup.tsx`, `frontend/src/pages/GamePage/GameActive.tsx`, `firestore.rules`
+
+### Scheduled Start Time Timezone Display
+- **New Feature**: The scheduled start time in tournament mode now displays the actual date/time formatted in each client's local timezone
+- **Implementation**: Uses `toLocaleString()` with `dateStyle: 'medium'` and `timeStyle: 'long'` to show a human-readable time with timezone indicator
+- **Display Location**: Shown below the countdown timer in the tournament mode box on the setup page
+- **Core Files Modified**: `frontend/src/pages/GamePage/GameSetup.tsx`
+
 ## Room Owner & Tournament Mode (March 4, 2026)
 
 ### Room Owner Feature

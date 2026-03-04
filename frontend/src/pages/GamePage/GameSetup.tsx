@@ -687,9 +687,21 @@ const GameSetup: React.FC = () => {
           }}
         >
           {gameSetup.scheduledStartTime && !(gameSetup.remainingRounds !== undefined && gameSetup.remainingRounds <= 0) ? (
-            <Typography variant="h5" sx={{ fontFamily: "monospace" }}>
-              {tournamentCountdown || "Scheduled"}
-            </Typography>
+            <>
+              <Typography variant="h5" sx={{ fontFamily: "monospace" }}>
+                {tournamentCountdown || "Scheduled"}
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                {(() => {
+                  const ts = gameSetup.scheduledStartTime as unknown as { seconds: number };
+                  if (!ts?.seconds) return "";
+                  return new Date(ts.seconds * 1000).toLocaleString(undefined, {
+                    dateStyle: "medium",
+                    timeStyle: "long",
+                  });
+                })()}
+              </Typography>
+            </>
           ) : (
             <Typography variant="h6" color="text.secondary">
               Waiting for schedule...
@@ -838,6 +850,18 @@ const GameSetup: React.FC = () => {
           }}
         >
           {RulesComponent && <RulesComponent />}
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={gameSetup.skipConfirmation ?? false}
+                onChange={async (e) => {
+                  await updateDoc(gameDocRef, { skipConfirmation: e.target.checked });
+                }}
+                disabled={started || isConfigDisabled}
+              />
+            }
+            label="Skip confirmation at game start"
+          />
         </Box>
       </FormControl>
       {/* Tournament Mode */}

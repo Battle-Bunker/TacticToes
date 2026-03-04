@@ -1,6 +1,6 @@
 // src/components/GameActive.tsx
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useUser } from "../../context/UserContext";
 
 import {
@@ -33,8 +33,16 @@ const GameActive: React.FC = () => {
     queryTimedOut,
   } = useGameStateContext();
 
-  const [isRulesDialogOpen, setIsRulesDialogOpen] = useState(true); // Show rules dialog initially
-  const [isRulesAccepted, setIsRulesAccepted] = useState(false); // Track if rules have been accepted
+  const skipConfirmation = gameSetup?.skipConfirmation ?? false;
+  const [isRulesDialogOpen, setIsRulesDialogOpen] = useState(!skipConfirmation);
+  const [isRulesAccepted, setIsRulesAccepted] = useState(skipConfirmation);
+
+  useEffect(() => {
+    if (skipConfirmation) {
+      setIsRulesAccepted(true);
+      setIsRulesDialogOpen(false);
+    }
+  }, [skipConfirmation]);
 
   const handleRulesAccepted = () => {
     setIsRulesAccepted(true);

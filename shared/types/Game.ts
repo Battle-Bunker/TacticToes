@@ -81,6 +81,7 @@
     foodSpawnRate?: number // Expected food spawned per turn (0-5, defaults to 0.5)
     invulnerabilityPotionEnabled?: boolean
     invulnerabilityPotionSpawnRate?: number // 0.05 to 1, defaults to 0.15
+    skipConfirmation?: boolean
     tournamentMode?: boolean
     scheduledStartTime?: Timestamp | null
     remainingRounds?: number

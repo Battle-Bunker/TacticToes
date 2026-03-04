@@ -75,7 +75,8 @@ service cloud.firestore {
         (!('tournamentMode' in setup.keys()) || setup.tournamentMode is bool) &&
         (!('scheduledStartTime' in setup.keys()) || setup.scheduledStartTime == null || setup.scheduledStartTime is timestamp) &&
         (!('remainingRounds' in setup.keys()) || (setup.remainingRounds is int && setup.remainingRounds >= 0)) &&
-        (!('interludeDuration' in setup.keys()) || (setup.interludeDuration is int && setup.interludeDuration >= 0))
+        (!('interludeDuration' in setup.keys()) || (setup.interludeDuration is int && setup.interludeDuration >= 0)) &&
+        (!('skipConfirmation' in setup.keys()) || setup.skipConfirmation is bool)
       );
       
       return hasRequiredFields && validBaseFields && validOptionalFields && validTournamentFields;
@@ -170,6 +171,7 @@ service cloud.firestore {
             (!('usePreviewBoard' in request.resource.data) || request.resource.data.usePreviewBoard == resource.data.usePreviewBoard) &&
             (!('invulnerabilityPotionEnabled' in request.resource.data) || request.resource.data.invulnerabilityPotionEnabled == resource.data.invulnerabilityPotionEnabled) &&
             (!('invulnerabilityPotionSpawnRate' in request.resource.data) || request.resource.data.invulnerabilityPotionSpawnRate == resource.data.invulnerabilityPotionSpawnRate) &&
+            (!('skipConfirmation' in request.resource.data) || request.resource.data.skipConfirmation == resource.data.skipConfirmation) &&
             (!('teams' in request.resource.data) || request.resource.data.teams == resource.data.teams)
           )
         );
