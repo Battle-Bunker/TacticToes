@@ -22,7 +22,7 @@ import {
   FirstPage,
   LastPage,
 } from "@mui/icons-material"
-import { debugLog, debugWarn, debugError } from "../../utils/debugLogger"
+import { debugWarn, debugError } from "../../utils/debugLogger"
 
 export interface GameLogicProps {
   gameState: GameState | null
@@ -99,68 +99,17 @@ const GameGrid: React.FC = () => {
   const handleSquareClick = async (index: number) => {
     if (isSubmittingRef.current) return
 
-    const currentTurnIndex = gameState?.turns ? gameState.turns.length - 1 : -1
-    
-    debugLog('GameGrid', 'handleSquareClick called', {
-      index,
-      hasLatestTurn: !!latestTurn,
-      hasGameState: !!gameState,
-      hasGameSetup: !!gameSetup,
-      gameStarted: gameSetup?.started,
-      userID: user.userID,
-      gameID,
-      sessionName,
-      hasSubmittedMove,
-      disabled,
-      selectedSquare,
-      hasGameLogicReturn: !!gameLogicReturn,
-    }, currentTurnIndex)
-
-    if (!latestTurn || !gameState) {
-      debugWarn('GameGrid', 'handleSquareClick early return: missing latestTurn or gameState', {
-        hasLatestTurn: !!latestTurn,
-        hasGameState: !!gameState,
-      }, currentTurnIndex)
-      return
-    }
-
-    if (!gameSetup?.started) {
-      debugWarn('GameGrid', 'handleSquareClick: game not started', {
-        gameSetup,
-        started: gameSetup?.started,
-      }, currentTurnIndex)
-      return
-    }
+    if (!latestTurn || !gameState) return
+    if (!gameSetup?.started) return
 
     const allowedMoves = latestTurn.allowedMoves[user.userID] || []
-    debugLog('GameGrid', 'allowedMoves check', {
-      userID: user.userID,
-      allowedMoves,
-      clickedIndex: index,
-      isAllowed: allowedMoves.includes(index),
-      allAllowedMoves: latestTurn.allowedMoves,
-    }, currentTurnIndex)
+    if (!allowedMoves.includes(index)) return
 
-    if (!allowedMoves.includes(index)) {
-      debugWarn('GameGrid', 'handleSquareClick: clicked index not in allowedMoves', {
-        index,
-        allowedMoves,
-        userID: user.userID,
-      }, currentTurnIndex)
-      return
-    }
-
-    debugLog('GameGrid', 'setSelectedSquare called', { index }, currentTurnIndex)
     setSelectedSquare(index)
 
     // Handle clash
     const clash = gameLogicReturn?.clashesAtPosition[index]
     if (clash) {
-      debugLog('GameGrid', 'clash detected at position', {
-        index,
-        clash,
-        clashesAtPosition: gameLogicReturn?.clashesAtPosition,
-      }, currentTurnIndex)
       const playersInvolved = gameSetup.gamePlayers.filter((player) =>
         clash.playerIDs.includes(player.id),
       )
@@ -170,28 +119,20 @@ const GameGrid: React.FC = () => {
     }
 
     // Submit move
-    if (!gameID || !sessionName) {
-      debugError('GameGrid', 'handleSquareClick: missing gameID or sessionName for move submission', {
-        gameID,
-        sessionName,
-      }, currentTurnIndex)
-      return
-    }
+    if (!gameID || !sessionName) return
 
     const moveNumber = gameState.turns.length - 1
 
     if (latestMoveStatus?.moveNumber !== moveNumber) {
-      debugWarn('GameGrid', 'handleSquareClick: moveStatus/gameState out of sync, skipping submission', {
-        latestMoveStatusNumber: latestMoveStatus?.moveNumber,
-        computedMoveNumber: moveNumber,
-      }, currentTurnIndex)
+      debugWarn('GameGrid', 'move blocked: moveStatus/gameState out of sync', {
+        moveStatusNumber: latestMoveStatus?.moveNumber,
+        gameStateMoveNumber: moveNumber,
+      })
       return
     }
 
     if (lastSubmittedMoveNumberRef.current === moveNumber) {
-      debugWarn('GameGrid', 'handleSquareClick: already submitted for this turn, skipping', {
-        moveNumber,
-      }, currentTurnIndex)
+      debugWarn('GameGrid', 'move blocked: duplicate submission for turn', { moveNumber })
       return
     }
 
@@ -202,53 +143,30 @@ const GameGrid: React.FC = () => {
         db,
         `sessions/${sessionName}/games/${gameID}/privateMoves`,
       )
-      
-      debugLog('GameGrid', 'submitting move to Firestore', {
-        path: `sessions/${sessionName}/games/${gameID}/privateMoves`,
-        moveNumber,
-        playerID: user.userID,
-        move: index,
-      }, currentTurnIndex)
 
-      const docRef = await addDoc(moveRef, {
+      await addDoc(moveRef, {
         gameID,
         moveNumber,
         playerID: user.userID,
         move: index,
         timestamp: serverTimestamp(),
       })
-      
-      debugLog('GameGrid', 'move document created successfully', {
-        docId: docRef.id,
-        path: docRef.path,
-      }, currentTurnIndex)
 
       const moveStatusDocRef = doc(
         db,
         `sessions/${sessionName}/games/${gameID}/moveStatuses/${moveNumber}`,
       )
-      
-      debugLog('GameGrid', 'updating moveStatus document', {
-        path: `sessions/${sessionName}/games/${gameID}/moveStatuses/${moveNumber}`,
-        playerID: user.userID,
-      }, currentTurnIndex)
 
       await updateDoc(moveStatusDocRef, {
         movedPlayerIDs: arrayUnion(user.userID),
       })
-      
-      debugLog('GameGrid', 'moveStatus updated successfully', {}, currentTurnIndex)
     } catch (error) {
       lastSubmittedMoveNumberRef.current = -1
-      debugError('GameGrid', 'Error submitting move to Firestore', {
-        error,
+      debugError('GameGrid', 'move submission failed', {
         errorMessage: error instanceof Error ? error.message : 'Unknown error',
-        errorStack: error instanceof Error ? error.stack : undefined,
-        gameID,
-        sessionName,
-        index,
-        userID: user.userID,
-      }, currentTurnIndex)
+        moveNumber,
+        move: index,
+      })
     } finally {
       isSubmittingRef.current = false
     }

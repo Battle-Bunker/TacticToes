@@ -38,7 +38,6 @@ import React, {
 import { EmojiCycler } from "../components/EmojiCycler"
 import { db } from "../firebaseConfig"
 import { useUser } from "./UserContext"
-import { debugLog } from "../utils/debugLogger"
 
 interface GameStateContextType {
   gameState: GameState | null
@@ -139,16 +138,6 @@ export const GameStateProvider: React.FC<{
         const gameData = docSnapshot.data() as GameState
         const safeTurns = Array.isArray(gameData.turns) ? gameData.turns : []
         const latestTurnData = safeTurns.length ? safeTurns[safeTurns.length - 1] : null
-        
-        const turnIndex = safeTurns.length - 1
-        debugLog('GameStateContext', 'gameState updated', {
-          gameID,
-          turnCount: safeTurns.length,
-          hasLatestTurn: !!latestTurnData,
-          allowedMovesKeys: latestTurnData ? Object.keys(latestTurnData.allowedMoves || {}) : [],
-          userAllowedMoves: latestTurnData?.allowedMoves?.[userID] || [],
-          fromCache: docSnapshot.metadata.fromCache,
-        }, turnIndex)
         
         setGameState({ ...gameData, turns: safeTurns })
         setLatestTurn(latestTurnData)
@@ -256,15 +245,6 @@ export const GameStateProvider: React.FC<{
         }
 
         const gameData = docSnapshot.data() as GameSetup
-        
-        debugLog('GameStateContext', 'gameSetup updated', {
-          gameID,
-          started: gameData.started,
-          gameType: gameData.gameType,
-          gamePlayers: gameData.gamePlayers?.map(p => ({ id: p.id, type: p.type })),
-          fromCache: docSnapshot.metadata.fromCache,
-        })
-        
         setGameSetup(gameData)
 
         if (!docSnapshot.metadata.fromCache) {
@@ -479,23 +459,9 @@ export const GameStateProvider: React.FC<{
 
         if (!querySnapshot.empty) {
           const highestMoveStatus = querySnapshot.docs[0].data() as MoveStatus
-          const turnIndex = highestMoveStatus.moveNumber
-          debugLog('GameStateContext', 'moveStatus updated', {
-            moveNumber: highestMoveStatus.moveNumber,
-            movedPlayerIDs: highestMoveStatus.movedPlayerIDs,
-            alivePlayerIDs: highestMoveStatus.alivePlayerIDs,
-            userID,
-            userHasMoved: highestMoveStatus.movedPlayerIDs?.includes(userID),
-          }, turnIndex)
           setLatestMoveStatus(highestMoveStatus)
           
-          // Check if user has submitted move for current turn
           const userHasMoved = highestMoveStatus.movedPlayerIDs?.includes(userID) || false
-          debugLog('GameStateContext', 'updating hasSubmittedMove', {
-            userHasMoved,
-            userID,
-            movedPlayerIDs: highestMoveStatus.movedPlayerIDs,
-          }, turnIndex)
           setHasSubmittedMove(userHasMoved)
         }
 
