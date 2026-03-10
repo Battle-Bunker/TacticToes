@@ -4,6 +4,16 @@ Tactic Toes is a multiplayer game platform built with React/TypeScript frontend 
 
 # Recent Changes
 
+## Move Submission Race Condition Fix (March 10, 2026)
+- **Bug**: Intermittent Firebase permission errors when submitting moves in snek games, caused by race conditions between independent Firestore snapshot listeners
+- **Root Causes**: (1) Double-submit from fast clicks/keyboard repeats before React state update propagates, (2) Turn-transition race where game document updates before moveStatuses document exists
+- **Fix**: Three defensive guards added to `handleSquareClick` in `GameGrid.tsx`:
+  1. **Ref-based in-flight lock** (`isSubmittingRef`): Synchronous guard preventing concurrent async submission sequences
+  2. **Per-turn idempotency** (`lastSubmittedMoveNumberRef`): Tracks last submitted moveNumber to block duplicate submissions for the same turn, reset on error to allow retry
+  3. **Consistency gate**: Verifies `latestMoveStatus.moveNumber` matches computed `moveNumber` before submission, preventing writes during turn-transition windows when moveStatuses doc may not exist yet
+- **Scope**: Client-side only, no changes to Firebase rules or Cloud Functions
+- **Core Files Modified**: `frontend/src/pages/GamePage/GameGrid.tsx`
+
 ## Skip Confirmation & Timezone Display (March 4, 2026)
 
 ### Skip Confirmation Checkbox

@@ -55,6 +55,7 @@ const GameGrid: React.FC = () => {
     sessionName,
     gameID,
     latestTurn,
+    latestMoveStatus,
   } = useGameStateContext()
 
   const user = useUser()
@@ -76,6 +77,8 @@ const GameGrid: React.FC = () => {
     GameLogicReturn | undefined
   >()
   const gridRef = useRef<HTMLDivElement>(null)
+  const isSubmittingRef = useRef<boolean>(false)
+  const lastSubmittedMoveNumberRef = useRef<number>(-1)
   const [containerWidth, setContainerWidth] = useState<number>(0)
 
   const cellSize = containerWidth ? containerWidth / gridWidth : 0
@@ -94,6 +97,8 @@ const GameGrid: React.FC = () => {
   }, [gridWidth, selectedTurnIndex])
 
   const handleSquareClick = async (index: number) => {
+    if (isSubmittingRef.current) return
+
     const currentTurnIndex = gameState?.turns ? gameState.turns.length - 1 : -1
     
     debugLog('GameGrid', 'handleSquareClick called', {
@@ -173,12 +178,30 @@ const GameGrid: React.FC = () => {
       return
     }
 
+    const moveNumber = gameState.turns.length - 1
+
+    if (latestMoveStatus?.moveNumber !== moveNumber) {
+      debugWarn('GameGrid', 'handleSquareClick: moveStatus/gameState out of sync, skipping submission', {
+        latestMoveStatusNumber: latestMoveStatus?.moveNumber,
+        computedMoveNumber: moveNumber,
+      }, currentTurnIndex)
+      return
+    }
+
+    if (lastSubmittedMoveNumberRef.current === moveNumber) {
+      debugWarn('GameGrid', 'handleSquareClick: already submitted for this turn, skipping', {
+        moveNumber,
+      }, currentTurnIndex)
+      return
+    }
+
+    isSubmittingRef.current = true
+    lastSubmittedMoveNumberRef.current = moveNumber
     try {
       const moveRef = collection(
         db,
         `sessions/${sessionName}/games/${gameID}/privateMoves`,
       )
-      const moveNumber = gameState.turns.length - 1
       
       debugLog('GameGrid', 'submitting move to Firestore', {
         path: `sessions/${sessionName}/games/${gameID}/privateMoves`,
@@ -216,6 +239,7 @@ const GameGrid: React.FC = () => {
       
       debugLog('GameGrid', 'moveStatus updated successfully', {}, currentTurnIndex)
     } catch (error) {
+      lastSubmittedMoveNumberRef.current = -1
       debugError('GameGrid', 'Error submitting move to Firestore', {
         error,
         errorMessage: error instanceof Error ? error.message : 'Unknown error',
@@ -225,6 +249,8 @@ const GameGrid: React.FC = () => {
         index,
         userID: user.userID,
       }, currentTurnIndex)
+    } finally {
+      isSubmittingRef.current = false
     }
   }
 
