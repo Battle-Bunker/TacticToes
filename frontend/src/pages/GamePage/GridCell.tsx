@@ -1,6 +1,5 @@
 import { Box } from "@mui/material"
 import React from "react"
-import { debugLog, debugWarn } from "../../utils/debugLogger"
 
 interface GridCellProps {
   index: number
@@ -32,16 +31,7 @@ const GridCell: React.FC<GridCellProps> = React.memo(({
   return (
     <Box
       onClick={() => {
-        debugLog('GridCell', 'onClick triggered', {
-          index,
-          disabled,
-          isAllowedMove,
-          isSelected,
-        })
-        if (disabled) {
-          debugWarn('GridCell', 'click ignored: cell is disabled', { index, disabled })
-          return
-        }
+        if (disabled) return
         onClick(index)
       }}
       sx={{

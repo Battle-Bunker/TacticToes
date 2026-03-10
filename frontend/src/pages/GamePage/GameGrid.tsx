@@ -97,7 +97,10 @@ const GameGrid: React.FC = () => {
   }, [gridWidth, selectedTurnIndex])
 
   const handleSquareClick = async (index: number) => {
-    if (isSubmittingRef.current) return
+    if (isSubmittingRef.current) {
+      debugWarn('GameGrid', 'move blocked: submission already in flight', { index })
+      return
+    }
 
     if (!latestTurn || !gameState) return
     if (!gameSetup?.started) return
