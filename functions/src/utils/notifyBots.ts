@@ -168,6 +168,13 @@ export async function notifyBots(
             return adjustPosition(x, y)
           }),
         } : {}),
+        ...(turnData.invulnerabilityPotions?.length ? {
+          invulnerabilityPotions: turnData.invulnerabilityPotions.map((pos) => {
+            const x = pos % gameData.setup.boardWidth
+            const y = Math.floor(pos / gameData.setup.boardWidth)
+            return adjustPosition(x, y)
+          }),
+        } : {}),
         snakes: Object.keys(turnData.playerPieces).map((player) => {
           const body = turnData.playerPieces[player].map((pos) => {
             const x = pos % gameData.setup.boardWidth
@@ -192,6 +199,7 @@ export async function notifyBots(
               head: "default",
               tail: "default",
             },
+            invulnerabilityLevel: turnData.playerInvulnerabilityLevel?.[player] ?? 0,
           }
 
           if (
@@ -227,6 +235,7 @@ export async function notifyBots(
           head: "default",
           tail: "default",
         },
+        invulnerabilityLevel: turnData.playerInvulnerabilityLevel?.[bot.id] ?? 0,
       },
     }
 
