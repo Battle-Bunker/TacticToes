@@ -141,6 +141,8 @@ export async function notifyBots(
           name: gameData.setup.gameType,
           settings: {
             foodSpawnChance,
+            foodSpawnRate,
+            invulnerabilityPotionSpawnRate: gameData.setup.invulnerabilityPotionSpawnRate ?? 0.15,
             minimumFood: 0,
             hazardDamagePerTurn: 100,
           },
