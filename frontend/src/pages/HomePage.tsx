@@ -12,7 +12,7 @@ const HomePage: React.FC = () => {
   const { colour } = useUser()
 
   const handleSessionNameChange = (e: ChangeEvent<HTMLInputElement>) => {
-    const lowercaseValue = e.target.value.toLowerCase().replace(/[^a-z]/g, "")
+    const lowercaseValue = e.target.value.toLowerCase().replace(/[^a-z0-9]/g, "")
     setSessionName(lowercaseValue)
   }
 
