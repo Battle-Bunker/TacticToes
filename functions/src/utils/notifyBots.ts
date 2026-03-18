@@ -2,7 +2,7 @@ import axios from "axios"
 import * as admin from "firebase-admin"
 import { FieldValue } from "firebase-admin/firestore"
 import * as logger from "firebase-functions/logger"
-import { Bot, GameState, Move, Winner } from "../types/Game"
+import { Bot, GameState, Human, Move, Winner } from "../types/Game"
 
 /**
  * Sends move requests to all active bots for a specific turn.
@@ -72,6 +72,27 @@ export async function notifyBots(
       `No bots found in the bots collection that match the game players for turn ${turnNumber}`
     )
     return
+  }
+
+  const humanPlayerIds = gameData.setup.gamePlayers
+    .filter((gp) => gp.type === "human")
+    .map((gp) => gp.id)
+
+  const playerInfoMap = new Map<string, { name: string; emoji: string }>()
+  for (const bot of allBots) {
+    playerInfoMap.set(bot.id, { name: bot.name, emoji: bot.emoji })
+  }
+
+  if (humanPlayerIds.length > 0) {
+    const usersCollection = admin.firestore().collection("users")
+    const humanFetches = humanPlayerIds.map((id) => usersCollection.doc(id).get())
+    const humanDocs = await Promise.all(humanFetches)
+    for (const doc of humanDocs) {
+      if (doc.exists) {
+        const data = doc.data() as Human
+        playerInfoMap.set(doc.id, { name: data.name, emoji: data.emoji })
+      }
+    }
   }
 
   // Adjusts a position based on the new reduced board and flips the y-axis
@@ -188,9 +209,11 @@ export async function notifyBots(
           const gamePlayer = gameData.setup.gamePlayers.find(
             (gp) => gp.id === player
           )
+          const playerInfo = playerInfoMap.get(player)
           const snakeData: any = {
             id: player,
-            name: player,
+            name: playerInfo?.name ?? player,
+            emoji: playerInfo?.emoji ?? "",
             health: turnData.playerHealth[player],
             body,
             head: { ...body[0] },
@@ -226,7 +249,8 @@ export async function notifyBots(
       },
       you: {
         id: bot.id,
-        name: bot.id,
+        name: bot.name,
+        emoji: bot.emoji,
         health: turnData.playerHealth[bot.id],
         body: youBody,
         head: { ...youBody[0] },
