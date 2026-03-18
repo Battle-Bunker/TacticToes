@@ -131,21 +131,22 @@ export async function notifyBots(
     })
 
     const botColor = getSnakeColor(bot.id)
+    const foodSpawnRate = gameData.setup.foodSpawnRate ?? 0.5
+    const foodSpawnChance = (foodSpawnRate / 5) * 100
+
     const botRequestBody = {
       game: {
         id: gameID,
         ruleset: {
-          name: "standard",
-          version: "v1.1.15",
+          name: gameData.setup.gameType,
           settings: {
-            foodSpawnChance: 15,
-            minimumFood: 1,
-            hazardDamagePerTurn: 14,
+            foodSpawnChance,
+            minimumFood: 0,
+            hazardDamagePerTurn: 100,
           },
         },
         map: "standard",
-        source: "league",
-        timeout: 500,
+        timeout: gameData.setup.maxTurnTime * 1000,
       },
       turn: turnNumber,
       board: {
