@@ -2,7 +2,7 @@ import axios from "axios"
 import * as admin from "firebase-admin"
 import { FieldValue } from "firebase-admin/firestore"
 import * as logger from "firebase-functions/logger"
-import { Bot, GameState, Move } from "../types/Game"
+import { Bot, GameState, Move, Winner } from "../types/Game"
 
 /**
  * Sends move requests to all active bots for a specific turn.
@@ -300,6 +300,101 @@ export async function notifyBots(
   await Promise.all(requests)
 
   logger.info(`Finished processing bot moves for game ${gameID}, turn ${turnNumber}`)
+}
+
+export async function notifyBotsGameEnd(
+  sessionID: string,
+  gameID: string,
+  gameState: GameState,
+  winners: Winner[],
+  finalTurnNumber: number,
+  finalScores: { [playerID: string]: number }
+): Promise<void> {
+  logger.info(`[notifyBotsGameEnd] Sending /end to bots for game ${gameID}`, {
+    sessionID,
+    gameID,
+    finalTurnNumber,
+  })
+
+  const botPlayers = gameState.setup.gamePlayers.filter(
+    (player) => player.type === "bot"
+  )
+
+  if (botPlayers.length === 0) {
+    logger.info(`[notifyBotsGameEnd] No bots participated in game ${gameID}`)
+    return
+  }
+
+  const botsSnapshot = await admin.firestore().collection("bots").get()
+  const allBots: Bot[] = botsSnapshot.docs.map((doc) => doc.data() as Bot)
+
+  const botsToNotify = allBots.filter((bot) =>
+    botPlayers.find((player) => player.id === bot.id)
+  )
+
+  if (botsToNotify.length === 0) {
+    logger.info(
+      `[notifyBotsGameEnd] No matching bots found in bots collection for game ${gameID}`
+    )
+    return
+  }
+
+  const foodSpawnRate = gameState.setup.foodSpawnRate ?? 0.5
+  const foodSpawnChance = (foodSpawnRate / 5) * 100
+
+  const requests = botsToNotify.map(async (bot) => {
+    const endPayload = {
+      game: {
+        id: gameID,
+        ruleset: {
+          name: gameState.setup.gameType,
+          settings: {
+            foodSpawnChance,
+            foodSpawnRate,
+            invulnerabilityPotionSpawnRate:
+              gameState.setup.invulnerabilityPotionSpawnRate ?? 0.15,
+            minimumFood: 0,
+            hazardDamagePerTurn: 100,
+          },
+        },
+        map: "standard",
+        timeout: gameState.setup.maxTurnTime * 1000,
+      },
+      turn: finalTurnNumber,
+      scores: finalScores,
+      winners: winners.map((w) => ({
+        playerID: w.playerID,
+        score: w.score,
+        ...(w.teamID ? { teamID: w.teamID } : {}),
+        ...(w.teamScore !== undefined ? { teamScore: w.teamScore } : {}),
+      })),
+      you: {
+        id: bot.id,
+        name: bot.id,
+      },
+    }
+
+    try {
+      logger.info(
+        `[notifyBotsGameEnd] Sending /end to bot ${bot.id} at ${bot.url}/end`
+      )
+      await axios.post(`${bot.url}/end`, endPayload, {
+        timeout: 5000,
+      })
+      logger.info(`[notifyBotsGameEnd] Successfully sent /end to bot ${bot.id}`)
+    } catch (error) {
+      logger.error(
+        `[notifyBotsGameEnd] Error sending /end to bot ${bot.id}`,
+        error
+      )
+    }
+  })
+
+  await Promise.all(requests)
+
+  logger.info(
+    `[notifyBotsGameEnd] Finished sending /end to all bots for game ${gameID}`
+  )
 }
 
 function convertDirectionToMoveIndex(

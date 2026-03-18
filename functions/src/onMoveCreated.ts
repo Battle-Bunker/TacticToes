@@ -3,7 +3,7 @@ import * as functions from "firebase-functions/v1"
 import * as logger from "firebase-functions/logger"
 import { getFunctions } from "firebase-admin/functions"
 import { processTurn } from "./gameprocessors/processTurn"
-import { notifyBots } from "./utils/notifyBots"
+import { notifyBots, notifyBotsGameEnd } from "./utils/notifyBots"
 import { MoveStatus } from "./types/Game" // Adjust the import path as necessary
 
 export const onMoveCreated = functions.firestore
@@ -122,6 +122,14 @@ export const onMoveCreated = functions.firestore
         )
       } catch (error) {
         logger.error(`[onMoveCreated] Error scheduling tournament game start`, { schedGameID, error })
+      }
+    }
+
+    if (result?.gameEnded && result.gameState && result.winners && result.finalTurnNumber !== undefined && result.finalScores) {
+      try {
+        await notifyBotsGameEnd(sessionID, gameID, result.gameState, result.winners, result.finalTurnNumber, result.finalScores)
+      } catch (error) {
+        logger.error(`[onMoveCreated] Error sending /end to bots for game ${gameID}`, error)
       }
     }
 

@@ -3,7 +3,7 @@ import { onTaskDispatched } from "firebase-functions/v2/tasks"
 import { getFunctions } from "firebase-admin/functions"
 import * as logger from "firebase-functions/logger"
 import { processTurn } from "./gameprocessors/processTurn"
-import { notifyBots } from "./utils/notifyBots"
+import { notifyBots, notifyBotsGameEnd } from "./utils/notifyBots"
 
 /**
  * Firebase task queue function for processing turn expirations.
@@ -113,6 +113,14 @@ export const processTurnExpirationTask = onTaskDispatched(
         )
       } catch (error) {
         logger.error(`[processTurnExpirationTask] Error scheduling tournament game start`, { schedGameID, error })
+      }
+    }
+
+    if (result?.gameEnded && result.gameState && result.winners && result.finalTurnNumber !== undefined && result.finalScores) {
+      try {
+        await notifyBotsGameEnd(sessionID, gameID, result.gameState, result.winners, result.finalTurnNumber, result.finalScores)
+      } catch (error) {
+        logger.error(`[processTurnExpirationTask] Error sending /end to bots for game ${gameID}`, error)
       }
     }
 

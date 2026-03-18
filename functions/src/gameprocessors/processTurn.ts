@@ -50,6 +50,11 @@ export interface ProcessTurnResult {
     delaySeconds: number
     expectedScheduledStartMillis: number
   }
+  gameEnded?: boolean
+  gameState?: GameState
+  winners?: Winner[]
+  finalTurnNumber?: number
+  finalScores?: { [playerID: string]: number }
 }
 
 const DEFAULT_MMR = 1000
@@ -390,7 +395,7 @@ export async function processTurn(
         winners: nextTurn.winners,
       })
       
-      return { newTurnCreated: false, tournamentSchedule: createResult.tournamentSchedule }
+      return { newTurnCreated: false, tournamentSchedule: createResult.tournamentSchedule, gameEnded: true, gameState, winners: nextTurn.winners, finalTurnNumber: gameState.turns.length, finalScores: nextTurn.scores }
     } else {
       // normal turn
       transaction.update(gameStateRef, {
