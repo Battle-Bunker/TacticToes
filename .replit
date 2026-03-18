@@ -112,3 +112,7 @@ to = "/index.html"
 [userenv.development]
 
 [userenv.production]
+
+[postMerge]
+path = "scripts/post-merge.sh"
+timeoutMs = 30000
