@@ -996,7 +996,7 @@ const GameSetup: React.FC = () => {
       {/* Bots List */}
       {bots.length > 0 && (
         <FormControl fullWidth variant="outlined" sx={{ mt: 2 }}>
-          <InputLabel shrink sx={{ backgroundColor: "white", px: 1 }}>
+          <InputLabel shrink sx={{ backgroundColor: "white", px: 1, zIndex: 2 }}>
             Available Bots
           </InputLabel>
           <Box
@@ -1032,9 +1032,12 @@ const GameSetup: React.FC = () => {
                       display: "flex",
                       alignItems: "center",
                       px: 2,
-                      py: 0.5,
+                      py: 1,
                       backgroundColor: "#f0f0f0",
                       borderBottom: "1px solid #ddd",
+                      position: "sticky",
+                      top: 0,
+                      zIndex: 1,
                     }}
                   >
                     <Link
