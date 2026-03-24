@@ -1,7 +1,6 @@
 // src/pages/GamePage/components/GameSetup.tsx
 
 import {
-  arrayRemove,
   arrayUnion,
   deleteField,
   doc,
@@ -300,6 +299,10 @@ const GameSetup: React.FC = () => {
       return;
     }
 
+    if (gameSetup.gamePlayers.some((p) => p.id === botID)) {
+      return;
+    }
+
     const bot: GamePlayer = {
       id: botID,
       type: "bot",
@@ -318,14 +321,12 @@ const GameSetup: React.FC = () => {
     });
   };
 
-  // Kick a player by removing their playerID from the playerIDs field
-  const handlePlayerKick = async (playerID: string, type: "bot" | "human") => {
-    const player: GamePlayer = {
-      id: playerID,
-      type: type,
-    };
+  const handlePlayerKick = async (playerID: string, _type: "bot" | "human") => {
+    const updatedGamePlayers = gameSetup.gamePlayers.filter(
+      (p) => p.id !== playerID
+    );
     await updateDoc(gameDocRef, {
-      gamePlayers: arrayRemove(player),
+      gamePlayers: updatedGamePlayers,
     });
     debouncedRegeneratePreview();
   };
@@ -969,18 +970,26 @@ const GameSetup: React.FC = () => {
               {bots.map((bot) => {
                 const botStatus = getBotStatus(bot.id);
                 const isDead = botStatus === "dead";
+                const isInGame = gameSetup.gamePlayers.some(
+                  (p) => p.id === bot.id
+                );
+                const isDisabled = isDead || isInGame;
 
                 return (
                   <Button
                     key={bot.name}
-                    disabled={isDead}
+                    disabled={isDisabled}
                     sx={{
-                      backgroundColor: isDead ? "#ccc" : bot.colour,
-                      opacity: isDead ? 0.6 : 1,
+                      backgroundColor: isDisabled ? "#ccc" : bot.colour,
+                      opacity: isDisabled ? 0.6 : 1,
                     }}
                     onClick={() => handleAddBot(bot.id)}
                     title={
-                      isDead ? "Bot is dead and cannot be added to game" : ""
+                      isDead
+                        ? "Bot is dead and cannot be added to game"
+                        : isInGame
+                          ? "Bot is already in the game"
+                          : ""
                     }
                   >
                     {bot.emoji}{" "}
@@ -988,6 +997,7 @@ const GameSetup: React.FC = () => {
                       ? `${bot.name.slice(0, 10)}…`
                       : bot.name}
                     {isDead && " (DEAD)"}
+                    {isInGame && !isDead && " (IN GAME)"}
                   </Button>
                 );
               })}

@@ -8,7 +8,13 @@ export class TeamSnekProcessor extends SnekProcessor {
    * Unassigned players become observers.
    */
   static filterActivePlayers(setup: GameSetup): GamePlayer[] {
-    return setup.gamePlayers.filter(player => player.teamID);
+    const seen = new Set<string>();
+    return setup.gamePlayers.filter((player) => {
+      if (!player.teamID) return false;
+      if (seen.has(player.id)) return false;
+      seen.add(player.id);
+      return true;
+    });
   }
 
   /**

@@ -23,8 +23,12 @@ export abstract class GameProcessor {
    * @returns Array of players who should actively participate
    */
   static filterActivePlayers(setup: GameSetup): GamePlayer[] {
-    // Default: all players are active
-    return setup.gamePlayers
+    const seen = new Set<string>();
+    return setup.gamePlayers.filter((player) => {
+      if (seen.has(player.id)) return false;
+      seen.add(player.id);
+      return true;
+    });
   }
 
   /**
