@@ -89,6 +89,9 @@ export const GameStateProvider: React.FC<{
   const [timeRemaining, setTimeRemaining] = useState<number>(0)
   const [selectedSquare, setSelectedSquare] = useState<number | null>(null)
   const [bots, setBots] = useState<Bot[]>([])
+  const [gameParticipantBots, setGameParticipantBots] = useState<Bot[]>([])
+  const gameParticipantBotMapRef = useRef<{ [id: string]: Bot }>({})
+  const gameParticipantBotUnsubsRef = useRef<{ [id: string]: () => void }>({})
   const [gameType, setGameType] = useState<GameType>("snek")
   const [connectivityStatus, setConnectivityStatus] = useState<'connected' | 'disconnected'>('connected')
   const [queryTimedOut, setQueryTimedOut] = useState<boolean>(false)
@@ -338,6 +341,79 @@ export const GameStateProvider: React.FC<{
       clearQueryTimeout()
     }
   }, [gameSetup?.gameType])
+
+  // Subscribe to bot documents for private bots added to this game by other players
+  useEffect(() => {
+    const unsubs = gameParticipantBotUnsubsRef.current
+    const botMap = gameParticipantBotMapRef.current
+
+    if (!gameSetup?.gamePlayers) {
+      for (const id of Object.keys(unsubs)) {
+        unsubs[id]()
+        delete unsubs[id]
+        delete botMap[id]
+      }
+      setGameParticipantBots([])
+      return
+    }
+
+    const botPlayerIDs = gameSetup.gamePlayers
+      .filter((gp) => gp.type === "bot")
+      .map((gp) => gp.id)
+
+    const existingBotIDs = new Set(bots.map((b) => b.id))
+    const neededIDs = new Set(botPlayerIDs.filter((id) => !existingBotIDs.has(id)))
+
+    // Unsubscribe from bots no longer needed
+    for (const id of Object.keys(unsubs)) {
+      if (!neededIDs.has(id)) {
+        unsubs[id]()
+        delete unsubs[id]
+        delete botMap[id]
+      }
+    }
+
+    // Subscribe to newly needed bots
+    for (const botID of neededIDs) {
+      if (unsubs[botID]) continue
+      const botDocRef = doc(db, "bots", botID)
+
+      const unsubscribe = onSnapshot(
+        botDocRef,
+        (docSnap) => {
+          if (docSnap.exists()) {
+            const botData = docSnap.data() as Bot
+            gameParticipantBotMapRef.current[botID] = {
+              ...botData,
+              id: botID,
+            }
+          } else {
+            delete gameParticipantBotMapRef.current[botID]
+          }
+          setGameParticipantBots(Object.values(gameParticipantBotMapRef.current))
+        },
+        (error) => {
+          console.error(`Error in game participant bot subscription for ${botID}:`, error)
+        }
+      )
+
+      unsubs[botID] = unsubscribe
+    }
+
+    setGameParticipantBots(Object.values(botMap))
+  }, [gameSetup?.gamePlayers, bots])
+
+  // Cleanup all game participant bot subscriptions on unmount
+  useEffect(() => {
+    return () => {
+      const unsubs = gameParticipantBotUnsubsRef.current
+      for (const id of Object.keys(unsubs)) {
+        unsubs[id]()
+        delete unsubs[id]
+      }
+      gameParticipantBotMapRef.current = {}
+    }
+  }, [])
 
   // Subscribe to player documents
   useEffect(() => {
@@ -615,7 +691,17 @@ export const GameStateProvider: React.FC<{
     bots,
     gameType,
     setGameType,
-    players: [...humans, ...bots],
+    players: (() => {
+      const seen = new Set<string>()
+      const result: Player[] = []
+      for (const p of [...humans, ...bots, ...gameParticipantBots]) {
+        if (!seen.has(p.id)) {
+          seen.add(p.id)
+          result.push(p)
+        }
+      }
+      return result
+    })(),
     sessionName,
     gameSetup,
     latestMoveStatus,
