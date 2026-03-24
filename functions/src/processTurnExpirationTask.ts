@@ -83,7 +83,7 @@ export const processTurnExpirationTask = onTaskDispatched(
       try {
         // Notify bots immediately
         logger.info(`[processTurnExpirationTask] Starting bot notifications`, { gameID, turnNumber: result.newTurnNumber })
-        await notifyBots(sessionID, gameID, result.newTurnNumber)
+        await notifyBots(sessionID, gameID, result.newTurnNumber, result.turnExpiryTime)
         logger.info(`[processTurnExpirationTask] Bot notifications completed`, { gameID, turnNumber: result.newTurnNumber })
       } catch (error) {
         logger.error(

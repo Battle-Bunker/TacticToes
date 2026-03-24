@@ -12,7 +12,8 @@ import { Bot, GameState, Human, Move, Winner } from "../types/Game"
 export async function notifyBots(
   sessionID: string,
   gameID: string,
-  turnNumber: number
+  turnNumber: number,
+  turnExpiryTime?: number
 ): Promise<void> {
   logger.info(
     `Bot notification started for game ${gameID}, turn ${turnNumber}`,
@@ -170,6 +171,7 @@ export async function notifyBots(
         },
         map: "standard",
         timeout: gameData.setup.maxTurnTime * 1000,
+        ...(turnExpiryTime !== undefined && { turnExpiryTime }),
       },
       turn: turnNumber,
       board: {

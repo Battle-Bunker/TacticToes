@@ -44,6 +44,7 @@ export interface ProcessTurnResult {
   newTurnCreated: boolean
   newTurnNumber?: number
   turnDurationSeconds?: number
+  turnExpiryTime?: number
   tournamentSchedule?: {
     sessionID: string
     gameID: string
@@ -430,6 +431,7 @@ export async function processTurn(
         newTurnCreated: true,
         newTurnNumber,
         turnDurationSeconds,
+        turnExpiryTime: now + turnDurationMillis,
       }
     }
   } catch (error) {

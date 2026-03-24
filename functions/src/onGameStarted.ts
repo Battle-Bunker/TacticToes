@@ -127,7 +127,7 @@ export const onGameStarted = functions.firestore
     }
 
     // Use a transaction to ensure consistency
-    const turnDurationSeconds = await admin.firestore().runTransaction(async (transaction) => {
+    const txResult = await admin.firestore().runTransaction(async (transaction) => {
       // If not all players are ready, exit early
 
       // Initialize the game using the processor's method
@@ -175,9 +175,11 @@ export const onGameStarted = functions.firestore
 
       logger.info(`[onGameStarted] Game ${gameID} has been initialized.`)
       
-      // Return first turn duration for post-transaction orchestration
-      return firstTurnTimeSeconds
+      // Return first turn duration and expiry time for post-transaction orchestration
+      return { turnDurationSeconds: firstTurnTimeSeconds, turnExpiryTime: now + startTurnDurationMillis }
     })
+
+    const { turnDurationSeconds, turnExpiryTime } = txResult
 
     // After transaction commits, schedule turn expiration and notify bots for turn 0
     logger.info(`[onGameStarted] Starting post-transaction orchestration for game ${gameID}`, {
@@ -218,7 +220,7 @@ export const onGameStarted = functions.firestore
     try {
       // Notify bots immediately for turn 0
       logger.info(`[onGameStarted] Starting bot notifications for turn 0`, { gameID })
-      await notifyBots(sessionID, gameID, 0)
+      await notifyBots(sessionID, gameID, 0, turnExpiryTime)
       logger.info(`[onGameStarted] Bot notifications completed for turn 0`, { gameID })
     } catch (error) {
       logger.error(`[onGameStarted] Error notifying bots for game ${gameID}, turn 0`, error)

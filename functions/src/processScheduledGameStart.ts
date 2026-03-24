@@ -83,7 +83,7 @@ export const processScheduledGameStart = onTaskDispatched(
       return
     }
 
-    const turnDurationSeconds = await admin.firestore().runTransaction(async (transaction) => {
+    const txResult = await admin.firestore().runTransaction(async (transaction) => {
       const freshDoc = await transaction.get(setupRef)
       const freshSetup = freshDoc.data() as GameSetup
 
@@ -156,13 +156,15 @@ export const processScheduledGameStart = onTaskDispatched(
       transaction.set(moveStatusRef, moveStatus)
 
       logger.info(`[processScheduledGameStart] Game ${gameID} initialized in transaction`)
-      return firstTurnTimeSeconds
+      return { turnDurationSeconds: firstTurnTimeSeconds, turnExpiryTime: nowMs + startTurnDurationMillis }
     })
 
-    if (turnDurationSeconds === null) {
+    if (txResult === null) {
       logger.info(`[processScheduledGameStart] Transaction aborted for game ${gameID}`)
       return
     }
+
+    const { turnDurationSeconds, turnExpiryTime } = txResult
 
     try {
       const queue = getFunctions().taskQueue("processTurnExpirationTask")
@@ -179,7 +181,7 @@ export const processScheduledGameStart = onTaskDispatched(
     }
 
     try {
-      await notifyBots(sessionID, gameID, 0)
+      await notifyBots(sessionID, gameID, 0, turnExpiryTime)
       logger.info(`[processScheduledGameStart] Bot notifications completed for turn 0`, { gameID })
     } catch (error) {
       logger.error(`[processScheduledGameStart] Error notifying bots for game ${gameID}, turn 0`, error)

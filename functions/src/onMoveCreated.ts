@@ -92,7 +92,7 @@ export const onMoveCreated = functions.firestore
       try {
         // Notify bots immediately
         logger.info(`[onMoveCreated] Starting bot notifications`, { gameID, turnNumber: result.newTurnNumber })
-        await notifyBots(sessionID, gameID, result.newTurnNumber)
+        await notifyBots(sessionID, gameID, result.newTurnNumber, result.turnExpiryTime)
         logger.info(`[onMoveCreated] Bot notifications completed`, { gameID, turnNumber: result.newTurnNumber })
       } catch (error) {
         logger.error(
