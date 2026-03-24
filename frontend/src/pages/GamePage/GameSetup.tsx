@@ -30,6 +30,8 @@ import {
   Checkbox,
   FormControl,
   FormControlLabel,
+  IconButton,
+  InputAdornment,
   InputLabel,
   MenuItem,
   Select,
@@ -81,6 +83,7 @@ const GameSetup: React.FC = () => {
   const [RulesComponent, setRulesComponent] = useState<React.FC | null>(null);
   const [boardSize, setBoardSize] = useState<BoardSize>("medium");
   const [teams, setTeams] = useState<Team[]>(gameSetup?.teams || []);
+  const [botSearchQuery, setBotSearchQuery] = useState("");
   const [maxTurnsEnabled, setMaxTurnsEnabled] = useState<boolean>(
     gameSetup?.maxTurns !== undefined,
   );
@@ -1005,12 +1008,49 @@ const GameSetup: React.FC = () => {
               borderRadius: "0px",
               minHeight: "56px",
               maxHeight: "300px",
-              overflowY: "auto",
+              display: "flex",
+              flexDirection: "column",
             }}
           >
+            <Box sx={{ px: 1, pt: 1, pb: 0.5, borderBottom: "1px solid #ddd", flexShrink: 0 }}>
+              <TextField
+                size="small"
+                fullWidth
+                placeholder="Search bots..."
+                value={botSearchQuery}
+                onChange={(e) => setBotSearchQuery(e.target.value)}
+                InputProps={{
+                  endAdornment: botSearchQuery ? (
+                    <InputAdornment position="end">
+                      <IconButton
+                        size="small"
+                        onClick={() => setBotSearchQuery("")}
+                        edge="end"
+                        aria-label="clear search"
+                      >
+                        ✕
+                      </IconButton>
+                    </InputAdornment>
+                  ) : null,
+                }}
+                sx={{
+                  "& .MuiOutlinedInput-root": {
+                    borderRadius: "0px",
+                    "& fieldset": { borderColor: "black", borderWidth: "2px" },
+                    "&:hover fieldset": { borderColor: "black" },
+                    "&.Mui-focused fieldset": { borderColor: "black" },
+                  },
+                }}
+              />
+            </Box>
+            <Box sx={{ overflowY: "auto", flexGrow: 1 }}>
             {(() => {
+              const searchLower = botSearchQuery.toLowerCase();
+              const filtered = botSearchQuery
+                ? bots.filter((bot) => bot.name.toLowerCase().includes(searchLower))
+                : bots;
               const grouped: Record<string, typeof bots> = {};
-              bots.forEach((bot) => {
+              filtered.forEach((bot) => {
                 if (!grouped[bot.owner]) grouped[bot.owner] = [];
                 grouped[bot.owner].push(bot);
               });
@@ -1024,6 +1064,14 @@ const GameSetup: React.FC = () => {
                 const nameB = ownerNames[b] || b;
                 return nameA.localeCompare(nameB);
               });
+
+              if (ownerOrder.length === 0 && botSearchQuery) {
+                return (
+                  <Typography sx={{ px: 2, py: 2, color: "#999", fontSize: "0.9rem" }}>
+                    No bots match "{botSearchQuery}"
+                  </Typography>
+                );
+              }
 
               return ownerOrder.map((ownerID) => (
                 <Box key={ownerID}>
@@ -1118,6 +1166,7 @@ const GameSetup: React.FC = () => {
                 </Box>
               ));
             })()}
+            </Box>
           </Box>
         </FormControl>
       )}
