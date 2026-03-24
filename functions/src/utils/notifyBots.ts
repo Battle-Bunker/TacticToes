@@ -269,10 +269,16 @@ export async function notifyBots(
     }
 
     try {
+      const DEFAULT_TIMEOUT = 10000
+      const MIN_TIMEOUT = 500
+      const moveTimeout = turnExpiryTime
+        ? Math.max(MIN_TIMEOUT, turnExpiryTime - Date.now())
+        : DEFAULT_TIMEOUT
+
       // Make a POST request to the bot's URL
-      logger.info(`Sending move request to bot ${bot.id} for turn ${turnNumber}`)
+      logger.info(`Sending move request to bot ${bot.id} for turn ${turnNumber} (timeout: ${moveTimeout}ms)`)
       const response = await axios.post(`${bot.url}/move`, botRequestBody, {
-        timeout: 10000,
+        timeout: moveTimeout,
       })
       logger.info(`Successfully sent move request to bot ${bot.id}`, {
         response: response.data,
