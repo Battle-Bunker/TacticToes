@@ -64,9 +64,9 @@ const Bots: React.FC = () => {
     if (!userID) return;
     const q = query(collection(db, "bots"), where("owner", "==", userID));
     return onSnapshot(q, (snap) => {
-      setBots(
-        snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Bot, "id">) })),
-      );
+      const mapped = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Bot, "id">) }));
+      mapped.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+      setBots(mapped);
     });
   }, [userID]);
 
