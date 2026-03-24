@@ -2,13 +2,18 @@
 
 import {
   arrayUnion,
+  collection,
   deleteField,
   doc,
+  getDocs,
+  query,
   Timestamp,
   updateDoc,
+  where,
 } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { useUser } from "../../context/UserContext";
 import { db, functions } from "../../firebaseConfig";
 import { TeamConfiguration } from "../../components/TeamConfiguration";
@@ -119,6 +124,44 @@ const GameSetup: React.FC = () => {
   const [tournamentCountdown, setTournamentCountdown] = useState<string>("");
 
   const { getBotStatus } = useBotHealth();
+
+  const [ownerNames, setOwnerNames] = useState<Record<string, string>>({});
+
+  const ownerIDs = useMemo(
+    () => Array.from(new Set(bots.map((b) => b.owner))),
+    [bots],
+  );
+
+  useEffect(() => {
+    if (ownerIDs.length === 0) {
+      setOwnerNames({});
+      return;
+    }
+    const batchSize = 10;
+    const batches: string[][] = [];
+    for (let i = 0; i < ownerIDs.length; i += batchSize) {
+      batches.push(ownerIDs.slice(i, i + batchSize));
+    }
+    let cancelled = false;
+    Promise.all(
+      batches.map((batch) =>
+        getDocs(query(collection(db, "users"), where("__name__", "in", batch))),
+      ),
+    ).then((snapshots) => {
+      if (cancelled) return;
+      const names: Record<string, string> = {};
+      snapshots.forEach((snap) => {
+        snap.forEach((d) => {
+          const data = d.data();
+          names[d.id] = data.name || d.id;
+        });
+      });
+      setOwnerNames(names);
+    }).catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [ownerIDs.join(",")]);
 
   const gameDocRef = doc(db, "sessions", sessionName, "setups", gameID);
   const sessionDocRef = doc(db, "sessions", sessionName);
@@ -959,49 +1002,119 @@ const GameSetup: React.FC = () => {
           <Box
             sx={{
               border: "2px solid black",
-              padding: 2,
               borderRadius: "0px",
               minHeight: "56px",
-              display: "flex",
-              flexDirection: "column",
+              maxHeight: "300px",
+              overflowY: "auto",
             }}
           >
-            <Box sx={{ display: "flex", flexWrap: "wrap", gap: 2 }}>
-              {bots.map((bot) => {
-                const botStatus = getBotStatus(bot.id);
-                const isDead = botStatus === "dead";
-                const isInGame = gameSetup.gamePlayers.some(
-                  (p) => p.id === bot.id
-                );
-                const isDisabled = isDead || isInGame;
+            {(() => {
+              const grouped: Record<string, typeof bots> = {};
+              bots.forEach((bot) => {
+                if (!grouped[bot.owner]) grouped[bot.owner] = [];
+                grouped[bot.owner].push(bot);
+              });
+              Object.values(grouped).forEach((group) =>
+                group.sort((a, b) => a.name.localeCompare(b.name)),
+              );
+              const ownerOrder = Object.keys(grouped).sort((a, b) => {
+                if (a === userID) return -1;
+                if (b === userID) return 1;
+                const nameA = ownerNames[a] || a;
+                const nameB = ownerNames[b] || b;
+                return nameA.localeCompare(nameB);
+              });
 
-                return (
-                  <Button
-                    key={bot.name}
-                    disabled={isDisabled}
+              return ownerOrder.map((ownerID) => (
+                <Box key={ownerID}>
+                  <Box
                     sx={{
-                      backgroundColor: isDisabled ? "#ccc" : bot.colour,
-                      opacity: isDisabled ? 0.6 : 1,
+                      display: "flex",
+                      alignItems: "center",
+                      px: 2,
+                      py: 0.5,
+                      backgroundColor: "#f0f0f0",
+                      borderBottom: "1px solid #ddd",
                     }}
-                    onClick={() => handleAddBot(bot.id)}
-                    title={
-                      isDead
-                        ? "Bot is dead and cannot be added to game"
-                        : isInGame
-                          ? "Bot is already in the game"
-                          : ""
-                    }
                   >
-                    {bot.emoji}{" "}
-                    {bot.name.length > 10
-                      ? `${bot.name.slice(0, 10)}…`
-                      : bot.name}
-                    {isDead && " (DEAD)"}
-                    {isInGame && !isDead && " (IN GAME)"}
-                  </Button>
-                );
-              })}
-            </Box>
+                    <Link
+                      to={`/ladder/${ownerID}/${gameType}`}
+                      style={{
+                        fontSize: "0.8rem",
+                        fontWeight: 600,
+                        color: "#555",
+                        textDecoration: "none",
+                        cursor: "pointer",
+                      }}
+                      onMouseEnter={(e: React.MouseEvent<HTMLAnchorElement>) => {
+                        e.currentTarget.style.textDecoration = "underline";
+                      }}
+                      onMouseLeave={(e: React.MouseEvent<HTMLAnchorElement>) => {
+                        e.currentTarget.style.textDecoration = "none";
+                      }}
+                    >
+                      {ownerID === userID
+                        ? `${ownerNames[ownerID] || "You"} (You)`
+                        : ownerNames[ownerID] || ownerID}
+                    </Link>
+                  </Box>
+                  {grouped[ownerID].map((bot) => {
+                    const botStatus = getBotStatus(bot.id);
+                    const isDead = botStatus === "dead";
+                    const isInGame = gameSetup.gamePlayers.some(
+                      (p) => p.id === bot.id,
+                    );
+                    const isDisabled = isDead || isInGame;
+
+                    return (
+                      <Box
+                        key={bot.id}
+                        title={
+                          isDead
+                            ? "Bot is dead and cannot be added to game"
+                            : isInGame
+                              ? "Bot is already in the game"
+                              : bot.name
+                        }
+                        onClick={() => {
+                          if (!isDisabled) handleAddBot(bot.id);
+                        }}
+                        sx={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 1,
+                          px: 2,
+                          py: 1,
+                          borderLeft: `4px solid ${isDisabled ? "#ccc" : bot.colour}`,
+                          borderBottom: "1px solid #eee",
+                          cursor: isDisabled ? "default" : "pointer",
+                          opacity: isDisabled ? 0.5 : 1,
+                          backgroundColor: isDisabled ? "#f5f5f5" : "transparent",
+                          "&:hover": isDisabled
+                            ? {}
+                            : { backgroundColor: `${bot.colour}22` },
+                        }}
+                      >
+                        <Typography sx={{ fontSize: "1.2rem", flexShrink: 0 }}>
+                          {bot.emoji}
+                        </Typography>
+                        <Typography
+                          sx={{
+                            fontWeight: 500,
+                            flexGrow: 1,
+                            wordBreak: "break-word",
+                          }}
+                        >
+                          {bot.name}
+                          {isDead && " (DEAD)"}
+                          {isInGame && !isDead && " (IN GAME)"}
+                        </Typography>
+                      </Box>
+                    );
+                  })}
+                </Box>
+              ));
+            })()}
           </Box>
         </FormControl>
       )}
