@@ -4,8 +4,10 @@ import {
   GameRanking,
   GameResult,
   GameState,
+  GameSetup,
   Move,
   Ranking,
+  Turn,
   Winner
 } from "@shared/types/Game"
 import * as admin from "firebase-admin"
@@ -48,6 +50,119 @@ export interface ProcessTurnResult {
 
 const DEFAULT_MMR = 1000
 const MIN_MMR = 0 // Minimum MMR value
+const RESIGN_ACTION = "resign"
+
+const getAliveHumanIDs = (setup: GameSetup, turn: Turn): string[] => {
+  return setup.gamePlayers
+    .filter((player) => player.type === "human" && turn.alivePlayers.includes(player.id))
+    .map((player) => player.id)
+}
+
+const getAliveTeamsFromTurn = (turn: Turn, setup: GameSetup): string[] => {
+  const aliveTeams = new Set<string>()
+
+  turn.alivePlayers.forEach((playerID) => {
+    const player = setup.gamePlayers.find((gamePlayer) => gamePlayer.id === playerID)
+    if (player?.teamID) {
+      aliveTeams.add(player.teamID)
+    }
+  })
+
+  return Array.from(aliveTeams)
+}
+
+const removePlayersFromTurn = (
+  turn: Turn,
+  playerIDs: string[],
+  setup: GameSetup
+): void => {
+  if (playerIDs.length === 0) {
+    return
+  }
+
+  const removeSet = new Set(playerIDs)
+  turn.alivePlayers = turn.alivePlayers.filter((playerID) => !removeSet.has(playerID))
+
+  playerIDs.forEach((playerID) => {
+    delete turn.allowedMoves[playerID]
+    delete turn.playerPieces[playerID]
+    delete turn.playerHealth[playerID]
+    delete turn.scores[playerID]
+    delete turn.moves[playerID]
+  })
+
+  if (turn.teamScores) {
+    const updatedTeamScores: { [teamID: string]: number } = {}
+
+    setup.gamePlayers.forEach((player) => {
+      if (!player.teamID) {
+        return
+      }
+      const score = turn.scores[player.id]
+      if (score === undefined) {
+        return
+      }
+      updatedTeamScores[player.teamID] =
+        (updatedTeamScores[player.teamID] || 0) + score
+    })
+
+    turn.teamScores = updatedTeamScores
+  }
+}
+
+const cloneTurnForProcessing = (turn: Turn): Turn => {
+  return {
+    ...turn,
+    alivePlayers: [...turn.alivePlayers],
+    playerHealth: { ...turn.playerHealth },
+    scores: { ...turn.scores },
+    food: [...turn.food],
+    hazards: [...turn.hazards],
+    walls: [...turn.walls],
+    moves: { ...turn.moves },
+    playerPieces: Object.fromEntries(
+      Object.entries(turn.playerPieces).map(([playerID, positions]) => [
+        playerID,
+        [...positions],
+      ])
+    ),
+    allowedMoves: Object.fromEntries(
+      Object.entries(turn.allowedMoves).map(([playerID, moves]) => [
+        playerID,
+        [...moves],
+      ])
+    ),
+    clashes: turn.clashes ? [...turn.clashes] : [],
+    winners: turn.winners ? [...turn.winners] : [],
+    teamScores: turn.teamScores ? { ...turn.teamScores } : undefined,
+    eliminatedTeams: turn.eliminatedTeams ? [...turn.eliminatedTeams] : undefined,
+  }
+}
+
+const buildTeamWinnersFromTurn = (
+  turn: Turn,
+  setup: GameSetup,
+  teamID: string,
+  excludedPlayerIDs: Set<string>
+): Winner[] => {
+  const teamPlayers = setup.gamePlayers.filter(
+    (player) => player.teamID === teamID && !excludedPlayerIDs.has(player.id)
+  )
+  const teamScore =
+    turn.teamScores?.[teamID] ??
+    teamPlayers.reduce(
+      (total, player) => total + (turn.playerPieces[player.id]?.length || 0),
+      0
+    )
+
+  return teamPlayers.map((player) => ({
+    playerID: player.id,
+    score: turn.playerPieces[player.id]?.length || 0,
+    winningSquares: turn.playerPieces[player.id] || [],
+    teamID,
+    teamScore,
+  }))
+}
 
 async function preparePlayerUpdates(
   transaction: Transaction,
@@ -345,19 +460,65 @@ export async function processTurn(
       return { newTurnCreated: false }
     }
 
+    const latestMovesByPlayer = new Map(
+      latestMoves.map((move) => [move.playerID, move])
+    )
+    const isResignMove = (move: Move | undefined): boolean =>
+      Boolean(move && (move.action === RESIGN_ACTION || move.move === -1))
+    const aliveHumanIDs = getAliveHumanIDs(gameState.setup, currentTurn)
+    const resignedHumanIDs = aliveHumanIDs.filter(
+      (playerID) => isResignMove(latestMovesByPlayer.get(playerID))
+    )
+    const allHumansResigned =
+      aliveHumanIDs.length > 0 && resignedHumanIDs.length === aliveHumanIDs.length
+    const resignedHumanSet = new Set(resignedHumanIDs)
+
     const processor = getGameProcessor(gameState)
     if (!processor) {
       logger.error(`No processor available `, { gameID })
       throw `Processor not known: ${gameState.setup.gameType}`
     }
 
-    const nextTurn = await processor.applyMoves(currentTurn, latestMoves)
+    const movesForProcessor = latestMoves.filter(
+      (move) => !isResignMove(move)
+    )
+    const sanitizedTurn = allHumansResigned
+      ? (() => {
+          const clonedTurn = cloneTurnForProcessing(currentTurn)
+          removePlayersFromTurn(clonedTurn, resignedHumanIDs, gameState.setup)
+          return clonedTurn
+        })()
+      : currentTurn
+    const nextTurn = await processor.applyMoves(sanitizedTurn, movesForProcessor)
     const now = Date.now()
     const turnDurationMillis = gameState.setup.maxTurnTime * 1000
     const endTime = new Date(now + turnDurationMillis)
 
     nextTurn.startTime = Timestamp.fromMillis(now)
     nextTurn.endTime = Timestamp.fromDate(endTime)
+
+    if (allHumansResigned && nextTurn.winners.length === 0) {
+      const preResignTeams = getAliveTeamsFromTurn(nextTurn, gameState.setup)
+      removePlayersFromTurn(nextTurn, resignedHumanIDs, gameState.setup)
+      const postResignTeams = getAliveTeamsFromTurn(nextTurn, gameState.setup)
+      const isTeamGame =
+        nextTurn.scoringUnit === "team" ||
+        gameState.setup.gameType === "teamsnek" ||
+        gameState.setup.gameType === "kingsnek"
+
+      if (
+        isTeamGame &&
+        preResignTeams.length === 2 &&
+        postResignTeams.length === 1
+      ) {
+        nextTurn.winners = buildTeamWinnersFromTurn(
+          nextTurn,
+          gameState.setup,
+          postResignTeams[0],
+          resignedHumanSet
+        )
+      }
+    }
 
     if (nextTurn.winners.length > 0) {
       // Prepare all player ranking updates (reads and writes are done in preparePlayerUpdates)

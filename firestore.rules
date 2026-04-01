@@ -75,12 +75,19 @@ service cloud.firestore {
     }
 
     function isValidPrivateMove(move) {
-      return move.keys().hasAll(['gameID', 'moveNumber', 'playerID', 'move', 'timestamp']) &&
-        move.gameID is string &&
+      let hasRequiredFields = move.keys().hasAll(['gameID', 'moveNumber', 'playerID', 'move', 'timestamp']);
+      let baseFieldsValid = move.gameID is string &&
         move.moveNumber is int && move.moveNumber >= 0 &&
         move.playerID is string &&
-        move.move is int && move.move >= 0 &&
+        move.move is int &&
         (move.timestamp is timestamp || move.timestamp == request.time); // Allow server timestamp on create
+
+      let hasAction = 'action' in move.keys();
+      let actionValid = !hasAction || move.action in ['move', 'resign'];
+      let moveValueValid = (move.move >= 0 && (!hasAction || move.action == 'move')) ||
+        (move.move == -1 && move.action == 'resign');
+
+      return hasRequiredFields && baseFieldsValid && actionValid && moveValueValid;
     }
 
     function isValidMoveStatusUpdate(current, next) {
