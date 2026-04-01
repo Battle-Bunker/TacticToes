@@ -99,7 +99,7 @@ externalPort = 8000
 
 
 [deployment]
-build = ["sh", "-c", "cd frontend && npm run build"]
+build = ["sh", "-c", "cd frontend && npm run build && cp dist/index.html dist/404.html"]
 deploymentTarget = "static"
 publicDir = "frontend/dist"
 
