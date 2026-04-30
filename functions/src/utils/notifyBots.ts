@@ -3,11 +3,28 @@ import * as admin from "firebase-admin"
 import { FieldValue } from "firebase-admin/firestore"
 import * as logger from "firebase-functions/logger"
 import { Bot, GameState, Human, Move, Winner } from "../types/Game"
+import {
+  buildEndPayload,
+  buildMovePayload,
+  buildPlayerInfoMap,
+  convertDirectionToMoveIndex,
+} from "./buildBotPayloads"
+import {
+  notifyWebsocketBot,
+  notifyWebsocketBotGameEnd,
+} from "./notifyWebsocketBot"
+
+const isWebsocketBot = (bot: Bot): boolean =>
+  (bot.connectionType ?? "http") === "websocket"
 
 /**
  * Sends move requests to all active bots for a specific turn.
- * This function fetches the current game state and sends Battlesnake API requests
- * to each bot, then records their moves.
+ *
+ * For HTTP bots this preserves the historical Battlesnake-style request to
+ * `${bot.url}/move`. For WebSocket bots (snek-only, see
+ * docs/BOT_WEBSOCKET_API.md) this opens a connection per turn that lets the
+ * bot stage and then commit a move; the connection is held open until the bot
+ * commits or the turn deadline elapses.
  */
 export async function notifyBots(
   sessionID: string,
@@ -25,7 +42,6 @@ export async function notifyBots(
     }
   )
 
-  // Fetch the current game state
   const gameStateRef = admin
     .firestore()
     .collection(`sessions/${sessionID}/games`)
@@ -38,7 +54,6 @@ export async function notifyBots(
     return
   }
 
-  // Validate that the turn number exists in the game
   if (turnNumber >= gameData.turns.length) {
     logger.error(
       `Turn ${turnNumber} does not exist in game ${gameID} (current turns: ${gameData.turns.length})`,
@@ -59,11 +74,9 @@ export async function notifyBots(
     return
   }
 
-  // Fetch all bots from the "bots" collection
   const botsSnapshot = await admin.firestore().collection("bots").get()
   const allBots: Bot[] = botsSnapshot.docs.map((doc) => doc.data() as Bot)
 
-  // Filter to get the bots that are playing in the current game
   const botsToQuery = allBots.filter((bot) =>
     botsInTurn.find((player) => player.id === bot.id)
   )
@@ -79,193 +92,50 @@ export async function notifyBots(
     .filter((gp) => gp.type === "human")
     .map((gp) => gp.id)
 
-  const playerInfoMap = new Map<string, { name: string; emoji: string }>()
-  for (const bot of allBots) {
-    playerInfoMap.set(bot.id, { name: bot.name, emoji: bot.emoji })
-  }
-
+  const humans = new Map<string, Human>()
   if (humanPlayerIds.length > 0) {
     const usersCollection = admin.firestore().collection("users")
-    const humanFetches = humanPlayerIds.map((id) => usersCollection.doc(id).get())
-    const humanDocs = await Promise.all(humanFetches)
+    const humanDocs = await Promise.all(
+      humanPlayerIds.map((id) => usersCollection.doc(id).get())
+    )
     for (const doc of humanDocs) {
       if (doc.exists) {
-        const data = doc.data() as Human
-        playerInfoMap.set(doc.id, { name: data.name, emoji: data.emoji })
+        humans.set(doc.id, doc.data() as Human)
       }
     }
   }
 
-  // Adjusts a position based on the new reduced board and flips the y-axis
-  const adjustPosition = (x: number, y: number): { x: number; y: number } => {
-    return { x: x - 1, y: gameData.setup.boardHeight - y - 2 } // Shift x inward and flip y-axis
-  }
+  const playerInfoMap = buildPlayerInfoMap(allBots, humans)
 
-  // Helper function to determine snake color - team color in team mode, otherwise bot color
-  const getSnakeColor = (playerID: string): string => {
-    if (
-      (gameData.setup.gameType === "teamsnek" ||
-        gameData.setup.gameType === "kingsnek") &&
-      gameData.setup.teams
-    ) {
-      const gamePlayer = gameData.setup.gamePlayers.find(
-        (gp) => gp.id === playerID
-      )
-      if (gamePlayer?.teamID) {
-        const team = gameData.setup.teams.find(
-          (t) => t.id === gamePlayer.teamID
-        )
-        if (team) {
-          return team.color
-        }
-      }
-    }
-    // Fall back to bot color if not in team mode or team not found
-    const botInfo = allBots.find((b) => b.id === playerID)
-    return botInfo?.colour || "#FF0000"
-  }
-
-  // Helper function to check if a player is a King
-  const isKing = (playerID: string): boolean => {
-    if (gameData.setup.gameType !== "kingsnek") return false
-    const gamePlayer = gameData.setup.gamePlayers.find(
-      (gp) => gp.id === playerID
-    )
-    return gamePlayer?.isKing || false
-  }
-
-  // Helper function to get team's King ID
-  const getTeamKingID = (teamID: string): string | undefined => {
-    if (gameData.setup.gameType !== "kingsnek") return undefined
-    const king = gameData.setup.gamePlayers.find(
-      (gp) => gp.teamID === teamID && gp.isKing
-    )
-    return king?.id
-  }
-
-  // Prepare the Battlesnake API request for each bot
   const requests = botsToQuery.map(async (bot) => {
-    // Build the request body based on Battlesnake API format, excluding the perimeter and flipping the y-axis
-    const youBody = turnData.playerPieces[bot.id].map((pos) => {
-      const x = pos % gameData.setup.boardWidth
-      const y = Math.floor(pos / gameData.setup.boardWidth)
-      return adjustPosition(x, y) // Adjust the position inward and flip y-axis
+    const payload = buildMovePayload({
+      gameID,
+      turnNumber,
+      turnExpiryTime,
+      gameData,
+      bot,
+      allBots,
+      playerInfoMap,
     })
 
-    const botColor = getSnakeColor(bot.id)
-    const foodSpawnRate = gameData.setup.foodSpawnRate ?? 0.5
-    const foodSpawnChance = (foodSpawnRate / 5) * 100
-
-    const botRequestBody = {
-      game: {
-        id: gameID,
-        ruleset: {
-          name: gameData.setup.gameType,
-          settings: {
-            foodSpawnChance,
-            foodSpawnRate,
-            invulnerabilityPotionSpawnRate: gameData.setup.invulnerabilityPotionSpawnRate ?? 0.15,
-            minimumFood: 0,
-            hazardDamagePerTurn: 100,
-          },
-        },
-        map: "standard",
-        timeout: gameData.setup.maxTurnTime * 1000,
-        ...(turnExpiryTime !== undefined && { turnExpiryTime }),
-      },
-      turn: turnNumber,
-      board: {
-        height: gameData.setup.boardHeight - 2,
-        width: gameData.setup.boardWidth - 2,
-        food: (turnData.food || []).map((pos) => {
-          const x = pos % gameData.setup.boardWidth
-          const y = Math.floor(pos / gameData.setup.boardWidth)
-          return adjustPosition(x, y)
-        }),
-        hazards: (turnData.hazards || []).map((pos) => {
-          const x = pos % gameData.setup.boardWidth
-          const y = Math.floor(pos / gameData.setup.boardWidth)
-          return adjustPosition(x, y)
-        }),
-        ...(turnData.fertileTiles ? {
-          fertileTiles: turnData.fertileTiles.map((pos) => {
-            const x = pos % gameData.setup.boardWidth
-            const y = Math.floor(pos / gameData.setup.boardWidth)
-            return adjustPosition(x, y)
-          }),
-        } : {}),
-        ...(turnData.invulnerabilityPotions?.length ? {
-          invulnerabilityPotions: turnData.invulnerabilityPotions.map((pos) => {
-            const x = pos % gameData.setup.boardWidth
-            const y = Math.floor(pos / gameData.setup.boardWidth)
-            return adjustPosition(x, y)
-          }),
-        } : {}),
-        snakes: Object.keys(turnData.playerPieces).map((player) => {
-          const body = turnData.playerPieces[player].map((pos) => {
-            const x = pos % gameData.setup.boardWidth
-            const y = Math.floor(pos / gameData.setup.boardWidth)
-            return adjustPosition(x, y)
-          })
-
-          const gamePlayer = gameData.setup.gamePlayers.find(
-            (gp) => gp.id === player
-          )
-          const playerInfo = playerInfoMap.get(player)
-          const snakeData: any = {
-            id: player,
-            name: playerInfo?.name ?? player,
-            emoji: playerInfo?.emoji ?? "",
-            health: turnData.playerHealth[player],
-            body,
-            head: { ...body[0] },
-            length: body.length,
-            latency: "111",
-            shout: "",
-            customizations: {
-              color: getSnakeColor(player),
-              head: "default",
-              tail: "default",
-            },
-            invulnerabilityLevel: turnData.playerInvulnerabilityLevel?.[player] ?? 0,
-          }
-
-          if (
-            (gameData.setup.gameType === "teamsnek" ||
-              gameData.setup.gameType === "kingsnek") &&
-            gamePlayer?.teamID
-          ) {
-            snakeData.teamID = gamePlayer.teamID
-
-            if (gameData.setup.gameType === "kingsnek") {
-              snakeData.isKing = isKing(player)
-              const teamKingID = getTeamKingID(gamePlayer.teamID)
-              if (teamKingID) {
-                snakeData.teamKingID = teamKingID
-              }
-            }
-          }
-
-          return snakeData
-        }),
-      },
-      you: {
-        id: bot.id,
-        name: bot.name,
-        emoji: bot.emoji,
-        health: turnData.playerHealth[bot.id],
-        body: youBody,
-        head: { ...youBody[0] },
-        length: turnData.playerPieces[bot.id].length,
-        latency: "111",
-        shout: "",
-        customizations: {
-          color: botColor,
-          head: "default",
-          tail: "default",
-        },
-        invulnerabilityLevel: turnData.playerInvulnerabilityLevel?.[bot.id] ?? 0,
-      },
+    if (isWebsocketBot(bot)) {
+      try {
+        await notifyWebsocketBot({
+          sessionID,
+          gameID,
+          turnNumber,
+          turnExpiryTime,
+          bot,
+          payload,
+          gameData,
+        })
+      } catch (error) {
+        logger.error(
+          `Error in websocket session for bot ${bot.id}`,
+          error instanceof Error ? error.message : String(error)
+        )
+      }
+      return
     }
 
     try {
@@ -275,16 +145,14 @@ export async function notifyBots(
         ? Math.max(MIN_TIMEOUT, turnExpiryTime - Date.now())
         : DEFAULT_TIMEOUT
 
-      // Make a POST request to the bot's URL
       logger.info(`Sending move request to bot ${bot.id} for turn ${turnNumber} (timeout: ${moveTimeout}ms)`)
-      const response = await axios.post(`${bot.url}/move`, botRequestBody, {
+      const response = await axios.post(`${bot.url}/move`, payload, {
         timeout: moveTimeout,
       })
       logger.info(`Successfully sent move request to bot ${bot.id}`, {
         response: response.data,
       })
 
-      // Convert response to move
       const moveDirection = response.data.move as
         | "up"
         | "down"
@@ -297,7 +165,6 @@ export async function notifyBots(
         gameData.setup.boardHeight
       )
 
-      // Create a new Move object
       const newMove: Move = {
         gameID: gameID,
         moveNumber: turnNumber,
@@ -306,7 +173,6 @@ export async function notifyBots(
         timestamp: FieldValue.serverTimestamp(),
       }
 
-      // Store the move in the Firestore collection
       await admin
         .firestore()
         .collection(`sessions/${sessionID}/games/${gameID}/privateMoves`)
@@ -328,7 +194,6 @@ export async function notifyBots(
     }
   })
 
-  // Execute all the requests
   await Promise.all(requests)
 
   logger.info(`Finished processing bot moves for game ${gameID}, turn ${turnNumber}`)
@@ -371,39 +236,27 @@ export async function notifyBotsGameEnd(
     return
   }
 
-  const foodSpawnRate = gameState.setup.foodSpawnRate ?? 0.5
-  const foodSpawnChance = (foodSpawnRate / 5) * 100
-
   const requests = botsToNotify.map(async (bot) => {
-    const endPayload = {
-      game: {
-        id: gameID,
-        ruleset: {
-          name: gameState.setup.gameType,
-          settings: {
-            foodSpawnChance,
-            foodSpawnRate,
-            invulnerabilityPotionSpawnRate:
-              gameState.setup.invulnerabilityPotionSpawnRate ?? 0.15,
-            minimumFood: 0,
-            hazardDamagePerTurn: 100,
-          },
-        },
-        map: "standard",
-        timeout: gameState.setup.maxTurnTime * 1000,
-      },
-      turn: finalTurnNumber,
-      scores: finalScores,
-      winners: winners.map((w) => ({
-        playerID: w.playerID,
-        score: w.score,
-        ...(w.teamID ? { teamID: w.teamID } : {}),
-        ...(w.teamScore !== undefined ? { teamScore: w.teamScore } : {}),
-      })),
-      you: {
-        id: bot.id,
-        name: bot.id,
-      },
+    const endPayload = buildEndPayload(
+      gameID,
+      finalTurnNumber,
+      gameState,
+      finalScores,
+      winners,
+      bot,
+    )
+
+    if (isWebsocketBot(bot)) {
+      try {
+        await notifyWebsocketBotGameEnd({ bot, payload: endPayload, gameID })
+        logger.info(`[notifyBotsGameEnd] Sent ws game_end to bot ${bot.id}`)
+      } catch (error) {
+        logger.error(
+          `[notifyBotsGameEnd] Error sending ws game_end to bot ${bot.id}`,
+          error
+        )
+      }
+      return
     }
 
     try {
@@ -427,27 +280,4 @@ export async function notifyBotsGameEnd(
   logger.info(
     `[notifyBotsGameEnd] Finished sending /end to all bots for game ${gameID}`
   )
-}
-
-function convertDirectionToMoveIndex(
-  direction: "up" | "down" | "left" | "right",
-  headIndex: number,
-  boardWidth: number,
-  boardHeight: number
-): number {
-  const x = headIndex % boardWidth
-  const y = Math.floor(headIndex / boardWidth)
-
-  switch (direction) {
-    case "up":
-      return y > 0 ? (y - 1) * boardWidth + x : headIndex
-    case "down":
-      return y < boardHeight - 1 ? (y + 1) * boardWidth + x : headIndex
-    case "left":
-      return x > 0 ? y * boardWidth + (x - 1) : headIndex
-    case "right":
-      return x < boardWidth - 1 ? y * boardWidth + (x + 1) : headIndex
-    default:
-      return headIndex
-  }
 }

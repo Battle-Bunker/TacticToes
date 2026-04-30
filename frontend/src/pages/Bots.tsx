@@ -22,6 +22,8 @@ import {
   DialogContent,
   DialogContentText,
   DialogActions,
+  ToggleButton,
+  ToggleButtonGroup,
 } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
 import { Refresh } from "@mui/icons-material";
@@ -30,7 +32,7 @@ import { useUser } from "../context/UserContext";
 import { db } from "../firebaseConfig";
 import { generateColor } from "../utils/colourUtils";
 import { emojiList } from "@shared/types/Emojis";
-import { Bot, GameType } from "@shared/types/Game";
+import { Bot, BotConnectionType, GameType } from "@shared/types/Game";
 import {
   doc,
   setDoc,
@@ -53,6 +55,30 @@ const availableGameTypes: GameType[] = [
   "teamsnek",
   "kingsnek",
 ];
+
+const SNEK_GAME_TYPES: GameType[] = ["snek", "teamsnek", "kingsnek"];
+
+const isSnekOnly = (caps: GameType[]) =>
+  caps.length > 0 && caps.every((c) => SNEK_GAME_TYPES.includes(c));
+
+const validateBotUrl = (url: string, connectionType: BotConnectionType): string | null => {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return "Invalid URL";
+  }
+  if (connectionType === "websocket") {
+    if (parsed.protocol !== "ws:" && parsed.protocol !== "wss:") {
+      return "WebSocket bots must use ws:// or wss:// URLs";
+    }
+  } else {
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return "HTTP bots must use http:// or https:// URLs";
+    }
+  }
+  return null;
+};
 
 const Bots: React.FC = () => {
   const { userID } = useUser();
@@ -106,6 +132,7 @@ const Bots: React.FC = () => {
   const [botName, setBotName] = useState("");
   const [botUrl, setBotUrl] = useState("");
   const [botCaps, setBotCaps] = useState<GameType[]>([]);
+  const [botConnectionType, setBotConnectionType] = useState<BotConnectionType>("http");
   const [isPublic, setIsPublic] = useState(false);
   const [hue, setHue] = useState(Math.random() * 360);
   const [colour, setColour] = useState(generateColor(hue));
@@ -122,6 +149,7 @@ const Bots: React.FC = () => {
   const [editName, setEditName] = useState("");
   const [editUrl, setEditUrl] = useState("");
   const [editCaps, setEditCaps] = useState<GameType[]>([]);
+  const [editConnectionType, setEditConnectionType] = useState<BotConnectionType>("http");
   const [editPublic, setEditPublic] = useState(false);
   const [editHue, setEditHue] = useState(0);
   const [editColour, setEditColour] = useState(generateColor(0));
@@ -153,6 +181,19 @@ const Bots: React.FC = () => {
   useEffect(() => setColour(generateColor(hue)), [hue]);
   useEffect(() => setEditColour(generateColor(editHue)), [editHue]);
 
+  // When switching to websocket, prune non-snek capabilities so the saved
+  // form always satisfies the snek-only constraint.
+  useEffect(() => {
+    if (botConnectionType === "websocket") {
+      setBotCaps((prev) => prev.filter((c) => SNEK_GAME_TYPES.includes(c)));
+    }
+  }, [botConnectionType]);
+  useEffect(() => {
+    if (editConnectionType === "websocket") {
+      setEditCaps((prev) => prev.filter((c) => SNEK_GAME_TYPES.includes(c)));
+    }
+  }, [editConnectionType]);
+
   const handleAdd = async () => {
     if (!userID) {
       setError("Login required");
@@ -165,15 +206,19 @@ const Bots: React.FC = () => {
 
     // normalize URL: strip trailing slashes
     const normalizedUrl = botUrl.trim().replace(/\/+$/, "");
-    try {
-      new URL(normalizedUrl);
-    } catch {
-      setError("Invalid URL");
+    const urlError = validateBotUrl(normalizedUrl, botConnectionType);
+    if (urlError) {
+      setError(urlError);
       return;
     }
 
     if (!botCaps.length) {
       setError("Choose at least one skill");
+      return;
+    }
+
+    if (botConnectionType === "websocket" && !isSnekOnly(botCaps)) {
+      setError("WebSocket bots only support snek-variant games (snek, teamsnek, kingsnek)");
       return;
     }
 
@@ -190,6 +235,7 @@ const Bots: React.FC = () => {
       emoji,
       colour,
       public: isPublic,
+      connectionType: botConnectionType,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       createdAt: serverTimestamp() as any,
     };
@@ -200,6 +246,7 @@ const Bots: React.FC = () => {
       setBotName("");
       setBotUrl("");
       setBotCaps([]);
+      setBotConnectionType("http");
       setIsPublic(false);
       setHue(Math.random() * 360);
       randomizeEmojis();
@@ -213,6 +260,7 @@ const Bots: React.FC = () => {
     setEditName(bot.name);
     setEditUrl(bot.url);
     setEditCaps(bot.capabilities);
+    setEditConnectionType(bot.connectionType ?? "http");
     setEditPublic(bot.public);
     const botHue = getHueFromColour(bot.colour);
     setEditHue(botHue);
@@ -242,15 +290,19 @@ const Bots: React.FC = () => {
     }
 
     const normalizedUrl = editUrl.trim().replace(/\/+$/, "");
-    try {
-      new URL(normalizedUrl);
-    } catch {
-      setEditError("Invalid URL");
+    const urlError = validateBotUrl(normalizedUrl, editConnectionType);
+    if (urlError) {
+      setEditError(urlError);
       return;
     }
 
     if (!editCaps.length) {
       setEditError("Choose at least one skill");
+      return;
+    }
+
+    if (editConnectionType === "websocket" && !isSnekOnly(editCaps)) {
+      setEditError("WebSocket bots only support snek-variant games (snek, teamsnek, kingsnek)");
       return;
     }
 
@@ -265,6 +317,7 @@ const Bots: React.FC = () => {
         emoji: editEmoji,
         colour: editColour,
         public: editPublic,
+        connectionType: editConnectionType,
       });
       setEditDialogOpen(false);
       setEditingBotId(null);
@@ -320,7 +373,9 @@ const Bots: React.FC = () => {
                           <Typography>
                             {b.emoji}{" "}
                             <Box component="span" sx={{ ml: 1 }}>
-                              {b.name} {b.public && "(public 👀)"}
+                              {b.name}{" "}
+                              {(b.connectionType ?? "http") === "websocket" && "🔌"}{" "}
+                              {b.public && "(public 👀)"}
                             </Box>
                           </Typography>
                         </Box>
@@ -377,6 +432,24 @@ const Bots: React.FC = () => {
           placeholder="e.g. 'Cool Bot'"
         />
 
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 2 }}>
+          <Typography variant="body2" sx={{ minWidth: 80 }}>
+            Transport
+          </Typography>
+          <ToggleButtonGroup
+            exclusive
+            size="small"
+            value={botConnectionType}
+            onChange={(_e, value) => {
+              if (value) setBotConnectionType(value as BotConnectionType);
+            }}
+            disabled={busy}
+          >
+            <ToggleButton value="http">HTTP</ToggleButton>
+            <ToggleButton value="websocket">WebSocket (snek only)</ToggleButton>
+          </ToggleButtonGroup>
+        </Box>
+
         <TextField
           label="URL"
           value={botUrl}
@@ -385,7 +458,11 @@ const Bots: React.FC = () => {
           fullWidth
           size="small"
           sx={{ mb: 2 }}
-          placeholder="e.g. https://mybot.com"
+          placeholder={
+            botConnectionType === "websocket"
+              ? "e.g. wss://mybot.example.com/ws"
+              : "e.g. https://mybot.com"
+          }
         />
 
         <Box
@@ -425,25 +502,30 @@ const Bots: React.FC = () => {
         </Box>
 
         <FormGroup row sx={{ gap: 1, mb: 2 }}>
-          {availableGameTypes.map((g) => (
-            <FormControlLabel
-              key={g}
-              control={
-                <Checkbox
-                  checked={botCaps.includes(g)}
-                  onChange={() =>
-                    setBotCaps((prev) =>
-                      prev.includes(g)
-                        ? prev.filter((x) => x !== g)
-                        : [...prev, g],
-                    )
-                  }
-                  size="small"
-                />
-              }
-              label={g}
-            />
-          ))}
+          {availableGameTypes.map((g) => {
+            const disabled =
+              botConnectionType === "websocket" && !SNEK_GAME_TYPES.includes(g);
+            return (
+              <FormControlLabel
+                key={g}
+                control={
+                  <Checkbox
+                    checked={botCaps.includes(g)}
+                    onChange={() =>
+                      setBotCaps((prev) =>
+                        prev.includes(g)
+                          ? prev.filter((x) => x !== g)
+                          : [...prev, g],
+                      )
+                    }
+                    size="small"
+                    disabled={disabled}
+                  />
+                }
+                label={g}
+              />
+            );
+          })}
         </FormGroup>
 
         <FormControlLabel
@@ -533,6 +615,24 @@ const Bots: React.FC = () => {
               sx={{ mb: 2 }}
             />
 
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 2 }}>
+              <Typography variant="body2" sx={{ minWidth: 80 }}>
+                Transport
+              </Typography>
+              <ToggleButtonGroup
+                exclusive
+                size="small"
+                value={editConnectionType}
+                onChange={(_e, value) => {
+                  if (value) setEditConnectionType(value as BotConnectionType);
+                }}
+                disabled={editBusy}
+              >
+                <ToggleButton value="http">HTTP</ToggleButton>
+                <ToggleButton value="websocket">WebSocket (snek only)</ToggleButton>
+              </ToggleButtonGroup>
+            </Box>
+
             <TextField
               label="URL"
               value={editUrl}
@@ -541,6 +641,11 @@ const Bots: React.FC = () => {
               fullWidth
               size="small"
               sx={{ mb: 2 }}
+              placeholder={
+                editConnectionType === "websocket"
+                  ? "e.g. wss://mybot.example.com/ws"
+                  : "e.g. https://mybot.com"
+              }
             />
 
             <Box
@@ -580,25 +685,31 @@ const Bots: React.FC = () => {
             </Box>
 
             <FormGroup row sx={{ gap: 1, mb: 2 }}>
-              {availableGameTypes.map((g) => (
-                <FormControlLabel
-                  key={g}
-                  control={
-                    <Checkbox
-                      checked={editCaps.includes(g)}
-                      onChange={() =>
-                        setEditCaps((prev) =>
-                          prev.includes(g)
-                            ? prev.filter((x) => x !== g)
-                            : [...prev, g],
-                        )
-                      }
-                      size="small"
-                    />
-                  }
-                  label={g}
-                />
-              ))}
+              {availableGameTypes.map((g) => {
+                const disabled =
+                  editConnectionType === "websocket" &&
+                  !SNEK_GAME_TYPES.includes(g);
+                return (
+                  <FormControlLabel
+                    key={g}
+                    control={
+                      <Checkbox
+                        checked={editCaps.includes(g)}
+                        onChange={() =>
+                          setEditCaps((prev) =>
+                            prev.includes(g)
+                              ? prev.filter((x) => x !== g)
+                              : [...prev, g],
+                          )
+                        }
+                        size="small"
+                        disabled={disabled}
+                      />
+                    }
+                    label={g}
+                  />
+                );
+              })}
             </FormGroup>
 
             <FormControlLabel

@@ -47,8 +47,16 @@ export const BotHealthProvider: React.FC<BotHealthProviderProps> = ({
       const maxRetries = 3;
       const retryDelay = 2000; // 2 seconds between retries
 
-      // Validate URL
-      if (!bot.url || !bot.url.startsWith("http")) {
+      // Validate URL — accept HTTP(S) for HTTP bots and WS(S) for WebSocket bots.
+      if (
+        !bot.url ||
+        !(
+          bot.url.startsWith("http://") ||
+          bot.url.startsWith("https://") ||
+          bot.url.startsWith("ws://") ||
+          bot.url.startsWith("wss://")
+        )
+      ) {
         console.error(`Invalid URL for bot ${bot.name}: ${bot.url}`);
         setBotHealthStatus((prev) => ({
           ...prev,
@@ -179,8 +187,16 @@ export const BotHealthProvider: React.FC<BotHealthProviderProps> = ({
   // Wake bot function using Firebase function
   const wakeBot = useCallback(
     async (bot: Bot): Promise<void> => {
-      // Validate URL
-      if (!bot.url || !bot.url.startsWith("http")) {
+      // Validate URL — accept HTTP(S) for HTTP bots and WS(S) for WebSocket bots.
+      if (
+        !bot.url ||
+        !(
+          bot.url.startsWith("http://") ||
+          bot.url.startsWith("https://") ||
+          bot.url.startsWith("ws://") ||
+          bot.url.startsWith("wss://")
+        )
+      ) {
         console.error(`Invalid URL for bot ${bot.name}: ${bot.url}`);
         setBotHealthStatus((prev) => ({
           ...prev,

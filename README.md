@@ -6,6 +6,23 @@ It is configured to support both:
 - A **default shared project** (`tactic-toes`)
 - Your **own Firebase/GCP project** (BYO project, e.g., `tactic-toes-tuke`)
 
+## Bot interfaces
+
+Tactic Toes supports two transports for user-supplied bots, configured per
+bot via the `connectionType` field on the `bots/{botId}` Firestore document:
+
+- `"http"` (default; assumed when missing) — server `POST`s `/move` and
+  `/end` to the configured URL. Works for every game type.
+- `"websocket"` — server opens a WebSocket connection to the configured
+  URL each turn. The bot may **stage** moves (replaceable) and finally
+  **commit** one (closes its submission). Once every player commits, the
+  turn ends early. WebSocket bots are restricted to snek-variant games
+  (`snek`, `teamsnek`, `kingsnek`).
+
+  See [`docs/BOT_WEBSOCKET_API.md`](docs/BOT_WEBSOCKET_API.md) for the full
+  protocol, and [`scripts/sample-websocket-bot.js`](scripts/sample-websocket-bot.js)
+  for a runnable reference implementation.
+
 > TL;DR: Put your frontend env in `frontend/.env`, your server env in `functions/.env`, add your Firebase project alias via `firebase use --add`, then run the `gcloud` commands below once per project.
 
 ---

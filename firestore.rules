@@ -104,16 +104,31 @@ service cloud.firestore {
         addedIds[0] == request.auth.uid;
     }
 
+    // Snek-variant capabilities — the only ones supported by the WebSocket bot interface.
+    function isSnekOnlyCapabilities(caps) {
+      return caps.hasOnly(['snek', 'teamsnek', 'kingsnek']);
+    }
+
     function isValidBotData(botData, botId) {
+      let connectionType = ('connectionType' in botData.keys()) ? botData.connectionType : 'http';
+      let isHttp = connectionType == 'http';
+      let isWebsocket = connectionType == 'websocket';
+      let urlOk = botData.url is string && botData.url.size() > 5 && botData.url.size() < 500 && (
+        (isHttp && (botData.url.matches('^https?://.*'))) ||
+        (isWebsocket && (botData.url.matches('^wss?://.*')))
+      );
       return botData.keys().hasAll(['id', 'owner', 'name', 'url', 'capabilities', 'emoji', 'colour', 'createdAt']) &&
         botData.id == botId &&
         botData.owner is string &&
         botData.name is string && botData.name.size() > 0 && botData.name.size() < 100 &&
-        botData.url is string && botData.url.size() > 10 && botData.url.size() < 500 &&
+        urlOk &&
         botData.capabilities is list && botData.capabilities.size() > 0 && botData.capabilities.size() < 10 &&
+        // websocket bots may only declare snek-variant capabilities.
+        (!isWebsocket || isSnekOnlyCapabilities(botData.capabilities)) &&
         botData.emoji is string && botData.emoji.size() > 0 && botData.emoji.size() < 10 &&
         botData.colour is string && botData.colour.matches('hsl\\([0-9]+(\\.[0-9]+)?,\\s*[0-9]+(\\.[0-9]+)?%,\\s*[0-9]+(\\.[0-9]+)?%\\)') &&
-        (!botData.keys().hasAny(['public']) || botData.public is bool);
+        (!botData.keys().hasAny(['public']) || botData.public is bool) &&
+        (isHttp || isWebsocket);
     }
 
     function isValidBotUpdate(botData, botId, currentData) {
