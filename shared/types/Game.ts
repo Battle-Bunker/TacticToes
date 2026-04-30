@@ -115,11 +115,22 @@
     email?: string
   }
 
+  export type BotConnectionType = "http" | "websocket"
+
   export interface Bot extends Player {
     owner: string
     url: string
     capabilities: GameType[]
     public: boolean
+    /**
+     * How the server should reach this bot.
+     * - "http" (default, also assumed when missing): server makes
+     *   `POST {url}/move` and `POST {url}/end` HTTP requests.
+     * - "websocket": server opens a WebSocket connection per turn.
+     *   Only allowed for snek variant capabilities; see
+     *   docs/BOT_WEBSOCKET_API.md.
+     */
+    connectionType?: BotConnectionType
   }
 
   export interface Turn {
