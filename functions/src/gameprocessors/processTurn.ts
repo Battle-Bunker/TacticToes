@@ -70,9 +70,15 @@ async function preparePlayerUpdates(
 ): Promise<PlayerUpdateData[]> {
   const gameType = gameState.setup.gameType // Get the game type
 
-  const playerIDs = gameState.setup.gamePlayers.map((p) => p.id)
+  // Clones (gamePlayers with `botRef` set) share the underlying bot's
+  // identity and ranking doc — they exist purely as extra in-game snakes.
+  // Excluding them from MMR computation keeps a single bot from collecting
+  // multiple placement updates per game when it's fielded as N instances.
+  const mmrEligiblePlayers = gameState.setup.gamePlayers.filter((p) => !p.botRef)
+
+  const playerIDs = mmrEligiblePlayers.map((p) => p.id)
   const playerTypes = new Map<string, "human" | "bot">()
-  gameState.setup.gamePlayers.forEach((p) => {
+  mmrEligiblePlayers.forEach((p) => {
     playerTypes.set(p.id, p.type)
   })
 
@@ -105,7 +111,8 @@ async function preparePlayerUpdates(
   })
 
   // Map of playerID to placement, handling draws
-  // First, create an array of player results
+  // First, create an array of player results. Clones are absent from
+  // playerData, so they neither receive nor contribute to MMR updates.
   const playerResults = playerData.map((player) => {
     const winner = winners.find((w) => w.playerID === player.id)
     const score = winner ? winner.score : 0

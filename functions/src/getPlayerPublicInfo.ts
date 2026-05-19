@@ -46,11 +46,16 @@ export const getPlayerPublicInfo = functions.https.onRequest(
       return
     }
 
+    // Team Snek bot clones use ids of the form `botID#suffix`. Strip the
+    // suffix when looking up the canonical bot record so cross-game lookups
+    // for clone ids resolve to the underlying bot's name/emoji.
+    const lookupID = playerID.includes("#") ? playerID.split("#")[0] : playerID
+
     const firestore = admin.firestore()
 
     const [userSnap, botSnap] = await Promise.all([
-      firestore.collection("users").doc(playerID).get(),
-      firestore.collection("bots").doc(playerID).get(),
+      firestore.collection("users").doc(lookupID).get(),
+      firestore.collection("bots").doc(lookupID).get(),
     ])
 
     if (userSnap.exists) {

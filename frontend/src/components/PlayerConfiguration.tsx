@@ -134,11 +134,14 @@ export const PlayerConfiguration: React.FC<PlayerConfigurationProps> = ({
                     (p) => p.id === gamePlayer.id
                   );
                   if (!player) return null;
+                  const displayName = gamePlayer.displayName ?? player.name;
+                  const displayEmoji = gamePlayer.displayEmoji ?? player.emoji;
+                  const botHealthLookupID = gamePlayer.botRef ?? player.id;
                   return (
                     <TableRow key={player.id}>
                       <TableCell sx={{ backgroundColor: player.colour }}>
-                        {player.name} {player.emoji}
-                        {gamePlayer.type === 'bot' && getBotStatus?.(player.id) === 'dead' && ' (DEAD)'}
+                        {displayName} {displayEmoji}
+                        {gamePlayer.type === 'bot' && getBotStatus?.(botHealthLookupID) === 'dead' && ' (DEAD)'}
                       </TableCell>
                       <TableCell sx={{ backgroundColor: player.colour }}>
                         <FormControl size="small" fullWidth>
@@ -147,7 +150,7 @@ export const PlayerConfiguration: React.FC<PlayerConfigurationProps> = ({
                             onChange={(e) =>
                               onTeamChange(player.id, e.target.value)
                             }
-                            disabled={(gamePlayer.type === 'bot' && getBotStatus?.(player.id) === 'dead') || !canChangeTeam(gamePlayer)}
+                            disabled={(gamePlayer.type === 'bot' && getBotStatus?.(botHealthLookupID) === 'dead') || !canChangeTeam(gamePlayer)}
                             sx={{ minWidth: 120 }}
                           >
                             {teams.map((team) => (
@@ -242,11 +245,14 @@ export const PlayerConfiguration: React.FC<PlayerConfigurationProps> = ({
                     (p) => p.id === gamePlayer.id
                   );
                   if (!player) return null;
+                  const displayName = gamePlayer.displayName ?? player.name;
+                  const displayEmoji = gamePlayer.displayEmoji ?? player.emoji;
+                  const botHealthLookupID = gamePlayer.botRef ?? player.id;
                   return (
                     <TableRow key={player.id}>
                       <TableCell sx={{ backgroundColor: player.colour }}>
-                        {player.name} {player.emoji}
-                        {gamePlayer.type === 'bot' && getBotStatus?.(player.id) === 'dead' && ' (DEAD)'}
+                        {displayName} {displayEmoji}
+                        {gamePlayer.type === 'bot' && getBotStatus?.(botHealthLookupID) === 'dead' && ' (DEAD)'}
                       </TableCell>
                       <TableCell sx={{ backgroundColor: player.colour }}>
                         <FormControl size="small" fullWidth>
@@ -255,7 +261,7 @@ export const PlayerConfiguration: React.FC<PlayerConfigurationProps> = ({
                             onChange={(e) =>
                               onTeamChange(player.id, e.target.value)
                             }
-                            disabled={(gamePlayer.type === 'bot' && getBotStatus?.(player.id) === 'dead') || !canChangeTeam(gamePlayer)}
+                            disabled={(gamePlayer.type === 'bot' && getBotStatus?.(botHealthLookupID) === 'dead') || !canChangeTeam(gamePlayer)}
                             sx={{ minWidth: 120 }}
                           >
                             <MenuItem value="">

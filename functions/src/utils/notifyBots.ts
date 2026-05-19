@@ -62,13 +62,25 @@ export async function notifyBots(
   // Fetch all bots from the "bots" collection
   const botsSnapshot = await admin.firestore().collection("bots").get()
   const allBots: Bot[] = botsSnapshot.docs.map((doc) => doc.data() as Bot)
+  const botByID = new Map<string, Bot>()
+  for (const bot of allBots) {
+    botByID.set(bot.id, bot)
+  }
 
-  // Filter to get the bots that are playing in the current game
-  const botsToQuery = allBots.filter((bot) =>
-    botsInTurn.find((player) => player.id === bot.id)
-  )
+  // Resolve each bot GamePlayer to its underlying bot record. Each entry
+  // (clone or original) gets its own /move request — they share an
+  // endpoint URL but have a distinct in-game id, name, and emoji.
+  type BotEntry = { gamePlayer: typeof botsInTurn[number]; bot: Bot }
+  const botEntries: BotEntry[] = botsInTurn
+    .map((gamePlayer) => {
+      const underlyingID = gamePlayer.botRef ?? gamePlayer.id
+      const bot = botByID.get(underlyingID)
+      if (!bot) return null
+      return { gamePlayer, bot }
+    })
+    .filter((e): e is BotEntry => e !== null)
 
-  if (botsToQuery.length === 0) {
+  if (botEntries.length === 0) {
     logger.info(
       `No bots found in the bots collection that match the game players for turn ${turnNumber}`
     )
@@ -79,9 +91,17 @@ export async function notifyBots(
     .filter((gp) => gp.type === "human")
     .map((gp) => gp.id)
 
+  // Build playerInfoMap from gamePlayers first (so clone displayName /
+  // displayEmoji overrides win), falling back to the underlying bot record
+  // for the original instance, then layer human users on top.
   const playerInfoMap = new Map<string, { name: string; emoji: string }>()
-  for (const bot of allBots) {
-    playerInfoMap.set(bot.id, { name: bot.name, emoji: bot.emoji })
+  for (const gp of gameData.setup.gamePlayers) {
+    if (gp.type !== "bot") continue
+    const underlyingID = gp.botRef ?? gp.id
+    const bot = botByID.get(underlyingID)
+    const name = gp.displayName ?? bot?.name ?? gp.id
+    const emoji = gp.displayEmoji ?? bot?.emoji ?? ""
+    playerInfoMap.set(gp.id, { name, emoji })
   }
 
   if (humanPlayerIds.length > 0) {
@@ -120,8 +140,11 @@ export async function notifyBots(
         }
       }
     }
-    // Fall back to bot color if not in team mode or team not found
-    const botInfo = allBots.find((b) => b.id === playerID)
+    // Fall back to bot color if not in team mode or team not found.
+    // Resolve clones via botRef so they inherit the underlying bot's colour.
+    const gp = gameData.setup.gamePlayers.find((p) => p.id === playerID)
+    const underlyingID = gp?.botRef ?? playerID
+    const botInfo = botByID.get(underlyingID)
     return botInfo?.colour || "#FF0000"
   }
 
@@ -143,16 +166,21 @@ export async function notifyBots(
     return king?.id
   }
 
-  // Prepare the Battlesnake API request for each bot
-  const requests = botsToQuery.map(async (bot) => {
+  // Prepare the Battlesnake API request for each bot GamePlayer entry.
+  // For Team Snek clones, multiple entries share `bot` (same URL) but each
+  // has a distinct in-game id, so each gets its own /move request and its
+  // own recorded move under its in-game id.
+  const requests = botEntries.map(async ({ gamePlayer, bot }) => {
+    const playerID = gamePlayer.id
     // Build the request body based on Battlesnake API format, excluding the perimeter and flipping the y-axis
-    const youBody = turnData.playerPieces[bot.id].map((pos) => {
+    const youBody = turnData.playerPieces[playerID].map((pos) => {
       const x = pos % gameData.setup.boardWidth
       const y = Math.floor(pos / gameData.setup.boardWidth)
       return adjustPosition(x, y) // Adjust the position inward and flip y-axis
     })
 
-    const botColor = getSnakeColor(bot.id)
+    const botColor = getSnakeColor(playerID)
+    const youInfo = playerInfoMap.get(playerID)
     const foodSpawnRate = gameData.setup.foodSpawnRate ?? 0.5
     const foodSpawnChance = (foodSpawnRate / 5) * 100
 
@@ -250,13 +278,13 @@ export async function notifyBots(
         }),
       },
       you: {
-        id: bot.id,
-        name: bot.name,
-        emoji: bot.emoji,
-        health: turnData.playerHealth[bot.id],
+        id: playerID,
+        name: youInfo?.name ?? bot.name,
+        emoji: youInfo?.emoji ?? bot.emoji,
+        health: turnData.playerHealth[playerID],
         body: youBody,
         head: { ...youBody[0] },
-        length: turnData.playerPieces[bot.id].length,
+        length: turnData.playerPieces[playerID].length,
         latency: "111",
         shout: "",
         customizations: {
@@ -264,7 +292,7 @@ export async function notifyBots(
           head: "default",
           tail: "default",
         },
-        invulnerabilityLevel: turnData.playerInvulnerabilityLevel?.[bot.id] ?? 0,
+        invulnerabilityLevel: turnData.playerInvulnerabilityLevel?.[playerID] ?? 0,
       },
     }
 
@@ -276,11 +304,11 @@ export async function notifyBots(
         : DEFAULT_TIMEOUT
 
       // Make a POST request to the bot's URL
-      logger.info(`Sending move request to bot ${bot.id} for turn ${turnNumber} (timeout: ${moveTimeout}ms)`)
+      logger.info(`Sending move request to bot ${playerID} (endpoint ${bot.id}) for turn ${turnNumber} (timeout: ${moveTimeout}ms)`)
       const response = await axios.post(`${bot.url}/move`, botRequestBody, {
         timeout: moveTimeout,
       })
-      logger.info(`Successfully sent move request to bot ${bot.id}`, {
+      logger.info(`Successfully sent move request to bot ${playerID}`, {
         response: response.data,
       })
 
@@ -292,7 +320,7 @@ export async function notifyBots(
         | "right"
       const moveIndex = convertDirectionToMoveIndex(
         moveDirection,
-        turnData.playerPieces[bot.id][0],
+        turnData.playerPieces[playerID][0],
         gameData.setup.boardWidth,
         gameData.setup.boardHeight
       )
@@ -301,7 +329,7 @@ export async function notifyBots(
       const newMove: Move = {
         gameID: gameID,
         moveNumber: turnNumber,
-        playerID: bot.id,
+        playerID: playerID,
         move: moveIndex,
         timestamp: FieldValue.serverTimestamp(),
       }
@@ -317,14 +345,14 @@ export async function notifyBots(
         .firestore()
         .doc(path)
         .update({
-          movedPlayerIDs: FieldValue.arrayUnion(bot.id),
+          movedPlayerIDs: FieldValue.arrayUnion(playerID),
         })
 
-      logger.info(`Successfully recorded move for bot ${bot.id}`, {
+      logger.info(`Successfully recorded move for bot ${playerID}`, {
         newMove,
       })
     } catch (error) {
-      logger.error(`Error sending move request to bot ${bot.id}`, error)
+      logger.error(`Error sending move request to bot ${playerID}`, error)
     }
   })
 
@@ -360,9 +388,12 @@ export async function notifyBotsGameEnd(
   const botsSnapshot = await admin.firestore().collection("bots").get()
   const allBots: Bot[] = botsSnapshot.docs.map((doc) => doc.data() as Bot)
 
-  const botsToNotify = allBots.filter((bot) =>
-    botPlayers.find((player) => player.id === bot.id)
+  // Dedupe by underlying bot id so each clone group sends exactly one /end
+  // request to the shared endpoint, matching pre-clones behaviour.
+  const underlyingIDsInGame = new Set(
+    botPlayers.map((p) => p.botRef ?? p.id)
   )
+  const botsToNotify = allBots.filter((bot) => underlyingIDsInGame.has(bot.id))
 
   if (botsToNotify.length === 0) {
     logger.info(
@@ -371,10 +402,18 @@ export async function notifyBotsGameEnd(
     return
   }
 
+  // Dedupe by URL too, in case multiple bot docs share an endpoint.
+  const seenUrls = new Set<string>()
+  const uniqueBotsToNotify = botsToNotify.filter((bot) => {
+    if (seenUrls.has(bot.url)) return false
+    seenUrls.add(bot.url)
+    return true
+  })
+
   const foodSpawnRate = gameState.setup.foodSpawnRate ?? 0.5
   const foodSpawnChance = (foodSpawnRate / 5) * 100
 
-  const requests = botsToNotify.map(async (bot) => {
+  const requests = uniqueBotsToNotify.map(async (bot) => {
     const endPayload = {
       game: {
         id: gameID,

@@ -5,7 +5,12 @@ import { useBotHealth, BotStatus } from "../context/BotHealthContext";
 
 interface BotHealthCheckProps {
   bots: Bot[];
-  gamePlayers: Array<{ id: string; type: "bot" | "human"; teamID?: string }>;
+  gamePlayers: Array<{
+    id: string;
+    type: "bot" | "human";
+    teamID?: string;
+    botRef?: string;
+  }>;
   autoCheck?: boolean; // Whether to automatically check bots when they're added
   showTitle?: boolean; // Whether to show the "Bot Health Check" title
   compact?: boolean; // Whether to show in compact mode
@@ -22,12 +27,16 @@ export const BotHealthCheck: React.FC<BotHealthCheckProps> = ({
     useBotHealth();
   const checkedBotsRef = useRef<Set<string>>(new Set());
 
-  // Automatically check bot health when bots are added to the game
+  // Automatically check bot health when bots are added to the game.
+  // Match by the *underlying* bot id (`gp.botRef ?? gp.id`) so a bot with N
+  // clones is health-checked exactly once, not N times.
   useEffect(() => {
     if (!autoCheck) return;
 
     const botsInGame = bots.filter((bot) =>
-      gamePlayers.some((gp) => gp.id === bot.id && gp.type === "bot"),
+      gamePlayers.some(
+        (gp) => gp.type === "bot" && (gp.botRef ?? gp.id) === bot.id,
+      ),
     );
 
     if (botsInGame.length > 0) {
@@ -82,7 +91,9 @@ export const BotHealthCheck: React.FC<BotHealthCheckProps> = ({
   };
 
   const botsInGame = bots.filter((bot) =>
-    gamePlayers.some((gp) => gp.id === bot.id && gp.type === "bot"),
+    gamePlayers.some(
+      (gp) => gp.type === "bot" && (gp.botRef ?? gp.id) === bot.id,
+    ),
   );
 
   if (botsInGame.length === 0) {

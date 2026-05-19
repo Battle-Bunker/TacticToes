@@ -357,12 +357,16 @@ export const GameStateProvider: React.FC<{
       return
     }
 
+    // Subscribe based on the *underlying* bot doc id. Clones share an
+    // endpoint, so a clone id like `botID#abc123` is not a real Firestore
+    // doc and querying it would 404.
     const botPlayerIDs = gameSetup.gamePlayers
       .filter((gp) => gp.type === "bot")
-      .map((gp) => gp.id)
+      .map((gp) => gp.botRef ?? gp.id)
 
+    const uniqueBotPlayerIDs = Array.from(new Set(botPlayerIDs))
     const existingBotIDs = new Set(bots.map((b) => b.id))
-    const neededIDs = new Set(botPlayerIDs.filter((id) => !existingBotIDs.has(id)))
+    const neededIDs = new Set(uniqueBotPlayerIDs.filter((id) => !existingBotIDs.has(id)))
 
     // Unsubscribe from bots no longer needed
     for (const id of Object.keys(unsubs)) {
@@ -692,13 +696,40 @@ export const GameStateProvider: React.FC<{
     gameType,
     setGameType,
     players: (() => {
-      const seen = new Set<string>()
       const result: Player[] = []
-      for (const p of [...humans, ...bots, ...gameParticipantBots]) {
-        if (!seen.has(p.id)) {
-          seen.add(p.id)
-          result.push(p)
+      const seen = new Set<string>()
+      for (const h of humans) {
+        if (!seen.has(h.id)) {
+          seen.add(h.id)
+          result.push(h)
         }
+      }
+
+      // Build a quick lookup of every bot record we know about, keyed by
+      // underlying bot id. This covers both the public/owner-bot listing
+      // (`bots`) and any privately subscribed clones' underlying records
+      // (`gameParticipantBots`).
+      const botByID = new Map<string, Bot>()
+      for (const b of [...bots, ...gameParticipantBots]) {
+        if (!botByID.has(b.id)) botByID.set(b.id, b)
+      }
+
+      // Emit one synthesised Player per bot GamePlayer entry. Clones share
+      // an underlying bot record but get their own per-game name/emoji.
+      for (const gp of gameSetup?.gamePlayers ?? []) {
+        if (gp.type !== "bot") continue
+        if (seen.has(gp.id)) continue
+        const underlyingID = gp.botRef ?? gp.id
+        const bot = botByID.get(underlyingID)
+        if (!bot) continue
+        seen.add(gp.id)
+        result.push({
+          id: gp.id,
+          name: gp.displayName ?? bot.name,
+          emoji: gp.displayEmoji ?? bot.emoji,
+          colour: bot.colour,
+          createdAt: bot.createdAt,
+        })
       }
       return result
     })(),

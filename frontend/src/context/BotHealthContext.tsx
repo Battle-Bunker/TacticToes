@@ -20,7 +20,7 @@ interface BotHealthContextType {
   checkBotHealth: (bot: Bot) => Promise<void>;
   checkAllBotsHealth: (
     bots: Bot[],
-    gamePlayers: Array<{ id: string; type: "bot" | "human" }>,
+    gamePlayers: Array<{ id: string; type: "bot" | "human"; botRef?: string }>,
   ) => Promise<void>;
   wakeBot: (bot: Bot) => Promise<void>;
   isCheckingBots: boolean;
@@ -153,15 +153,22 @@ export const BotHealthProvider: React.FC<BotHealthProviderProps> = ({
     [botHealthStatus],
   );
 
-  // Check all bots health
+  // Check all bots health.
+  //
+  // Dedupe by underlying bot id (`gp.botRef ?? gp.id`) so that a bot fielded
+  // as N clones in a Team Snek game still only triggers a single health
+  // ping per game, matching the single-instance behaviour exactly.
   const checkAllBotsHealth = useCallback(
     async (
       bots: Bot[],
-      gamePlayers: Array<{ id: string; type: "bot" | "human" }>,
+      gamePlayers: Array<{ id: string; type: "bot" | "human"; botRef?: string }>,
     ): Promise<void> => {
-      const botsInGame = bots.filter((bot) =>
-        gamePlayers.some((gp) => gp.id === bot.id && gp.type === "bot"),
+      const underlyingIDs = new Set(
+        gamePlayers
+          .filter((gp) => gp.type === "bot")
+          .map((gp) => gp.botRef ?? gp.id),
       );
+      const botsInGame = bots.filter((bot) => underlyingIDs.has(bot.id));
 
       if (botsInGame.length === 0) return;
 

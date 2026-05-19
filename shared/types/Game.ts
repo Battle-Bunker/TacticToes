@@ -101,6 +101,21 @@
     type: "bot" | "human"
     teamID?: string
     isKing?: boolean
+    /**
+     * For bot clones: the underlying `bots/<id>` document this clone points to.
+     * Unset for the original (first) instance of a bot, where `id === botID`.
+     */
+    botRef?: string
+    /**
+     * For bot clones: the per-game display name shown in the UI and
+     * forwarded to the bot in `you.name` / `snakes[*].name`.
+     */
+    displayName?: string
+    /**
+     * For bot clones: the per-game display emoji shown in the UI and
+     * forwarded to the bot in `you.emoji` / `snakes[*].emoji`.
+     */
+    displayEmoji?: string
   }
 
   export interface Player {

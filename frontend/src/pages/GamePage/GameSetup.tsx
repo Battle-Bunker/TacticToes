@@ -61,6 +61,33 @@ const BOARD_SIZE_MAPPING = {
 
 type BoardSize = keyof typeof BOARD_SIZE_MAPPING;
 
+// Curated set of visually-distinct, easy-to-name emojis used to give bot
+// clones a recognisable per-game identity. Drawn at clone-creation time and
+// stored on the GamePlayer entry so the choice is stable for the game.
+const CLONE_EMOJI_POOL = [
+  "🐶", "🐱", "🦊", "🐻", "🐯", "🐸", "🐙", "🐢", "🦄", "🐝",
+  "🦋", "🐳", "🦖", "🐧", "🐔", "🦒", "🦘", "🐮", "🐷", "🐵",
+  "🐰", "🦔", "🐌", "🐞", "🦀", "🐍", "🌵", "🍕", "🌈", "⚡",
+];
+
+function pickCloneEmoji(usedEmojis: Set<string>): string {
+  const available = CLONE_EMOJI_POOL.filter((e) => !usedEmojis.has(e));
+  const pool = available.length > 0 ? available : CLONE_EMOJI_POOL;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+// Short, URL-safe suffix used to disambiguate clone GamePlayer ids from the
+// underlying bot id. Clone ids take the form `${botID}#${suffix}`, where the
+// suffix keeps logs/IDs short while remaining collision-resistant.
+function generateCloneSuffix(): string {
+  const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
+  let s = "";
+  for (let i = 0; i < 6; i++) {
+    s += alphabet[Math.floor(Math.random() * alphabet.length)];
+  }
+  return s;
+}
+
 const GameSetup: React.FC = () => {
   const { userID, colour } = useUser();
   const {
@@ -337,7 +364,7 @@ const GameSetup: React.FC = () => {
     });
   };
 
-  const handleAddBot = async (botID: string) => {
+  const handleIncrementBotCount = async (botID: string) => {
     // Check if bot is dead before adding to game
     const botHealthStatus = getBotStatus(botID);
     if (botHealthStatus === "dead") {
@@ -345,17 +372,66 @@ const GameSetup: React.FC = () => {
       return;
     }
 
-    if (gameSetup.gamePlayers.some((p) => p.id === botID)) {
+    const bot = bots.find((b) => b.id === botID);
+    if (!bot) {
+      console.warn(`Bot ${botID} not found in available bots`);
       return;
     }
 
-    const bot: GamePlayer = {
-      id: botID,
-      type: "bot",
-    };
+    const existingInstances = gameSetup.gamePlayers.filter(
+      (p) => p.type === "bot" && (p.botRef === botID || p.id === botID),
+    );
+
+    let newInstance: GamePlayer;
+    if (existingInstances.length === 0) {
+      // First (original) instance: keep canonical id, no overrides
+      newInstance = {
+        id: botID,
+        type: "bot",
+      };
+    } else {
+      // Subsequent clone: synthesise a unique id and overrides
+      const usedEmojis = new Set<string>(
+        existingInstances
+          .map((p) => p.displayEmoji)
+          .filter((e): e is string => !!e),
+      );
+      usedEmojis.add(bot.emoji);
+      const cloneEmoji = pickCloneEmoji(usedEmojis);
+      newInstance = {
+        id: `${botID}#${generateCloneSuffix()}`,
+        type: "bot",
+        botRef: botID,
+        displayName: `${bot.name} ${existingInstances.length + 1}`,
+        displayEmoji: cloneEmoji,
+      };
+    }
 
     await updateDoc(gameDocRef, {
-      gamePlayers: arrayUnion(bot),
+      gamePlayers: arrayUnion(newInstance),
+    });
+    debouncedRegeneratePreview();
+  };
+
+  const handleDecrementBotCount = async (botID: string) => {
+    // Find every gamePlayer entry pointing at this bot, in insertion order.
+    const matchingIndexes: number[] = [];
+    gameSetup.gamePlayers.forEach((p, idx) => {
+      if (p.type !== "bot") return;
+      const underlying = p.botRef ?? p.id;
+      if (underlying === botID) matchingIndexes.push(idx);
+    });
+
+    if (matchingIndexes.length === 0) return;
+
+    // Remove the most recently added instance (last in array order).
+    const removeIdx = matchingIndexes[matchingIndexes.length - 1];
+    const updatedGamePlayers = gameSetup.gamePlayers.filter(
+      (_, idx) => idx !== removeIdx,
+    );
+
+    await updateDoc(gameDocRef, {
+      gamePlayers: updatedGamePlayers,
     });
     debouncedRegeneratePreview();
   };
@@ -1112,10 +1188,14 @@ const GameSetup: React.FC = () => {
                   {grouped[ownerID].map((bot) => {
                     const botStatus = getBotStatus(bot.id);
                     const isDead = botStatus === "dead";
-                    const isInGame = gameSetup.gamePlayers.some(
-                      (p) => p.id === bot.id,
-                    );
-                    const isDisabled = isDead || isInGame;
+                    const instanceCount = gameSetup.gamePlayers.filter(
+                      (p) =>
+                        p.type === "bot" &&
+                        ((p.botRef ?? p.id) === bot.id),
+                    ).length;
+                    const isInGame = instanceCount > 0;
+                    const canIncrement = !isDead && !isConfigDisabled;
+                    const canDecrement = instanceCount > 0 && !isConfigDisabled;
 
                     return (
                       <Box
@@ -1123,27 +1203,18 @@ const GameSetup: React.FC = () => {
                         title={
                           isDead
                             ? "Bot is dead and cannot be added to game"
-                            : isInGame
-                              ? "Bot is already in the game"
-                              : bot.name
+                            : bot.name
                         }
-                        onClick={() => {
-                          if (!isDisabled) handleAddBot(bot.id);
-                        }}
                         sx={{
                           display: "flex",
                           alignItems: "center",
                           gap: 1,
                           px: 2,
                           py: 1,
-                          borderLeft: `4px solid ${isDisabled ? "#ccc" : bot.colour}`,
+                          borderLeft: `4px solid ${isDead ? "#ccc" : bot.colour}`,
                           borderBottom: "1px solid #eee",
-                          cursor: isDisabled ? "default" : "pointer",
-                          opacity: isDisabled ? 0.5 : 1,
-                          backgroundColor: isDisabled ? "#f5f5f5" : "transparent",
-                          "&:hover": isDisabled
-                            ? {}
-                            : { backgroundColor: `${bot.colour}22` },
+                          opacity: isDead ? 0.5 : 1,
+                          backgroundColor: isDead ? "#f5f5f5" : "transparent",
                         }}
                       >
                         <Typography sx={{ fontSize: "1.2rem", flexShrink: 0 }}>
@@ -1160,6 +1231,61 @@ const GameSetup: React.FC = () => {
                           {isDead && " (DEAD)"}
                           {isInGame && !isDead && " (IN GAME)"}
                         </Typography>
+                        {!isDead && (
+                          <Box
+                            sx={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 0.5,
+                              flexShrink: 0,
+                            }}
+                          >
+                            <IconButton
+                              size="small"
+                              aria-label={`Remove one ${bot.name}`}
+                              disabled={!canDecrement}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDecrementBotCount(bot.id);
+                              }}
+                              sx={{
+                                border: "1px solid #999",
+                                borderRadius: "4px",
+                                width: 28,
+                                height: 28,
+                              }}
+                            >
+                              −
+                            </IconButton>
+                            <Typography
+                              sx={{
+                                minWidth: 20,
+                                textAlign: "center",
+                                fontVariantNumeric: "tabular-nums",
+                                fontWeight: 600,
+                              }}
+                            >
+                              {instanceCount}
+                            </Typography>
+                            <IconButton
+                              size="small"
+                              aria-label={`Add one ${bot.name}`}
+                              disabled={!canIncrement}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleIncrementBotCount(bot.id);
+                              }}
+                              sx={{
+                                border: "1px solid #999",
+                                borderRadius: "4px",
+                                width: 28,
+                                height: 28,
+                              }}
+                            >
+                              +
+                            </IconButton>
+                          </Box>
+                        )}
                       </Box>
                     );
                   })}
