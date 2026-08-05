@@ -4,6 +4,17 @@ Tactic Toes is a multiplayer game platform built with React/TypeScript frontend 
 
 # Recent Changes
 
+## Firebase Bot Interface (August 5, 2026)
+- **New Feature**: Bots can connect directly through Firebase instead of the Battlesnake HTTP interface. Full protocol and auth design in `docs/firebase-bot-interface.md`
+- **Auth**: Per-bot API key exchanged for a Firebase custom token (uid `bot:<botId>`, claims `{bot, botId, botOwner}`) via two new callables: `createBotApiKey` (owner-only, stores SHA-256 hash in rules-less `botCredentials` collection) and `exchangeBotApiKey` (public, constant-time verify)
+- **Move Staging**: Bots may stage a move (privateMoves create) as many times as they like before the turn deadline; `processTurn` already resolves with the last staged move before `endTime`. Committing via `moveStatuses.movedPlayerIDs` is optional and enables early turn resolution
+- **Multi-Snake Ownership**: One bot identity acts for all its Team Snek snakes (original + clones). The game-start transaction writes `sessions/{s}/games/{g}/meta/botMap` (`{players: {gamePlayerID: underlyingBotID}}`); rules `get()` it to authorize per-snake writes
+- **Game Discovery**: Game start also writes invite docs at `bots/{botId}/games/{gameId}` so Firebase bots discover games via a single collection listener
+- **Firestore Rules**: New `isBot()`/`botControlsPlayer()` helpers; bot branches added to privateMoves create and moveStatuses update (one snake per commit write); human paths unchanged. Rules covered by emulator tests during development
+- **Infrastructure**: `bootstrap-gcp-project.sh` grants Service Account Token Creator to the App Engine SA (custom token minting needs `iam.serviceAccounts.signBlob`) and allUsers invoker to the new callables
+- **Core Files**: `functions/src/botAuth.ts`, `functions/src/utils/botGameMeta.ts`, `functions/src/onGameStarted.ts`, `functions/src/processScheduledGameStart.ts`, `functions/src/index.ts`, `firestore.rules`, `scripts/bootstrap-gcp-project.sh`, `docs/firebase-bot-interface.md`
+- **Reference Client**: Chris-Centaur `src/firebase/` implements the bot side (sign-in, invite listener, board translation, staged writes, buffered commit)
+
 ## Move Submission Race Condition Fix (March 10, 2026)
 - **Bug**: Intermittent Firebase permission errors when submitting moves in snek games, caused by race conditions between independent Firestore snapshot listeners
 - **Root Causes**: (1) Double-submit from fast clicks/keyboard repeats before React state update propagates, (2) Turn-transition race where game document updates before moveStatuses document exists

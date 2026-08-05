@@ -6,6 +6,7 @@ import { GameSetup, GameState, MoveStatus } from "@shared/types/Game"
 import { getGameProcessor, getProcessorClass } from "./gameprocessors/ProcessorFactory"
 import { FieldValue, Timestamp } from "firebase-admin/firestore"
 import { notifyBots } from "./utils/notifyBots"
+import { writeBotMap, writeBotGameInvites } from "./utils/botGameMeta"
 
 export const processScheduledGameStart = onTaskDispatched(
   async (request) => {
@@ -155,8 +156,15 @@ export const processScheduledGameStart = onTaskDispatched(
       }
       transaction.set(moveStatusRef, moveStatus)
 
+      // Bot ownership map for the Firebase bot interface security rules
+      writeBotMap(transaction, sessionID, gameID, freshFilteredSetup)
+
       logger.info(`[processScheduledGameStart] Game ${gameID} initialized in transaction`)
-      return { turnDurationSeconds: firstTurnTimeSeconds, turnExpiryTime: nowMs + startTurnDurationMillis }
+      return {
+        turnDurationSeconds: firstTurnTimeSeconds,
+        turnExpiryTime: nowMs + startTurnDurationMillis,
+        startedSetup: freshFilteredSetup,
+      }
     })
 
     if (txResult === null) {
@@ -164,7 +172,13 @@ export const processScheduledGameStart = onTaskDispatched(
       return
     }
 
-    const { turnDurationSeconds, turnExpiryTime } = txResult
+    const { turnDurationSeconds, turnExpiryTime, startedSetup } = txResult
+
+    try {
+      await writeBotGameInvites(sessionID, gameID, startedSetup)
+    } catch (error) {
+      logger.error(`[processScheduledGameStart] Error writing bot game invites`, { gameID, error })
+    }
 
     try {
       const queue = getFunctions().taskQueue("processTurnExpirationTask")

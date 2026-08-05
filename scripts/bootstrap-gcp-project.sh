@@ -275,6 +275,15 @@ gcloud iam service-accounts add-iam-policy-binding "$COMPUTE_SA" \
     --quiet 2>/dev/null || echo "    (May not exist yet - will be created on first deploy)"
 
 echo ""
+echo "Granting Service Account Token Creator (required by exchangeBotApiKey to mint"
+echo "Firebase custom tokens via iam.serviceAccounts.signBlob)..."
+gcloud iam service-accounts add-iam-policy-binding "$APPENGINE_SA" \
+    --member="serviceAccount:$APPENGINE_SA" \
+    --role="roles/iam.serviceAccountTokenCreator" \
+    --project="$PROJECT_ID" \
+    --quiet 2>/dev/null || echo "    (May not exist yet - will be created on first deploy)"
+
+echo ""
 echo "=========================================="
 echo "Step 9: Grant Public Access to Callable Functions"
 echo "=========================================="
@@ -292,13 +301,18 @@ echo ""
 echo "Note: Policy changes can take up to 15 minutes to propagate."
 echo ""
 
-echo "Granting allUsers invoker access to wakeBot function..."
-gcloud functions add-iam-policy-binding wakeBot \
-    --region=us-central1 \
-    --member=allUsers \
-    --role=roles/cloudfunctions.invoker \
-    --project="$PROJECT_ID" \
-    --quiet 2>/dev/null || echo "    (Function may not exist yet - run after first deploy)"
+# IMPORTANT: Update this list when adding new callable (onCall) functions.
+CALLABLE_FUNCTIONS=("wakeBot" "createBotApiKey" "exchangeBotApiKey")
+
+for fn in "${CALLABLE_FUNCTIONS[@]}"; do
+    echo "Granting allUsers invoker access to $fn function..."
+    gcloud functions add-iam-policy-binding "$fn" \
+        --region=us-central1 \
+        --member=allUsers \
+        --role=roles/cloudfunctions.invoker \
+        --project="$PROJECT_ID" \
+        --quiet 2>/dev/null || echo "    (Function may not exist yet - run after first deploy)"
+done
 
 echo ""
 echo "=========================================="

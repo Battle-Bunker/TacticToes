@@ -8,6 +8,7 @@ import { getGameProcessor, getProcessorClass } from "./gameprocessors/ProcessorF
 import { logger } from "./logger" // Adjust the path as necessary
 import { FieldValue, Timestamp } from "firebase-admin/firestore"
 import { notifyBots } from "./utils/notifyBots"
+import { writeBotMap, writeBotGameInvites } from "./utils/botGameMeta"
 
 /**
  * Firestore Trigger to start the game when all players are ready.
@@ -173,6 +174,9 @@ export const onGameStarted = functions.firestore
       }
       transaction.set(moveStatusRef, moveStatus)
 
+      // Bot ownership map for the Firebase bot interface security rules
+      writeBotMap(transaction, sessionID, gameID, filteredSetup)
+
       logger.info(`[onGameStarted] Game ${gameID} has been initialized.`)
       
       // Return first turn duration and expiry time for post-transaction orchestration
@@ -215,6 +219,13 @@ export const onGameStarted = functions.firestore
       )
     } catch (error) {
       logger.error(`[onGameStarted] Error scheduling turn expiration`, { gameID, error })
+    }
+
+    try {
+      // Game invites for Firebase-connected bots
+      await writeBotGameInvites(sessionID, gameID, filteredSetup)
+    } catch (error) {
+      logger.error(`[onGameStarted] Error writing bot game invites`, { gameID, error })
     }
 
     try {

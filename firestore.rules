@@ -13,6 +13,20 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
+    // Bot principals authenticate via exchangeBotApiKey -> signInWithCustomToken.
+    // Their uid is "bot:<botId>" and their token carries { bot: true, botId }.
+    function isBot() {
+      return isAuthenticated() && request.auth.token.bot == true;
+    }
+
+    // The game-start transaction writes meta/botMap with
+    // { players: { [gamePlayerID]: underlyingBotID } }, covering Team Snek
+    // clones whose in-game id differs from the bot id. A bot may act for a
+    // gamePlayer iff the map points that player at its botId claim.
+    function botControlsPlayer(sessionId, gameId, playerID) {
+      return get(/databases/$(database)/documents/sessions/$(sessionId)/games/$(gameId)/meta/botMap).data.players[playerID] == request.auth.token.botId;
+    }
+
     function isValidGameType(type) {
       return type in ['connect4', 'longboi', 'tactictoes', 'snek', 'colourclash', 'reversi', 'teamsnek', 'kingsnek'];
     }
@@ -104,6 +118,18 @@ service cloud.firestore {
         addedIds[0] == request.auth.uid;
     }
 
+    // Bot variant of isValidMoveStatusUpdate: a bot commits one of its own
+    // snakes (per botMap) instead of its auth uid. Committing is optional —
+    // it lets the turn resolve early once every player has committed;
+    // uncommitted bots simply ride the turn timer.
+    function isValidBotMoveStatusUpdate(current, next, sessionId, gameId) {
+      let addedIds = next.movedPlayerIDs.removeAll(current.movedPlayerIDs);
+      return current.moveNumber == next.moveNumber &&
+        current.alivePlayerIDs == next.alivePlayerIDs &&
+        addedIds.size() == 1 &&
+        botControlsPlayer(sessionId, gameId, addedIds[0]);
+    }
+
     function isValidBotData(botData, botId) {
       return botData.keys().hasAll(['id', 'owner', 'name', 'url', 'capabilities', 'emoji', 'colour', 'createdAt']) &&
         botData.id == botId &&
@@ -181,17 +207,31 @@ service cloud.firestore {
       match /games/{gameId} {
         allow read: if true;
 
+        // Meta Subcollection (botMap etc. — written server-side only)
+        match /meta/{metaId} {
+          allow read: if true;
+        }
+
         // MoveStatuses Subcollection
         match /moveStatuses/{moveStatusId} {
           allow read: if true;
-          allow update: if isAuthenticated() && isValidMoveStatusUpdate(resource.data, request.resource.data);
+          allow update: if isAuthenticated() && (
+            isValidMoveStatusUpdate(resource.data, request.resource.data) ||
+            (isBot() && isValidBotMoveStatusUpdate(resource.data, request.resource.data, sessionId, gameId))
+          );
         }
 
         // PrivateMoves Subcollection
+        // Multiple creates per player per turn are allowed: each write stages
+        // a move, and turn resolution takes the last staged move submitted
+        // before the turn's endTime.
         match /privateMoves/{moveId} {
           allow create: if isAuthenticated() &&
-            request.auth.uid == request.resource.data.playerID &&
-            isValidPrivateMove(request.resource.data);
+            isValidPrivateMove(request.resource.data) &&
+            (
+              request.auth.uid == request.resource.data.playerID ||
+              (isBot() && botControlsPlayer(sessionId, gameId, request.resource.data.playerID))
+            );
         }
 
         // ExpirationRequests Subcollection
@@ -212,6 +252,14 @@ service cloud.firestore {
       allow update: if isAuthenticated() &&
                        isValidBotUpdate(request.resource.data, botId, resource.data);
       allow delete: if isAuthenticated() && resource.data.owner == request.auth.uid;
+
+      // Game invites written server-side at game start so Firebase-connected
+      // bots can discover their games with a single collection listener.
+      // Contents mirror world-readable game/bot data, so reads are open;
+      // writes are server-only.
+      match /games/{gameId} {
+        allow read: if true;
+      }
     }
 
     // =========== RANKINGS COLLECTION ===========
