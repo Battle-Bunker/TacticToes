@@ -225,7 +225,16 @@ service cloud.firestore {
         // Multiple creates per player per turn are allowed: each write stages
         // a move, and turn resolution takes the last staged move submitted
         // before the turn's endTime.
+        // Reads are permitted only for one's OWN moves (moves stay hidden
+        // from opponents): queries must therefore filter on playerID so the
+        // rules engine can prove every result belongs to the caller. This is
+        // what lets a Firebase-connected bot confirm which staged move the
+        // server will actually use.
         match /privateMoves/{moveId} {
+          allow read: if isAuthenticated() && (
+            request.auth.uid == resource.data.playerID ||
+            (isBot() && botControlsPlayer(sessionId, gameId, resource.data.playerID))
+          );
           allow create: if isAuthenticated() &&
             isValidPrivateMove(request.resource.data) &&
             (

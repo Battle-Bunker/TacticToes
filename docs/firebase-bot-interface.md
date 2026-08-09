@@ -103,7 +103,7 @@ world-readable (as before); the bot-specific surfaces are:
 | `sessions/{s}/games/{g}` | read (public) | Game doc; `turns` array grows by one per resolved turn |
 | `sessions/{s}/games/{g}/meta/botMap` | read (public), server-written | Snake → bot ownership map used by rules |
 | `sessions/{s}/games/{g}/moveStatuses/{turn}` | read (public); bots may `arrayUnion` **one owned snake per write** into `movedPlayerIDs` | Commit signal for early turn resolution |
-| `sessions/{s}/games/{g}/privateMoves` | create-only, for owned snakes | Staged moves; repeatable per snake per turn |
+| `sessions/{s}/games/{g}/privateMoves` | create for owned snakes; read only one's OWN moves (queries must filter `playerID` to an owned snake so rules can prove it) | Staged moves; repeatable per snake per turn. Read-back lets a bot confirm which staged move the server will use (latest server timestamp ≤ `endTime` wins) |
 
 A staged move document is the same shape humans write:
 
