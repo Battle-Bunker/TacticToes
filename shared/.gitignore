@@ -1,1 +1,4 @@
 node_modules/
+# tsc output from the functions build (rootDirs compiles shared sources in place)
+types/*.js
+types/*.js.map
