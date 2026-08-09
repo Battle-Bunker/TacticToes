@@ -291,6 +291,12 @@ export class SnekProcessor extends GameProcessor {
       moveIndex = this.getDefaultMove(snake, allowedMoves, gameState.boardWidth, playerID)
     }
 
+    // Record the move actually applied (submitted or default) so the turn's
+    // `moves` map is complete for every player. Clients — including
+    // Firebase-connected bots inferring finalized moves — can rely on it as
+    // the authoritative applied move rather than reconstructing defaults.
+    gameState.playerMoves[playerID] = moveIndex
+
     // Move the snake
     this.moveSnake(snake, moveIndex)
   }

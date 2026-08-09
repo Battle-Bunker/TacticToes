@@ -138,6 +138,17 @@ HTTP notifier applies.
 4. Optionally commit each snake (`movedPlayerIDs` arrayUnion, one snake per
    write) when you're confident; all-committed turns resolve immediately.
 
+### Applied moves and the default policy
+
+When a turn resolves, each new `Turn` document's `moves` map records the
+move index **actually applied** for every player — the winning staged move,
+or the engine's default when nothing valid was staged. The default policy is
+deterministic: **continue the previous move** (step in the head−neck
+direction), falling back to the first in-bounds adjacent cell for a snake
+with no direction yet. Clients can therefore both read the authoritative
+applied moves from the next turn and accurately predict what an unstaged,
+committed snake will do.
+
 ### Timing semantics
 
 - The staging window closes at `turn.endTime` (server timestamp filter in
