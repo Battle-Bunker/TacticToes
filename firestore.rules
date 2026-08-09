@@ -27,6 +27,15 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/sessions/$(sessionId)/games/$(gameId)/meta/botMap).data.players[playerID] == request.auth.token.botId;
     }
 
+    // Commitment is binding: once a player appears in the turn's
+    // movedPlayerIDs, its staged move is frozen for the turn (no further
+    // privateMoves creates). This makes movedPlayerIDs represent TRUE
+    // commitment, so clients can reason robustly about what a committed
+    // player's move will be without waiting for turn resolution.
+    function hasCommittedForTurn(sessionId, gameId, moveNumber, playerID) {
+      return playerID in get(/databases/$(database)/documents/sessions/$(sessionId)/games/$(gameId)/moveStatuses/$(string(moveNumber))).data.movedPlayerIDs;
+    }
+
     function isValidGameType(type) {
       return type in ['connect4', 'longboi', 'tactictoes', 'snek', 'colourclash', 'reversi', 'teamsnek', 'kingsnek'];
     }
@@ -224,7 +233,8 @@ service cloud.firestore {
         // PrivateMoves Subcollection
         // Multiple creates per player per turn are allowed: each write stages
         // a move, and turn resolution takes the last staged move submitted
-        // before the turn's endTime.
+        // before the turn's endTime — UNTIL the player commits
+        // (movedPlayerIDs), which freezes their staged move for the turn.
         // Reads are permitted only for one's OWN moves (moves stay hidden
         // from opponents): queries must therefore filter on playerID so the
         // rules engine can prove every result belongs to the caller. This is
@@ -237,6 +247,7 @@ service cloud.firestore {
           );
           allow create: if isAuthenticated() &&
             isValidPrivateMove(request.resource.data) &&
+            !hasCommittedForTurn(sessionId, gameId, request.resource.data.moveNumber, request.resource.data.playerID) &&
             (
               request.auth.uid == request.resource.data.playerID ||
               (isBot() && botControlsPlayer(sessionId, gameId, request.resource.data.playerID))

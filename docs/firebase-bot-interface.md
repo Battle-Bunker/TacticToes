@@ -154,9 +154,13 @@ committed snake will do.
 - The staging window closes at `turn.endTime` (server timestamp filter in
   `processTurn`) **or** as soon as every alive player has committed,
   whichever comes first.
-- Committing is irreversible for the turn and caps your own staging window
-  only if everyone else has also committed; the last staged move at
-  processing time still wins.
+- **Committing is binding.** Once a player is in `movedPlayerIDs`, the rules
+  reject any further `privateMoves` creates for that player for the turn:
+  the staged move at commit time (or the engine default, if nothing was
+  staged) is guaranteed to be the move that plays. This makes
+  `movedPlayerIDs` represent true commitment, so clients can reason about a
+  committed player's move immediately instead of waiting for resolution.
+  Commit your snake only after its intended move is confirmed staged.
 - `turn.endTime` is included in the game doc, so bots can budget their own
   compute (e.g. commit `bufferMs` before the deadline).
 
