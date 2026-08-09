@@ -35,6 +35,28 @@ export const processTurnExpirationTask = onTaskDispatched(
       return
     }
 
+    // Guard against early dispatch: Cloud Tasks may deliver before the
+    // scheduled time (and the Cloud Tasks emulator ignores scheduleTime
+    // entirely), which would resolve the turn before its staging window
+    // closed. Wait out any remaining time until the turn's actual endTime.
+    const preDoc = await admin
+      .firestore()
+      .doc(`sessions/${sessionID}/games/${gameID}`)
+      .get()
+    const preTurns = preDoc.data()?.turns
+    const preTurn = Array.isArray(preTurns) ? preTurns[turnNumber] : undefined
+    const endTimeMillis = preTurn?.endTime?.toMillis?.()
+    if (typeof endTimeMillis === "number") {
+      const remaining = endTimeMillis - Date.now()
+      if (remaining > 50) {
+        const waitMs = Math.min(remaining, 120_000)
+        logger.info(
+          `[processTurnExpirationTask] Dispatched ${remaining}ms early for game ${gameID}, turn ${turnNumber} — waiting ${waitMs}ms until endTime`
+        )
+        await new Promise((resolve) => setTimeout(resolve, waitMs))
+      }
+    }
+
     logger.info(`[processTurnExpirationTask] Starting transaction`, { gameID, turnNumber })
     const result = await admin.firestore().runTransaction(async (transaction) => {
       const turnResult = await processTurn(transaction, gameID, sessionID, turnNumber)
