@@ -59,7 +59,13 @@ const BOARD_SIZE_MAPPING = {
   giant: { width: 21, height: 21 },
 };
 
-type BoardSize = keyof typeof BOARD_SIZE_MAPPING;
+// Bounds for the free-form "Custom" board size. The minimum matches the
+// Firestore rules (boardWidth/boardHeight >= 5, perimeter included); the
+// maximum is a client-side sanity bound.
+const MIN_BOARD_DIMENSION = 5;
+const MAX_BOARD_DIMENSION = 99;
+
+type BoardSize = keyof typeof BOARD_SIZE_MAPPING | "custom";
 
 // Curated set of visually-distinct, easy-to-name emojis used to give bot
 // clones a recognisable per-game identity. Drawn at clone-creation time and
@@ -109,6 +115,10 @@ const GameSetup: React.FC = () => {
   const [secondsPerTurn, setSecondsPerTurn] = useState<string>("10");
   const [RulesComponent, setRulesComponent] = useState<React.FC | null>(null);
   const [boardSize, setBoardSize] = useState<BoardSize>("medium");
+  // Local text state for the Custom width/height inputs so partial typing
+  // (e.g. clearing the field) doesn't write invalid values to Firestore.
+  const [customWidth, setCustomWidth] = useState<string>("21");
+  const [customHeight, setCustomHeight] = useState<string>("21");
   const [teams, setTeams] = useState<Team[]>(gameSetup?.teams || []);
   const [botSearchQuery, setBotSearchQuery] = useState("");
   const [maxTurnsEnabled, setMaxTurnsEnabled] = useState<boolean>(
@@ -270,7 +280,8 @@ const GameSetup: React.FC = () => {
   // Update local state when gameSetup changes
   useEffect(() => {
     if (gameSetup) {
-      // Update board size
+      // Update board size: match a preset when possible, otherwise show the
+      // dimensions in the Custom inputs (covers sizes set by other clients).
       const currentSize = Object.entries(BOARD_SIZE_MAPPING).find(
         ([, dimensions]) =>
           dimensions.width === gameSetup.boardWidth &&
@@ -278,7 +289,11 @@ const GameSetup: React.FC = () => {
       );
       if (currentSize) {
         setBoardSize(currentSize[0] as BoardSize);
+      } else {
+        setBoardSize("custom");
       }
+      setCustomWidth(`${gameSetup.boardWidth}`);
+      setCustomHeight(`${gameSetup.boardHeight}`);
 
       // Update game type
       if (gameSetup.gameType) {
@@ -715,6 +730,14 @@ const GameSetup: React.FC = () => {
     const selectedBoardSize = event.target.value as BoardSize;
     setBoardSize(selectedBoardSize);
 
+    if (selectedBoardSize === "custom") {
+      // Seed the custom inputs from the current board; no Firestore write
+      // until a dimension is actually edited.
+      setCustomWidth(`${gameSetup?.boardWidth ?? 21}`);
+      setCustomHeight(`${gameSetup?.boardHeight ?? 21}`);
+      return;
+    }
+
     const { width, height } = BOARD_SIZE_MAPPING[selectedBoardSize];
 
     // Update Firestore when board size is selected
@@ -722,6 +745,31 @@ const GameSetup: React.FC = () => {
       await updateDoc(gameDocRef, {
         boardWidth: width,
         boardHeight: height,
+      });
+    }
+    debouncedRegeneratePreview();
+  };
+
+  // Handler for the Custom width/height inputs. Writes only complete, valid
+  // integer dimensions; partial input just updates the local field.
+  const handleCustomDimensionChange = async (
+    dimension: "width" | "height",
+    raw: string,
+  ) => {
+    if (dimension === "width") setCustomWidth(raw);
+    else setCustomHeight(raw);
+
+    const value = parseInt(raw, 10);
+    if (
+      isNaN(value) ||
+      value < MIN_BOARD_DIMENSION ||
+      value > MAX_BOARD_DIMENSION
+    ) {
+      return;
+    }
+    if (!gameSetup?.started) {
+      await updateDoc(gameDocRef, {
+        [dimension === "width" ? "boardWidth" : "boardHeight"]: value,
       });
     }
     debouncedRegeneratePreview();
@@ -846,8 +894,8 @@ const GameSetup: React.FC = () => {
               <Button
                 disabled={
                   started ||
-                  gameSetup.boardWidth < 5 ||
-                  gameSetup.boardWidth > 25 ||
+                  gameSetup.boardWidth < MIN_BOARD_DIMENSION ||
+                  gameSetup.boardWidth > MAX_BOARD_DIMENSION ||
                   parseInt(secondsPerTurn) <= 0 ||
                   gameSetup.playersReady.includes(userID)
                 }
@@ -934,8 +982,45 @@ const GameSetup: React.FC = () => {
             <MenuItem value="medium">Medium (13x13)</MenuItem>
             <MenuItem value="large">Large (17x17)</MenuItem>
             <MenuItem value="giant">Giant (21x21)</MenuItem>
+            <MenuItem value="custom">
+              {boardSize === "custom"
+                ? `Custom (${gameSetup.boardWidth}x${gameSetup.boardHeight})`
+                : "Custom…"}
+            </MenuItem>
           </Select>
         </FormControl>
+
+        {/* Custom board dimensions (perimeter included) */}
+        {boardSize === "custom" && (
+          <>
+            <TextField
+              label="Width"
+              type="number"
+              value={customWidth}
+              onChange={(e) => handleCustomDimensionChange("width", e.target.value)}
+              disabled={started || isConfigDisabled}
+              sx={{ flex: 1 }}
+              inputProps={{ min: MIN_BOARD_DIMENSION, max: MAX_BOARD_DIMENSION, step: 1 }}
+              error={(() => {
+                const v = parseInt(customWidth, 10);
+                return isNaN(v) || v < MIN_BOARD_DIMENSION || v > MAX_BOARD_DIMENSION;
+              })()}
+            />
+            <TextField
+              label="Height"
+              type="number"
+              value={customHeight}
+              onChange={(e) => handleCustomDimensionChange("height", e.target.value)}
+              disabled={started || isConfigDisabled}
+              sx={{ flex: 1 }}
+              inputProps={{ min: MIN_BOARD_DIMENSION, max: MAX_BOARD_DIMENSION, step: 1 }}
+              error={(() => {
+                const v = parseInt(customHeight, 10);
+                return isNaN(v) || v < MIN_BOARD_DIMENSION || v > MAX_BOARD_DIMENSION;
+              })()}
+            />
+          </>
+        )}
 
         {/* Turn Time */}
         <TextField
