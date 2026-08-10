@@ -3,7 +3,8 @@ import * as functions from "firebase-functions/v1"
 import * as logger from "firebase-functions/logger"
 import { getFunctions } from "firebase-admin/functions"
 import { processTurn } from "./gameprocessors/processTurn"
-import { notifyBots, notifyBotsGameEnd } from "./utils/notifyBots"
+import { notifyBotsGameEnd } from "./utils/notifyBots"
+import { announceTurn } from "./utils/announceTurn"
 import { MoveStatus } from "./types/Game" // Adjust the import path as necessary
 
 export const onMoveCreated = functions.firestore
@@ -52,54 +53,22 @@ export const onMoveCreated = functions.firestore
       newTurnCreated: result?.newTurnCreated
     })
 
-    // After transaction commits, schedule turn expiration and notify bots
-    if (result?.newTurnCreated && result.newTurnNumber !== undefined && result.turnDurationSeconds !== undefined) {
-      logger.info(`[onMoveCreated] Starting post-transaction orchestration`, { 
-        gameID, 
-        newTurnNumber: result.newTurnNumber 
+    // After transaction commits, schedule turn expiration and notify bots —
+    // the same announceTurn() path turn 0 goes through.
+    if (
+      result?.newTurnCreated &&
+      result.newTurnNumber !== undefined &&
+      result.turnDurationSeconds !== undefined &&
+      result.turnExpiryTime !== undefined
+    ) {
+      await announceTurn({
+        sessionID,
+        gameID,
+        turnNumber: result.newTurnNumber,
+        turnDurationSeconds: result.turnDurationSeconds,
+        turnExpiryTime: result.turnExpiryTime,
+        source: "onMoveCreated",
       })
-
-      try {
-        // Schedule turn expiration task
-        const queue = getFunctions().taskQueue("processTurnExpirationTask")
-        logger.info(`[onMoveCreated] Got task queue reference`, { gameID })
-        
-        await queue.enqueue(
-          {
-            sessionID,
-            gameID,
-            turnNumber: result.newTurnNumber,
-          },
-          {
-            scheduleDelaySeconds: result.turnDurationSeconds,
-          }
-        )
-
-        logger.info(
-          `[onMoveCreated] Successfully scheduled turn expiration for game ${gameID}, turn ${result.newTurnNumber}`,
-          {
-            sessionID,
-            gameID,
-            turnNumber: result.newTurnNumber,
-            delaySeconds: result.turnDurationSeconds,
-          }
-        )
-      } catch (error) {
-        logger.error(`[onMoveCreated] Error scheduling turn expiration`, { gameID, error })
-        throw error
-      }
-
-      try {
-        // Notify bots immediately
-        logger.info(`[onMoveCreated] Starting bot notifications`, { gameID, turnNumber: result.newTurnNumber })
-        await notifyBots(sessionID, gameID, result.newTurnNumber, result.turnExpiryTime)
-        logger.info(`[onMoveCreated] Bot notifications completed`, { gameID, turnNumber: result.newTurnNumber })
-      } catch (error) {
-        logger.error(
-          `[onMoveCreated] Error notifying bots for game ${gameID}, turn ${result.newTurnNumber}`,
-          error
-        )
-      }
     } else {
       logger.info(`[onMoveCreated] Skipping post-transaction work`, { 
         gameID,

@@ -1,17 +1,19 @@
-// functions/src/triggers/onGameStarted.ts
+// functions/src/onGameStarted.ts
 
 import * as functions from "firebase-functions/v1"
-import * as admin from "firebase-admin"
 import { getFunctions } from "firebase-admin/functions"
-import { GameSetup, GameState, MoveStatus } from "@shared/types/Game" // Adjust the path as necessary
-import { getGameProcessor, getProcessorClass } from "./gameprocessors/ProcessorFactory"
-import { logger } from "./logger" // Adjust the path as necessary
-import { FieldValue, Timestamp } from "firebase-admin/firestore"
-import { notifyBots } from "./utils/notifyBots"
-import { writeBotMap, writeBotGameInvites } from "./utils/botGameMeta"
+import { Timestamp } from "firebase-admin/firestore"
+import { GameSetup } from "@shared/types/Game"
+import { logger } from "./logger"
+import { startGame } from "./utils/startGame"
 
 /**
- * Firestore Trigger to start the game when all players are ready.
+ * Firestore trigger on the lobby setup document.
+ *
+ * Deliberately thin: it decides only whether this update is worth *attempting*
+ * a start for. Whether the game may actually start — and the guarantee that it
+ * starts exactly once — lives in startGame(), because this trigger fires on
+ * every setup edit and Firestore delivers at-least-once.
  */
 export const onGameStarted = functions.firestore
   .document("sessions/{sessionID}/setups/{gameID}")
@@ -22,220 +24,50 @@ export const onGameStarted = functions.firestore
 
     logger.debug(`Checking update on game: ${gameID}`)
 
-    if (beforeData.started) {
-      logger.warn("game already started")
+    if (afterData.started) {
+      logger.info(`Game ${gameID} already started — nothing to do.`)
       return
     }
 
     if (afterData.tournamentMode) {
-      logger.info(`Game ${gameID} is in tournament mode — skipping normal ready/start workflow.`)
-
-      if (
+      // Tournament games start on a schedule, not on readiness. Enqueue the
+      // scheduler whenever the scheduled time is set or moved; a stale task
+      // detects the change and no-ops.
+      const scheduledChanged =
         afterData.scheduledStartTime &&
-        !afterData.started &&
         (!beforeData.scheduledStartTime ||
           (beforeData.scheduledStartTime as Timestamp).toMillis?.() !==
             (afterData.scheduledStartTime as Timestamp).toMillis?.())
-      ) {
-        const scheduledTime = afterData.scheduledStartTime as Timestamp
-        const nowMillis = Date.now()
-        const delaySeconds = Math.max(0, Math.round((scheduledTime.toMillis() - nowMillis) / 1000))
 
+      if (!scheduledChanged) {
+        logger.info(`Game ${gameID} is in tournament mode — no schedule change.`)
+        return
+      }
+
+      const scheduledTime = afterData.scheduledStartTime as Timestamp
+      const delaySeconds = Math.max(
+        0,
+        Math.round((scheduledTime.toMillis() - Date.now()) / 1000)
+      )
+
+      try {
+        const queue = getFunctions().taskQueue("processScheduledGameStart")
+        await queue.enqueue(
+          { sessionID, gameID, expectedScheduledStartMillis: scheduledTime.toMillis() },
+          { scheduleDelaySeconds: delaySeconds }
+        )
         logger.info(
-          `[onGameStarted] Tournament mode: scheduling game start for game ${gameID} in ${delaySeconds}s`,
+          `[onGameStarted] Enqueued processScheduledGameStart for game ${gameID} in ${delaySeconds}s`,
           { sessionID, gameID, scheduledMillis: scheduledTime.toMillis(), delaySeconds }
         )
-
-        try {
-          const queue = getFunctions().taskQueue("processScheduledGameStart")
-          await queue.enqueue(
-            { sessionID, gameID, expectedScheduledStartMillis: scheduledTime.toMillis() },
-            { scheduleDelaySeconds: delaySeconds }
-          )
-          logger.info(
-            `[onGameStarted] Successfully enqueued processScheduledGameStart for game ${gameID}`,
-            { sessionID, gameID, delaySeconds }
-          )
-        } catch (error) {
-          logger.error(`[onGameStarted] Error scheduling tournament game start`, { gameID, error })
-        }
-      }
-
-      return
-    }
-
-    // Check if all playerIDs are in playersReady
-    const allPlayersReady = afterData.gamePlayers
-      .filter((gamePlayer) => gamePlayer.type === "human")
-      .every((player) => afterData.playersReady.includes(player.id))
-
-    if (!allPlayersReady) {
-      logger.info(`Not all players are ready for game ${gameID}.`)
-      return
-    }
-
-    if (afterData.gamePlayers.length === 0) {
-      logger.info(`no one in game. nonsense. ${gameID}.`)
-      return
-    }
-
-    if (!afterData.startRequested) {
-      logger.info(`start not requested yet ${gameID}.`)
-      return
-    }
-
-    // If the game has started, abort
-    if (afterData.started) {
-      logger.info(`game has started ${gameID}.`)
-      return
-    }
-
-    // Get the processor class to determine which players should be active
-    const ProcessorClass = getProcessorClass(afterData.gameType)
-    if (!ProcessorClass) {
-      logger.error(
-        `No processor class found for gameType: ${afterData.gameType} in game ${gameID}`,
-      )
-      return
-    }
-
-    // Filter players using the processor's logic
-    // Players not returned become observers
-    const filteredSetup = {
-      ...afterData,
-      gamePlayers: ProcessorClass.filterActivePlayers(afterData)
-    }
-
-    // gameprocessor needs gamestate due to needing all turns.
-    // construct a new object with empty fields
-    const gameState: GameState = {
-      turns: [],
-      setup: filteredSetup,
-      // these are not used, don't want to change to optional fields though
-      timeCreated: Timestamp.fromMillis(0),
-      timeFinished: Timestamp.fromMillis(0),
-
-    }
-
-    // Instantiate the appropriate processor using the factory
-    const processor = getGameProcessor(gameState)
-
-    if (!processor) {
-      logger.error(
-        `No processor found for gameType: ${afterData.gameType} in game ${gameID}`,
-      )
-      return
-    }
-
-    // Use a transaction to ensure consistency
-    const txResult = await admin.firestore().runTransaction(async (transaction) => {
-      // If not all players are ready, exit early
-
-      // Initialize the game using the processor's method
-      const firstTurn = processor.firstTurn()
-      const now = Date.now() // Current time in milliseconds
-      const firstTurnTimeSeconds = filteredSetup.firstTurnTime ?? 60 // Default to 60 seconds for backward compatibility
-      const startTurnDurationMillis = firstTurnTimeSeconds * 1000 // Convert firstTurnTime from seconds to milliseconds
-      const endTime = new Date(now + startTurnDurationMillis) // Add turn time to current time
-      firstTurn.startTime = Timestamp.fromMillis(now)
-      firstTurn.endTime = Timestamp.fromDate(endTime)
-
-      afterData.started = true
-
-      // set the game
-      const gameStateRef = admin
-        .firestore()
-        .collection(`sessions/${sessionID}/games`)
-        .doc(gameID)
-      const newGame: GameState = {
-        setup: filteredSetup,
-        turns: [firstTurn],
-        timeCreated: FieldValue.serverTimestamp(),
-        timeFinished: null,
-      }
-      transaction.set(gameStateRef, newGame)
-
-      // set started to true
-      const gameSetupRef = admin
-        .firestore()
-        .collection(`sessions/${sessionID}/setups`)
-        .doc(gameID)
-      transaction.update(gameSetupRef, { started: true })
-
-      // set the movestatus for players to write to
-      const moveStatusRef = admin
-        .firestore()
-        .collection(`sessions/${sessionID}/games/${gameID}/moveStatuses`)
-        .doc("0")
-      const moveStatus: MoveStatus = {
-        moveNumber: 0,
-        alivePlayerIDs: firstTurn.alivePlayers,
-        movedPlayerIDs: [],
-      }
-      transaction.set(moveStatusRef, moveStatus)
-
-      // Bot ownership map for the Firebase bot interface security rules
-      writeBotMap(transaction, sessionID, gameID, filteredSetup)
-
-      logger.info(`[onGameStarted] Game ${gameID} has been initialized.`)
-      
-      // Return first turn duration and expiry time for post-transaction orchestration
-      return { turnDurationSeconds: firstTurnTimeSeconds, turnExpiryTime: now + startTurnDurationMillis }
-    })
-
-    const { turnDurationSeconds, turnExpiryTime } = txResult
-
-    // After transaction commits, schedule turn expiration and notify bots for turn 0
-    logger.info(`[onGameStarted] Starting post-transaction orchestration for game ${gameID}`, {
-      sessionID,
-      gameID,
-      turnDurationSeconds
-    })
-
-    try {
-      // Schedule turn expiration task for turn 0
-      const queue = getFunctions().taskQueue("processTurnExpirationTask")
-      logger.info(`[onGameStarted] Got task queue reference`, { gameID })
-      
-      await queue.enqueue(
-        {
-          sessionID,
+      } catch (error) {
+        logger.error(`[onGameStarted] Error scheduling tournament game start`, {
           gameID,
-          turnNumber: 0,
-        },
-        {
-          scheduleDelaySeconds: turnDurationSeconds,
-        }
-      )
-
-      logger.info(
-        `[onGameStarted] Successfully scheduled turn expiration for game ${gameID}, turn 0`,
-        {
-          sessionID,
-          gameID,
-          turnNumber: 0,
-          delaySeconds: turnDurationSeconds,
-        }
-      )
-    } catch (error) {
-      logger.error(`[onGameStarted] Error scheduling turn expiration`, { gameID, error })
+          error,
+        })
+      }
+      return
     }
 
-    try {
-      // Game invites for Firebase-connected bots
-      await writeBotGameInvites(sessionID, gameID, filteredSetup)
-    } catch (error) {
-      logger.error(`[onGameStarted] Error writing bot game invites`, { gameID, error })
-    }
-
-    try {
-      // Notify bots immediately for turn 0
-      logger.info(`[onGameStarted] Starting bot notifications for turn 0`, { gameID })
-      await notifyBots(sessionID, gameID, 0, turnExpiryTime)
-      logger.info(`[onGameStarted] Bot notifications completed for turn 0`, { gameID })
-    } catch (error) {
-      logger.error(`[onGameStarted] Error notifying bots for game ${gameID}, turn 0`, error)
-    }
-
-    logger.info(`[onGameStarted] Game ${gameID} initialization complete`)
+    await startGame(sessionID, gameID, { kind: "playersReady" }, "onGameStarted")
   })

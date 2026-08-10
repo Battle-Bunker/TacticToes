@@ -138,6 +138,30 @@ HTTP notifier applies.
 4. Optionally commit each snake (`movedPlayerIDs` arrayUnion, one snake per
    write) when you're confident; all-committed turns resolve immediately.
 
+### Turns are append-only and immutable
+
+**A turn is written exactly once and never modified — deadline included.**
+`turns` only ever grows by one, so a game-document snapshot that does not
+advance `turns.length` carries no new turn state and can be ignored outright.
+
+Turn 0 is an ordinary turn under that rule. It is created by a single
+idempotent start transaction (`functions/src/utils/startGame.ts`) and stamped
+with its window there and nowhere else — `setup.firstTurnTime` seconds rather
+than `maxTurnTime`, so players and bots have time to arrive — then announced by
+the same `announceTurn()` every later turn goes through.
+
+This is what makes the staging read-back sound: a staged move is resolved
+against the snake's head as the turn records it, so a board that changed
+underneath a staged write would silently invalidate it.
+
+### Player names
+
+Every entry in the game document's `setup.gamePlayers` carries a resolved
+`displayName` and `displayEmoji` — bot originals, Team Snek clones and humans
+alike — so a Firebase-connected bot can name every snake from the game document
+alone, matching the `name`/`emoji` the HTTP `/move` payload would carry. (In the
+lobby document under `setups/`, those fields remain clone-only overrides.)
+
 ### Applied moves and the default policy
 
 When a turn resolves, each new `Turn` document's `moves` map records the
