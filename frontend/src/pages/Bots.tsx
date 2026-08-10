@@ -742,19 +742,14 @@ const Bots: React.FC = () => {
               </Box>
               {editApiKey && (
                 <>
-                  <TextField
-                    value={editApiKey}
-                    fullWidth
-                    size="small"
-                    margin="dense"
-                    InputProps={{ readOnly: true }}
-                    helperText="Copy this key now. It cannot be recovered after this dialog closes or after regeneration."
-                  />
                   <Typography variant="subtitle2" sx={{ mt: 1.5 }}>
                     Bot environment configuration
                   </Typography>
                   <Typography variant="body2" sx={{ mt: 0.5, mb: 1 }}>
                     Provide these four values to the Firebase bot process:
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
+                    Copy this key now. It cannot be recovered after this dialog closes or after regeneration.
                   </Typography>
                   <TextField
                     label="TACTICTOES_BOT_ID"
