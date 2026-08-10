@@ -27,7 +27,7 @@ import { useTheme } from "@mui/material/styles";
 import { Refresh } from "@mui/icons-material";
 import { Hue } from "@uiw/react-color";
 import { useUser } from "../context/UserContext";
-import { db, functions } from "../firebaseConfig";
+import { db, firebaseConfig, functions } from "../firebaseConfig";
 import { generateColor } from "../utils/colourUtils";
 import { emojiList } from "@shared/types/Emojis";
 import { Bot, GameType } from "@shared/types/Game";
@@ -134,6 +134,7 @@ const Bots: React.FC = () => {
   const [editApiKey, setEditApiKey] = useState<string | null>(null);
   const [editApiKeyBusy, setEditApiKeyBusy] = useState(false);
   const [editApiKeyCopied, setEditApiKeyCopied] = useState(false);
+  const [editBotConfigCopied, setEditBotConfigCopied] = useState(false);
   const activeEditingBotId = useRef<string | null>(null);
 
   const editContrast = theme.palette.getContrastText(editColour);
@@ -229,6 +230,7 @@ const Bots: React.FC = () => {
     setEditApiKeyConfigured(false);
     setEditApiKey(null);
     setEditApiKeyCopied(false);
+    setEditBotConfigCopied(false);
     setEditDialogOpen(true);
     void loadBotApiKeyStatus(bot.id);
     setShowEditEmojis(() => {
@@ -246,6 +248,7 @@ const Bots: React.FC = () => {
     setEditError(null);
     setEditApiKey(null);
     setEditApiKeyCopied(false);
+    setEditBotConfigCopied(false);
   };
 
   const loadBotApiKeyStatus = async (botId: string) => {
@@ -295,6 +298,25 @@ const Bots: React.FC = () => {
     } catch (copyError) {
       console.error("Failed to copy Firebase API key", copyError);
       setEditError("Copy failed. Select the key and copy it manually.");
+    }
+  };
+
+  const handleCopyBotConfig = async () => {
+    if (!editingBotId || !editApiKey) return;
+
+    const config = [
+      `TACTICTOES_BOT_ID=${editingBotId}`,
+      `TACTICTOES_BOT_API_KEY=${editApiKey}`,
+      `TACTICTOES_FIREBASE_PROJECT_ID=${firebaseConfig.projectId}`,
+      `TACTICTOES_FIREBASE_API_KEY=${firebaseConfig.apiKey}`,
+    ].join("\n");
+
+    try {
+      await navigator.clipboard.writeText(config);
+      setEditBotConfigCopied(true);
+    } catch (copyError) {
+      console.error("Failed to copy Firebase bot configuration", copyError);
+      setEditError("Copy failed. Select the configuration and copy it manually.");
     }
   };
 
@@ -719,14 +741,62 @@ const Bots: React.FC = () => {
                 )}
               </Box>
               {editApiKey && (
-                <TextField
-                  value={editApiKey}
-                  fullWidth
-                  size="small"
-                  margin="dense"
-                  InputProps={{ readOnly: true }}
-                  helperText="Copy this key now. It cannot be recovered after this dialog closes or after regeneration."
-                />
+                <>
+                  <TextField
+                    value={editApiKey}
+                    fullWidth
+                    size="small"
+                    margin="dense"
+                    InputProps={{ readOnly: true }}
+                    helperText="Copy this key now. It cannot be recovered after this dialog closes or after regeneration."
+                  />
+                  <Typography variant="subtitle2" sx={{ mt: 1.5 }}>
+                    Bot environment configuration
+                  </Typography>
+                  <Typography variant="body2" sx={{ mt: 0.5, mb: 1 }}>
+                    Provide these four values to the Firebase bot process:
+                  </Typography>
+                  <TextField
+                    label="TACTICTOES_BOT_ID"
+                    value={editingBotId ?? ""}
+                    fullWidth
+                    size="small"
+                    margin="dense"
+                    InputProps={{ readOnly: true }}
+                  />
+                  <TextField
+                    label="TACTICTOES_BOT_API_KEY"
+                    value={editApiKey}
+                    fullWidth
+                    size="small"
+                    margin="dense"
+                    InputProps={{ readOnly: true }}
+                  />
+                  <TextField
+                    label="TACTICTOES_FIREBASE_PROJECT_ID"
+                    value={firebaseConfig.projectId}
+                    fullWidth
+                    size="small"
+                    margin="dense"
+                    InputProps={{ readOnly: true }}
+                  />
+                  <TextField
+                    label="TACTICTOES_FIREBASE_API_KEY"
+                    value={firebaseConfig.apiKey}
+                    fullWidth
+                    size="small"
+                    margin="dense"
+                    InputProps={{ readOnly: true }}
+                  />
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    onClick={handleCopyBotConfig}
+                    sx={{ mt: 1 }}
+                  >
+                    {editBotConfigCopied ? "Configuration copied" : "Copy all configuration"}
+                  </Button>
+                </>
               )}
             </Box>
 
