@@ -3,7 +3,8 @@ import { onTaskDispatched } from "firebase-functions/v2/tasks"
 import { getFunctions } from "firebase-admin/functions"
 import * as logger from "firebase-functions/logger"
 import { processTurn } from "./gameprocessors/processTurn"
-import { notifyBots, notifyBotsGameEnd } from "./utils/notifyBots"
+import { notifyBotsGameEnd } from "./utils/notifyBots"
+import { announceTurn } from "./utils/announceTurn"
 
 /**
  * Firebase task queue function for processing turn expirations.
@@ -35,6 +36,28 @@ export const processTurnExpirationTask = onTaskDispatched(
       return
     }
 
+    // Guard against early dispatch: Cloud Tasks may deliver before the
+    // scheduled time (and the Cloud Tasks emulator ignores scheduleTime
+    // entirely), which would resolve the turn before its staging window
+    // closed. Wait out any remaining time until the turn's actual endTime.
+    const preDoc = await admin
+      .firestore()
+      .doc(`sessions/${sessionID}/games/${gameID}`)
+      .get()
+    const preTurns = preDoc.data()?.turns
+    const preTurn = Array.isArray(preTurns) ? preTurns[turnNumber] : undefined
+    const endTimeMillis = preTurn?.endTime?.toMillis?.()
+    if (typeof endTimeMillis === "number") {
+      const remaining = endTimeMillis - Date.now()
+      if (remaining > 50) {
+        const waitMs = Math.min(remaining, 120_000)
+        logger.info(
+          `[processTurnExpirationTask] Dispatched ${remaining}ms early for game ${gameID}, turn ${turnNumber} — waiting ${waitMs}ms until endTime`
+        )
+        await new Promise((resolve) => setTimeout(resolve, waitMs))
+      }
+    }
+
     logger.info(`[processTurnExpirationTask] Starting transaction`, { gameID, turnNumber })
     const result = await admin.firestore().runTransaction(async (transaction) => {
       const turnResult = await processTurn(transaction, gameID, sessionID, turnNumber)
@@ -43,54 +66,22 @@ export const processTurnExpirationTask = onTaskDispatched(
     })
     logger.info(`[processTurnExpirationTask] Transaction completed`, { gameID, turnNumber, result })
 
-    // After transaction commits, schedule turn expiration and notify bots
-    if (result?.newTurnCreated && result.newTurnNumber !== undefined && result.turnDurationSeconds !== undefined) {
-      logger.info(`[processTurnExpirationTask] Starting post-transaction orchestration`, { 
-        gameID, 
-        newTurnNumber: result.newTurnNumber 
+    // After transaction commits, schedule turn expiration and notify bots —
+    // the same announceTurn() path turn 0 goes through.
+    if (
+      result?.newTurnCreated &&
+      result.newTurnNumber !== undefined &&
+      result.turnDurationSeconds !== undefined &&
+      result.turnExpiryTime !== undefined
+    ) {
+      await announceTurn({
+        sessionID,
+        gameID,
+        turnNumber: result.newTurnNumber,
+        turnDurationSeconds: result.turnDurationSeconds,
+        turnExpiryTime: result.turnExpiryTime,
+        source: "processTurnExpirationTask",
       })
-
-      try {
-        // Schedule turn expiration task
-        const queue = getFunctions().taskQueue("processTurnExpirationTask")
-        logger.info(`[processTurnExpirationTask] Got task queue reference`, { gameID })
-        
-        await queue.enqueue(
-          {
-            sessionID,
-            gameID,
-            turnNumber: result.newTurnNumber,
-          },
-          {
-            scheduleDelaySeconds: result.turnDurationSeconds,
-          }
-        )
-
-        logger.info(
-          `[processTurnExpirationTask] Successfully scheduled turn expiration for game ${gameID}, turn ${result.newTurnNumber}`,
-          {
-            sessionID,
-            gameID,
-            turnNumber: result.newTurnNumber,
-            delaySeconds: result.turnDurationSeconds,
-          }
-        )
-      } catch (error) {
-        logger.error(`[processTurnExpirationTask] Error scheduling turn expiration`, { gameID, error })
-        throw error
-      }
-
-      try {
-        // Notify bots immediately
-        logger.info(`[processTurnExpirationTask] Starting bot notifications`, { gameID, turnNumber: result.newTurnNumber })
-        await notifyBots(sessionID, gameID, result.newTurnNumber, result.turnExpiryTime)
-        logger.info(`[processTurnExpirationTask] Bot notifications completed`, { gameID, turnNumber: result.newTurnNumber })
-      } catch (error) {
-        logger.error(
-          `[processTurnExpirationTask] Error notifying bots for game ${gameID}, turn ${result.newTurnNumber}`,
-          error
-        )
-      }
     } else {
       logger.info(`[processTurnExpirationTask] Skipping post-transaction work`, { 
         gameID,

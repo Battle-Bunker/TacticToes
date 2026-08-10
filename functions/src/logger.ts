@@ -1,3 +1,3 @@
-import * as functions from "firebase-functions"
+import * as logger from "firebase-functions/logger"
 
-export const logger = functions.logger
+export { logger }
