@@ -69,6 +69,7 @@ APIS=(
     "logging.googleapis.com"
     "cloudresourcemanager.googleapis.com"
     "iam.googleapis.com"
+    "iamcredentials.googleapis.com"
     "secretmanager.googleapis.com"
 )
 
