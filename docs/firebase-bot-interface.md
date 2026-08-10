@@ -171,8 +171,13 @@ committed snake will do.
   (`iam.serviceAccounts.signBlob`) on itself. `scripts/bootstrap-gcp-project.sh`
   (step 8) now grants this; run it once per project before relying on the
   exchange in production.
-- Both new callables need the usual `allUsers` invoker grant (step 9 of the
-  bootstrap script) like `wakeBot`.
+- All three bot-auth callables (`createBotApiKey`, `exchangeBotApiKey`, and
+  `getBotApiKeyStatus`) need the usual `allUsers` invoker grant (step 9 of the
+  bootstrap script) like `wakeBot`. Deploying function code alone does not
+  automatically repair a missing IAM invoker grant.
+- To repair an existing project without rerunning the full infrastructure
+  bootstrap, run
+  `bash scripts/grant-callable-invokers.sh tactic-toes-cyphid-dev`.
 - No new Cloud Tasks queues or indexes are required.
 
 ## Alternatives considered

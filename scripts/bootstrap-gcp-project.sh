@@ -303,7 +303,7 @@ echo "Note: Policy changes can take up to 15 minutes to propagate."
 echo ""
 
 # IMPORTANT: Update this list when adding new callable (onCall) functions.
-CALLABLE_FUNCTIONS=("wakeBot" "createBotApiKey" "exchangeBotApiKey")
+CALLABLE_FUNCTIONS=("wakeBot" "createBotApiKey" "exchangeBotApiKey" "getBotApiKeyStatus")
 
 for fn in "${CALLABLE_FUNCTIONS[@]}"; do
     echo "Granting allUsers invoker access to $fn function..."
