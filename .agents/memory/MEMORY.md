@@ -1,0 +1,1 @@
+- [Bot Firebase credentials](bot-firebase-credentials.md) — plaintext API keys are returned only on creation/rotation; clients must expose copy-once UX and never promise recovery.

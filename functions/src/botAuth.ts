@@ -94,6 +94,48 @@ export const createBotApiKey = functions.https.onCall(async (data, context) => {
 })
 
 /**
+ * Owner-only status check. The plaintext key is never persisted, so clients
+ * can only learn whether a credential exists—not retrieve the key itself.
+ */
+export const getBotApiKeyStatus = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError(
+      "unauthenticated",
+      "Must be signed in to view bot credential status"
+    )
+  }
+
+  const { botId } = data as { botId?: unknown }
+  if (!botId || typeof botId !== "string") {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "botId is required and must be a string"
+    )
+  }
+
+  const botDoc = await admin.firestore().collection("bots").doc(botId).get()
+  if (!botDoc.exists) {
+    throw new functions.https.HttpsError("not-found", `Bot ${botId} not found`)
+  }
+
+  const bot = botDoc.data() as Bot
+  if (bot.owner !== context.auth.uid) {
+    throw new functions.https.HttpsError(
+      "permission-denied",
+      "Only the bot owner can view its credential status"
+    )
+  }
+
+  const credentialDoc = await admin
+    .firestore()
+    .collection("botCredentials")
+    .doc(botId)
+    .get()
+
+  return { botId, configured: credentialDoc.exists }
+})
+
+/**
  * Unauthenticated callable that exchanges a bot API key for a Firebase
  * custom token. The bot then calls signInWithCustomToken with the result.
  * Custom tokens are short-lived (1h) but the sign-in yields a refresh token,

@@ -4,7 +4,7 @@ import { onSessionCreated } from "./onSessionCreated"
 import { processTurnExpirationTask } from "./processTurnExpirationTask"
 import { processScheduledGameStart } from "./processScheduledGameStart"
 import { wakeBot } from "./wakeBot"
-import { createBotApiKey, exchangeBotApiKey } from "./botAuth"
+import { createBotApiKey, exchangeBotApiKey, getBotApiKeyStatus } from "./botAuth"
 import { getPlayerPublicInfo } from "./getPlayerPublicInfo"
 import { generatePreviewBoard } from "./generatePreviewBoard"
 import * as admin from "firebase-admin"
@@ -31,4 +31,5 @@ export {
   generatePreviewBoard,
   createBotApiKey,
   exchangeBotApiKey,
+  getBotApiKeyStatus,
 }

@@ -1,6 +1,6 @@
 // Bots.tsx
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   Box,
   Button,
@@ -27,10 +27,11 @@ import { useTheme } from "@mui/material/styles";
 import { Refresh } from "@mui/icons-material";
 import { Hue } from "@uiw/react-color";
 import { useUser } from "../context/UserContext";
-import { db } from "../firebaseConfig";
+import { db, functions } from "../firebaseConfig";
 import { generateColor } from "../utils/colourUtils";
 import { emojiList } from "@shared/types/Emojis";
 import { Bot, GameType } from "@shared/types/Game";
+import { httpsCallable } from "firebase/functions";
 import {
   doc,
   setDoc,
@@ -129,6 +130,11 @@ const Bots: React.FC = () => {
   const [showEditEmojis, setShowEditEmojis] = useState<string[]>([]);
   const [editError, setEditError] = useState<string | null>(null);
   const [editBusy, setEditBusy] = useState(false);
+  const [editApiKeyConfigured, setEditApiKeyConfigured] = useState(false);
+  const [editApiKey, setEditApiKey] = useState<string | null>(null);
+  const [editApiKeyBusy, setEditApiKeyBusy] = useState(false);
+  const [editApiKeyCopied, setEditApiKeyCopied] = useState(false);
+  const activeEditingBotId = useRef<string | null>(null);
 
   const editContrast = theme.palette.getContrastText(editColour);
 
@@ -209,6 +215,7 @@ const Bots: React.FC = () => {
   };
 
   const openEditDialog = (bot: Bot) => {
+    activeEditingBotId.current = bot.id;
     setEditingBotId(bot.id);
     setEditName(bot.name);
     setEditUrl(bot.url);
@@ -219,7 +226,11 @@ const Bots: React.FC = () => {
     setEditColour(bot.colour);
     setEditError(null);
     setEditBusy(false);
+    setEditApiKeyConfigured(false);
+    setEditApiKey(null);
+    setEditApiKeyCopied(false);
     setEditDialogOpen(true);
+    void loadBotApiKeyStatus(bot.id);
     setShowEditEmojis(() => {
       const shuffled = [...emojiList].sort(() => 0.5 - Math.random());
       const pick = shuffled.includes(bot.emoji) ? bot.emoji : shuffled[0];
@@ -229,9 +240,62 @@ const Bots: React.FC = () => {
   };
 
   const handleCloseEdit = () => {
+    activeEditingBotId.current = null;
     setEditingBotId(null);
     setEditDialogOpen(false);
     setEditError(null);
+    setEditApiKey(null);
+    setEditApiKeyCopied(false);
+  };
+
+  const loadBotApiKeyStatus = async (botId: string) => {
+    try {
+      const getStatus = httpsCallable<
+        { botId: string },
+        { botId: string; configured: boolean }
+      >(functions, "getBotApiKeyStatus");
+      const result = await getStatus({ botId });
+      if (activeEditingBotId.current === botId) {
+        setEditApiKeyConfigured(result.data.configured);
+      }
+    } catch (statusError) {
+      console.warn("Unable to check Firebase API key status", statusError);
+    }
+  };
+
+  const handleGenerateApiKey = async () => {
+    if (!editingBotId) return;
+
+    setEditApiKeyBusy(true);
+    setEditApiKeyCopied(false);
+    setEditError(null);
+
+    try {
+      const createKey = httpsCallable<
+        { botId: string },
+        { botId: string; apiKey: string; rotated: boolean }
+      >(functions, "createBotApiKey");
+      const result = await createKey({ botId: editingBotId });
+      setEditApiKey(result.data.apiKey);
+      setEditApiKeyConfigured(true);
+    } catch (keyError) {
+      console.error("Failed to generate Firebase API key", keyError);
+      setEditError("Failed to generate Firebase API key");
+    } finally {
+      setEditApiKeyBusy(false);
+    }
+  };
+
+  const handleCopyApiKey = async () => {
+    if (!editApiKey) return;
+
+    try {
+      await navigator.clipboard.writeText(editApiKey);
+      setEditApiKeyCopied(true);
+    } catch (copyError) {
+      console.error("Failed to copy Firebase API key", copyError);
+      setEditError("Copy failed. Select the key and copy it manually.");
+    }
   };
 
   const handleSaveEdit = async () => {
@@ -527,7 +591,7 @@ const Bots: React.FC = () => {
               label="Name"
               value={editName}
               onChange={(e) => setEditName(e.target.value)}
-              disabled={editBusy}
+              disabled={editBusy || editApiKeyBusy}
               fullWidth
               size="small"
               sx={{ mb: 2 }}
@@ -537,7 +601,7 @@ const Bots: React.FC = () => {
               label="URL"
               value={editUrl}
               onChange={(e) => setEditUrl(e.target.value)}
-              disabled={editBusy}
+              disabled={editBusy || editApiKeyBusy}
               fullWidth
               size="small"
               sx={{ mb: 2 }}
@@ -562,7 +626,7 @@ const Bots: React.FC = () => {
               {showEditEmojis.map((e) => (
                 <Button
                   key={e}
-                  onClick={() => !editBusy && setEditEmoji(e)}
+                       onClick={() => !editBusy && !editApiKeyBusy && setEditEmoji(e)}
                   size="small"
                   sx={{
                     fontSize: "1.5rem",
@@ -574,7 +638,7 @@ const Bots: React.FC = () => {
                   {e}
                 </Button>
               ))}
-              <Button onClick={randomizeEditEmojis} size="small">
+              <Button onClick={randomizeEditEmojis} size="small" disabled={editBusy || editApiKeyBusy}>
                 <Refresh fontSize="small" />
               </Button>
             </Box>
@@ -593,7 +657,8 @@ const Bots: React.FC = () => {
                             : [...prev, g],
                         )
                       }
-                      size="small"
+                       size="small"
+                       disabled={editBusy || editApiKeyBusy}
                     />
                   }
                   label={g}
@@ -605,13 +670,65 @@ const Bots: React.FC = () => {
               control={
                 <Switch
                   checked={editPublic}
-                  onChange={(e) => setEditPublic(e.target.checked)}
+                   onChange={(e) => setEditPublic(e.target.checked)}
                   size="small"
+                   disabled={editBusy || editApiKeyBusy}
                 />
               }
               label="Public"
               sx={{ mb: 2 }}
             />
+
+            <Box
+              sx={{
+                border: "1px solid",
+                borderColor: "divider",
+                p: 1.5,
+                mb: 2,
+              }}
+            >
+              <Typography variant="subtitle2">
+                Firebase bot connection
+              </Typography>
+              <Typography variant="body2" sx={{ mt: 0.5, mb: 1 }}>
+                {editApiKeyConfigured
+                  ? "A Firebase API key is configured. Regenerating it immediately invalidates the previous key."
+                  : "Generate a key to let this bot connect directly to Firebase."}
+              </Typography>
+              <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  onClick={handleGenerateApiKey}
+                  disabled={editBusy || editApiKeyBusy}
+                >
+                  {editApiKeyBusy
+                    ? "Generating..."
+                    : editApiKeyConfigured
+                      ? "Regenerate Firebase API key"
+                      : "Generate Firebase API key"}
+                </Button>
+                {editApiKey && (
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    onClick={handleCopyApiKey}
+                  >
+                    {editApiKeyCopied ? "Copied" : "Copy key"}
+                  </Button>
+                )}
+              </Box>
+              {editApiKey && (
+                <TextField
+                  value={editApiKey}
+                  fullWidth
+                  size="small"
+                  margin="dense"
+                  InputProps={{ readOnly: true }}
+                  helperText="Copy this key now. It cannot be recovered after this dialog closes or after regeneration."
+                />
+              )}
+            </Box>
 
             {editError && (
               <Typography color="error" variant="body2" sx={{ mb: 2 }}>
@@ -621,13 +738,13 @@ const Bots: React.FC = () => {
           </Box>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>
-          <Button onClick={handleCloseEdit} disabled={editBusy}>
+          <Button onClick={handleCloseEdit} disabled={editBusy || editApiKeyBusy}>
             Cancel
           </Button>
           <Button
             onClick={handleSaveEdit}
             variant="contained"
-            disabled={editBusy}
+            disabled={editBusy || editApiKeyBusy}
             sx={{ bgcolor: editColour, color: editContrast }}
           >
             Save Changes
