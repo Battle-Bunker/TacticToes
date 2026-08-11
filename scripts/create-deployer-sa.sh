@@ -38,6 +38,10 @@ DEPLOYER_ROLES=(
   # cloudfunctions.admin does not reach Cloud Tasks, so without this the deploy
   # fails with 403 cloudtasks.queues.get on a queue it is about to create.
   "roles/cloudtasks.admin"                  # task queue create/update/setIamPolicy
+  # Functions builds push images to the gcf-artifacts repository. The bootstrap
+  # script creates it, but the deployer still needs to write to it, and the CLI
+  # sets a cleanup policy on it after deploying.
+  "roles/artifactregistry.admin"            # gcf-artifacts push + cleanup policy
 )
 
 for role in "${DEPLOYER_ROLES[@]}"; do

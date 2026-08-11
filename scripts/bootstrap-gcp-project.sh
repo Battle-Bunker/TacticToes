@@ -180,6 +180,30 @@ else
     echo "Database created."
 fi
 
+section "Step 2b: Artifact Registry Repository"
+
+# Cloud Functions pushes every build image into a Docker repository named
+# gcf-artifacts, in the function's own region. It is normally auto-created on
+# first deploy, but that requires artifactregistry.repositories.create, which a
+# scoped deployer service account does not have. When it is missing the deploy
+# gets all the way to the build and dies with
+#   NAME_UNKNOWN: Repository "gcf-artifacts" not found
+# which reads like a registry outage rather than a setup gap.
+#
+# Creating it here, as Owner, means the deployer only ever needs to write to it.
+if gcloud artifacts repositories describe gcf-artifacts \
+       --location="$REGION" --project="$PROJECT_ID" >/dev/null 2>&1; then
+    echo "Repository gcf-artifacts already exists in $REGION."
+else
+    echo "Creating Artifact Registry repository gcf-artifacts in $REGION..."
+    gcloud artifacts repositories create gcf-artifacts \
+        --repository-format=docker \
+        --location="$REGION" \
+        --description="Cloud Functions build artifacts" \
+        --project="$PROJECT_ID"
+    echo "Repository created."
+fi
+
 section "Step 3: Resolve Service Accounts"
 
 CLOUD_BUILD_SA="${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com"
