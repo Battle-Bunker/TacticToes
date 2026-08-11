@@ -1,111 +1,74 @@
 // src/pages/LadderPage/LadderContext.tsx
 
 import React, { createContext, useContext, useEffect, useState } from 'react'
-import { collection, doc, onSnapshot } from 'firebase/firestore'
+import { collection, doc, onSnapshot, orderBy, query } from 'firebase/firestore'
 import { db } from '../../firebaseConfig'
-import { RankingData } from './types'
-import { GameType } from '@shared/types/Game'
-
-interface RankingsMap {
-    [gameType: string]: RankingData[]
-}
+import { Ranking } from '@shared/types/Game'
+import { LeaderboardEntry } from './types'
 
 interface LadderContextType {
-    selectedPlayerRanking: RankingData | null
-    globalRankings: RankingsMap
-    loadingPlayer: boolean
-    loadingGlobal: boolean
+    selectedRanking: Ranking | null
+    leaderboard: LeaderboardEntry[]
+    loadingSelected: boolean
+    loadingLeaderboard: boolean
 }
 
 const LadderContext = createContext<LadderContextType>({
-    selectedPlayerRanking: null,
-    globalRankings: {},
-    loadingPlayer: true,
-    loadingGlobal: true
+    selectedRanking: null,
+    leaderboard: [],
+    loadingSelected: true,
+    loadingLeaderboard: true,
 })
 
 export const useLadder = () => useContext(LadderContext)
 
 interface Props {
     children: React.ReactNode
-    playerID?: string
+    centaurId?: string
 }
 
-const gameTypes: GameType[] = [
-    'snek',
-    'connect4',
-    'tactictoes',
-    'longboi',
-    'reversi',
-    'colourclash',
-]
+export const LadderProvider: React.FC<Props> = ({ children, centaurId }) => {
+    const [selectedRanking, setSelectedRanking] = useState<Ranking | null>(null)
+    const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([])
+    const [loadingSelected, setLoadingSelected] = useState(true)
+    const [loadingLeaderboard, setLoadingLeaderboard] = useState(true)
 
-export const LadderProvider: React.FC<Props> = ({ children, playerID }) => {
-    const [selectedPlayerRanking, setSelectedPlayerRanking] = useState<RankingData | null>(null)
-    const [globalRankings, setGlobalRankings] = useState<RankingsMap>({})
-    const [loadingPlayer, setLoadingPlayer] = useState(true)
-    const [loadingGlobal, setLoadingGlobal] = useState(true)
-
-    // Subscribe to selected player's ranking
+    // Subscribe to the selected centaur's ranking doc
     useEffect(() => {
-        if (!playerID) {
-            setSelectedPlayerRanking(null)
-            setLoadingPlayer(false)
+        if (!centaurId) {
+            setSelectedRanking(null)
+            setLoadingSelected(false)
             return
         }
-
-        setLoadingPlayer(true)
-        const rankingRef = doc(db, 'rankings', playerID)
-        const unsubscribe = onSnapshot(rankingRef, (doc) => {
-            if (doc.exists()) {
-                setSelectedPlayerRanking({
-                    ...(doc.data() as Omit<RankingData, 'playerID'>),
-                    playerID
-                })
-            } else {
-                setSelectedPlayerRanking(null)
-            }
-            setLoadingPlayer(false)
+        setLoadingSelected(true)
+        const rankingRef = doc(db, 'rankings', centaurId)
+        const unsubscribe = onSnapshot(rankingRef, (snapshot) => {
+            setSelectedRanking(
+                snapshot.exists() ? (snapshot.data() as Ranking) : null
+            )
+            setLoadingSelected(false)
         })
 
         return () => unsubscribe()
-    }, [playerID])
+    }, [centaurId])
 
-    // Subscribe to global rankings for all game types
+    // Subscribe to the leaderboard: all rankings ordered by MMR
     useEffect(() => {
-        setLoadingGlobal(true)
-        const rankingsRef = collection(db, 'rankings')
-        const unsubscribe = onSnapshot(rankingsRef, (snapshot) => {
-            const newRankings: RankingsMap = {}
-
-            // Initialize empty arrays for each game type
-            gameTypes.forEach(type => {
-                newRankings[type] = []
-            })
-
-            // Populate rankings for each game type
-            snapshot.forEach((doc) => {
-                const data = doc.data() as Omit<RankingData, 'playerID'>
-                const playerRanking = { ...data, playerID: doc.id }
-
-                gameTypes.forEach(gameType => {
-                    if (data.rankings?.[gameType]?.currentMMR !== undefined) {
-                        newRankings[gameType].push(playerRanking)
-                    }
+        setLoadingLeaderboard(true)
+        const rankingsQuery = query(
+            collection(db, 'rankings'),
+            orderBy('currentMMR', 'desc')
+        )
+        const unsubscribe = onSnapshot(rankingsQuery, (snapshot) => {
+            const entries: LeaderboardEntry[] = []
+            snapshot.forEach((docSnapshot) => {
+                entries.push({
+                    centaurId: docSnapshot.id,
+                    ranking: docSnapshot.data() as Ranking,
                 })
             })
-
-            // Sort rankings for each game type
-            gameTypes.forEach(gameType => {
-                newRankings[gameType].sort((a, b) => {
-                    const mmrA = a.rankings[gameType]?.currentMMR ?? 0
-                    const mmrB = b.rankings[gameType]?.currentMMR ?? 0
-                    return mmrB - mmrA
-                })
-            })
-
-            setGlobalRankings(newRankings)
-            setLoadingGlobal(false)
+            setLeaderboard(entries)
+            setLoadingLeaderboard(false)
         })
 
         return () => unsubscribe()
@@ -113,10 +76,10 @@ export const LadderProvider: React.FC<Props> = ({ children, playerID }) => {
 
     return (
         <LadderContext.Provider value={{
-            selectedPlayerRanking,
-            globalRankings,
-            loadingPlayer,
-            loadingGlobal
+            selectedRanking,
+            leaderboard,
+            loadingSelected,
+            loadingLeaderboard,
         }}>
             {children}
         </LadderContext.Provider>

@@ -3,6 +3,7 @@ import {
   AppBar,
   Box,
   Button,
+  CircularProgress,
   Container,
   Dialog,
   DialogContent,
@@ -18,17 +19,15 @@ import {
   Routes,
   useNavigate,
 } from "react-router-dom"
-import { EmojiCycler } from "./components/EmojiCycler"
-import { UserContextType, UserProvider, useUser } from "./context/UserContext"
+import { UserProvider, useUser } from "./context/UserContext"
 import { db } from "./firebaseConfig"
+import Centaurs from "./pages/Centaurs"
 import GamePage from "./pages/GamePage/index"
 import HomePage from "./pages/HomePage"
+import LadderPage from "./pages/LadderPage"
 import ProfilePage from "./pages/ProfilePage"
 import Sessionpage from "./pages/SessionPage"
-import LadderPage from "./pages/LadderPage"
-import Bots from "./pages/Bots"
 
-// Error Boundary Component
 interface ErrorBoundaryProps {
   children: ReactNode
 }
@@ -64,24 +63,26 @@ class ErrorBoundary extends React.Component<
   }
 }
 
-// Wrap AppContent with error handling and user context check
-const SafeAppContent: React.FC = () => {
-  const userContext = useUser()
-
-  if (!userContext) {
-    return <EmojiCycler />
-  }
-
-  return <AppContent />
-}
+const CenteredLoader: React.FC = () => (
+  <Box
+    sx={{
+      display: "flex",
+      justifyContent: "center",
+      alignItems: "center",
+      height: "100vh",
+    }}
+  >
+    <CircularProgress />
+  </Box>
+)
 
 const App: React.FC = () => {
   return (
     <ErrorBoundary>
       <UserProvider>
         <Router>
-          <Suspense fallback={<EmojiCycler />}>
-            <SafeAppContent />
+          <Suspense fallback={<CenteredLoader />}>
+            <AppContent />
           </Suspense>
         </Router>
       </UserProvider>
@@ -90,27 +91,21 @@ const App: React.FC = () => {
 }
 
 const AppContent: React.FC = () => {
-  const { name, emoji, colour, userID } = useUser() as UserContextType
+  const { name, userID } = useUser()
   const [isProfileOpen, setIsProfileOpen] = useState<boolean>(false)
   const [updatedName, setUpdatedName] = useState<string>(name)
-  const [updatedColour, setUpdatedColour] = useState<string>(colour)
-  const [updatedEmoji, setUpdatedEmoji] = useState<string>(emoji)
   const navigate = useNavigate()
 
-  // Open the profile modal
   const handleProfileOpen = (): void => {
     setIsProfileOpen(true)
   }
 
-  // Save the name and colour when closing the profile
   const handleProfileClose = async (): Promise<void> => {
-    const userDocRef = doc(db, "users", userID)
     setIsProfileOpen(false)
-    await updateDoc(userDocRef, {
-      name: updatedName,
-      colour: updatedColour,
-      emoji: updatedEmoji,
-    })
+    const trimmed = updatedName.trim()
+    if (trimmed && trimmed !== name) {
+      await updateDoc(doc(db, "users", userID), { name: trimmed })
+    }
   }
 
   return (
@@ -128,7 +123,7 @@ const AppContent: React.FC = () => {
             }}
             onClick={() => navigate("/")}
           >
-            🦶 tactic toes
+            🐍 team snek
           </Button>
           <Typography
             variant="h6"
@@ -137,17 +132,17 @@ const AppContent: React.FC = () => {
           />
           <Button
             color="primary"
-            sx={{ height: 30, mr: 1 }}
-            onClick={() => navigate(`/ladder/${userID}`)}
+            sx={{ height: 30, minWidth: "auto", px: 1 }}
+            onClick={() => navigate("/ladder")}
           >
-            ladder 🪜
+            🪜
           </Button>
           <Button
             color="primary"
-            sx={{ height: 30, backgroundColor: colour }}
+            sx={{ height: 30 }}
             onClick={handleProfileOpen}
           >
-            {name} {emoji}
+            {name}
           </Button>
         </Container>
       </AppBar>
@@ -155,13 +150,14 @@ const AppContent: React.FC = () => {
         <Box width="100%">
           <Routes>
             <Route path="/" element={<HomePage />} />
-            <Route path="/ladder/*" element={<LadderPage />} />
             <Route path="/session/:sessionName" element={<Sessionpage />} />
-            <Route path="/bots" element={<Bots />} />
             <Route
               path="/session/:sessionName/:gameID"
               element={<GamePage />}
             />
+            <Route path="/centaurs" element={<Centaurs />} />
+            <Route path="/ladder" element={<LadderPage />} />
+            <Route path="/ladder/:centaurId" element={<LadderPage />} />
           </Routes>
         </Box>
       </Container>
@@ -198,14 +194,10 @@ const AppContent: React.FC = () => {
         <DialogContent sx={{ overflowX: "hidden" }}>
           <ProfilePage
             setUpdatedName={setUpdatedName}
-            setUpdatedColour={setUpdatedColour}
-            setUpdatedEmoji={setUpdatedEmoji}
             handleProfileClose={handleProfileClose}
           />
         </DialogContent>
       </Dialog>
-
-
     </>
   )
 }

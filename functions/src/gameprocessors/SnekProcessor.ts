@@ -29,7 +29,7 @@ interface SnakeGameState {
   newScores: { [playerID: string]: number }
 }
 
-export class SnekProcessor extends GameProcessor {
+export abstract class SnekProcessor extends GameProcessor {
   private foodSpawnRate: number
   protected maxTurns?: number
   private fertileTiles: number[] = []
@@ -292,9 +292,9 @@ export class SnekProcessor extends GameProcessor {
     }
 
     // Record the move actually applied (submitted or default) so the turn's
-    // `moves` map is complete for every player. Clients — including
-    // Firebase-connected bots inferring finalized moves — can rely on it as
-    // the authoritative applied move rather than reconstructing defaults.
+    // `moves` map is complete for every player. Clients — including centaurs
+    // inferring finalized moves — can rely on it as the authoritative applied
+    // move rather than reconstructing defaults.
     gameState.playerMoves[playerID] = moveIndex
 
     // Move the snake
@@ -849,77 +849,7 @@ export class SnekProcessor extends GameProcessor {
       }
   }
 
-  protected calculateWinners(gameState: SnakeGameState): Winner[] {
-    const currentTurnNumber = this.gameState.turns.length
-    const reachedTurnLimit =
-      this.maxTurns !== undefined && currentTurnNumber >= this.maxTurns
-
-    const alivePlayers = gameState.newAlivePlayers
-
-    if (alivePlayers.length === 0) {
-      // Everyone died simultaneously - use the previous turn's state to declare winners
-      const previousTurn = this.gameState.turns[this.gameState.turns.length - 1]
-
-      if (previousTurn) {
-        const previousAlivePlayers = previousTurn.alivePlayers
-
-        if (previousAlivePlayers.length > 0) {
-          return this.createTurnWinners(previousTurn, previousAlivePlayers)
-        }
-
-        const previousPlayers = Object.keys(previousTurn.scores || {})
-
-        if (previousPlayers.length > 0) {
-          return this.createTurnWinners(previousTurn, previousPlayers)
-        }
-      }
-
-      return this.calculateSurvivalWinners(gameState)
-    }
-
-    if (alivePlayers.length === 1) {
-      return this.createIndividualWinners(gameState, alivePlayers)
-    }
-
-    if (reachedTurnLimit) {
-      const maxLength = Math.max(
-        ...alivePlayers.map(
-          (playerID) => gameState.newSnakes[playerID]?.length ?? 0,
-        ),
-      )
-
-      const longestSnakes = alivePlayers.filter(
-        (playerID) => gameState.newSnakes[playerID]?.length === maxLength,
-      )
-
-      return this.createIndividualWinners(gameState, longestSnakes)
-    }
-
-    return []
-  }
-
-  protected calculateSurvivalWinners(gameState: SnakeGameState): Winner[] {
-    return this.createIndividualWinners(gameState, gameState.newAlivePlayers)
-  }
-
-  private createTurnWinners(turn: Turn, playerIDs: string[]): Winner[] {
-    return playerIDs.map((playerID) => ({
-      playerID,
-      score: turn.scores[playerID] ?? 0,
-      winningSquares: turn.playerPieces[playerID] ?? [],
-    }))
-  }
-
-  protected createIndividualWinners(
-    gameState: SnakeGameState,
-    playerIDs: string[],
-  ): Winner[] {
-    return playerIDs.map((playerID) => ({
-      playerID,
-      score: gameState.newSnakes[playerID]?.length || 0,
-      winningSquares: gameState.newSnakes[playerID] ?? [],
-    }))
-  }
+  protected abstract calculateWinners(gameState: SnakeGameState): Winner[]
 
   protected createNewTurn(currentTurn: Turn, gameState: SnakeGameState, winners: Winner[]): Turn {
     // Update allowed moves
@@ -1578,11 +1508,7 @@ export class SnekProcessor extends GameProcessor {
   }
 
   private shouldUseTeamClusters(): boolean {
-    return (
-      (this.gameSetup.gameType === "teamsnek" ||
-        this.gameSetup.gameType === "kingsnek") &&
-      !!this.gameSetup.teamClustersEnabled
-    )
+    return !!this.gameSetup.teamClustersEnabled
   }
 
   private generateTeamClusterStartingPositions(): { x: number; y: number }[] {

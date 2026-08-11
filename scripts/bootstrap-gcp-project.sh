@@ -21,7 +21,7 @@ echo "  (iam.allowedPolicyMemberDomains), you must first allow public access:"
 echo ""
 echo "    gcloud org-policies delete iam.allowedPolicyMemberDomains --organization=ORG_ID"
 echo ""
-echo "  This is required because Firebase callable functions (like wakeBot) need"
+echo "  This is required because Firebase callable functions (like exchangeCentaurApiKey) need"
 echo "  'allUsers' invoker permission. Without this, browsers cannot call the function"
 echo "  and you'll see CORS errors. The function still validates Firebase Auth tokens"
 echo "  in code - this only allows the HTTP request to reach the function."
@@ -276,7 +276,7 @@ gcloud iam service-accounts add-iam-policy-binding "$COMPUTE_SA" \
     --quiet 2>/dev/null || echo "    (May not exist yet - will be created on first deploy)"
 
 echo ""
-echo "Granting Service Account Token Creator (required by exchangeBotApiKey to mint"
+echo "Granting Service Account Token Creator (required by exchangeCentaurApiKey to mint"
 echo "Firebase custom tokens via iam.serviceAccounts.signBlob)..."
 gcloud iam service-accounts add-iam-policy-binding "$APPENGINE_SA" \
     --member="serviceAccount:$APPENGINE_SA" \
@@ -303,7 +303,7 @@ echo "Note: Policy changes can take up to 15 minutes to propagate."
 echo ""
 
 # IMPORTANT: Update this list when adding new callable (onCall) functions.
-CALLABLE_FUNCTIONS=("wakeBot" "createBotApiKey" "exchangeBotApiKey" "getBotApiKeyStatus")
+CALLABLE_FUNCTIONS=("createCentaurApiKey" "exchangeCentaurApiKey" "getCentaurApiKeyStatus")
 
 for fn in "${CALLABLE_FUNCTIONS[@]}"; do
     echo "Granting allUsers invoker access to $fn function..."

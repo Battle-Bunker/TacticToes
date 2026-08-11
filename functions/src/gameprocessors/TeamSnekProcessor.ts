@@ -1,28 +1,7 @@
-import { Winner, GameSetup, GamePlayer, Turn } from "@shared/types/Game";
+import { Winner, Turn } from "@shared/types/Game";
 import { SnekProcessor } from "./SnekProcessor";
 
 export class TeamSnekProcessor extends SnekProcessor {
-
-  /**
-   * Team snek: only players assigned to teams are active players.
-   * Unassigned players become observers.
-   */
-  static filterActivePlayers(setup: GameSetup): GamePlayer[] {
-    const seen = new Set<string>();
-    return setup.gamePlayers.filter((player) => {
-      if (!player.teamID) return false;
-      if (seen.has(player.id)) return false;
-      seen.add(player.id);
-      return true;
-    });
-  }
-
-  /**
-   * Team snek uses team-based scoring
-   */
-  static getScoringUnit(setup: GameSetup): 'individual' | 'team' {
-    return 'team';
-  }
 
   // Override calculateWinners to use team-based end conditions
   protected calculateWinners(gameState: any): Winner[] {

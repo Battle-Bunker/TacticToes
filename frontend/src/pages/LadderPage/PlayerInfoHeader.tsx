@@ -1,30 +1,21 @@
 // src/pages/LadderPage/PlayerInfoHeader.tsx
 
-import {
-    Box,
-    Typography
-} from '@mui/material'
-import React, { useEffect, useState } from 'react'
-import { EmojiCycler } from '../../components/EmojiCycler'
+import { Box, CircularProgress, Typography } from '@mui/material'
+import React from 'react'
+import { useLadder } from './LadderContext'
 import { usePlayerInfo } from './usePlayerInfo'
+import { formatCentaurName } from './utils'
 
 interface Props {
-    playerID: string
+    centaurId: string
 }
 
-export const PlayerInfoHeader: React.FC<Props> = ({ playerID }) => {
-    const { players } = usePlayerInfo([playerID])
-    const [showLoading, setShowLoading] = useState(true)
-    const player = players[playerID]
+export const PlayerInfoHeader: React.FC<Props> = ({ centaurId }) => {
+    const { selectedRanking, loadingSelected } = useLadder()
+    const { centaurs, loadingCentaurs } = usePlayerInfo([centaurId])
+    const centaur = centaurs[centaurId]
 
-    useEffect(() => {
-        if (player) {
-            setShowLoading(false)
-        }
-    }, [player])
-
-    // Show loading state
-    if (!player && showLoading) {
+    if (loadingCentaurs || loadingSelected) {
         return (
             <Box
                 sx={{
@@ -33,48 +24,38 @@ export const PlayerInfoHeader: React.FC<Props> = ({ playerID }) => {
                     display: 'flex',
                     alignItems: 'center',
                     gap: 2,
-                    height: "70px",
+                    height: '70px',
                 }}
             >
-                <EmojiCycler fontSize="2rem" />
+                <CircularProgress size={24} />
                 <Typography variant="h5">Loading...</Typography>
             </Box>
         )
-    }
-
-    // Only show player if we have data
-    if (!player) {
-        return null
     }
 
     return (
         <Box
             sx={{
                 p: 2,
-                backgroundColor: player.colour || 'inherit',
                 display: 'flex',
-                height: "70px",
+                height: '70px',
                 alignItems: 'center',
+                justifyContent: 'space-between',
                 gap: 2,
                 border: '2px solid #000',
-                transition: 'box-shadow 0.3s ease',
-                '&:hover': {
-                    boxShadow: '4px 4px 0px 0px rgba(0,0,0,1)',
-                }
             }}
         >
-            {player.emoji && (
+            <Typography variant="h5">
+                {formatCentaurName(centaur, centaurId)}
+            </Typography>
+            {selectedRanking && (
                 <Typography
-                    variant="h4"
+                    variant="h5"
+                    sx={{ fontFamily: '"Roboto Mono", monospace' }}
                 >
-                    {player.emoji}
+                    {selectedRanking.currentMMR} MMR
                 </Typography>
             )}
-            <Typography
-                variant="h5"
-            >
-                {player.name}
-            </Typography>
         </Box>
     )
 }

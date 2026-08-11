@@ -1,7 +1,6 @@
 // processTurn.ts
 
 import {
-  GameRanking,
   GameResult,
   GameState,
   Move,
@@ -18,44 +17,27 @@ import {
 } from "firebase-admin/firestore"
 import { logger } from "../logger"
 import { createNewGame } from "../utils/createNewGame"
-import { getGameProcessor } from "./ProcessorFactory"
+import { TeamSnekProcessor } from "./TeamSnekProcessor"
 
-interface PlayerUpdateData {
-  playerID: string
-  type: "human" | "bot"
-  ref: FirebaseFirestore.DocumentReference // Reference to the ranking document
-  newRanking: GameRanking
-  shouldCreate: boolean
-  mmrChange: number
-  newMMR: number
-}
-
-interface PlayerData {
+interface TeamData {
   id: string
-  type: "human" | "bot"
-  rankingRef: FirebaseFirestore.DocumentReference // Reference to the ranking document
-  rankingData: Ranking | null // Existing ranking data
+  rankingRef: FirebaseFirestore.DocumentReference
+  rankingData: Ranking | null
   currentMMR: number
   gamesPlayed: number
-  exists: boolean // Whether the ranking document exists
+  exists: boolean
 }
 
 export interface ProcessTurnResult {
   newTurnCreated: boolean
   newTurnNumber?: number
   turnDurationSeconds?: number
-  turnExpiryTime?: number
   tournamentSchedule?: {
     sessionID: string
     gameID: string
     delaySeconds: number
     expectedScheduledStartMillis: number
   }
-  gameEnded?: boolean
-  gameState?: GameState
-  winners?: Winner[]
-  finalTurnNumber?: number
-  finalScores?: { [playerID: string]: number }
 }
 
 const DEFAULT_MMR = 1000
@@ -67,24 +49,12 @@ async function preparePlayerUpdates(
   gameID: string,
   gameState: GameState,
   winners: Winner[]
-): Promise<PlayerUpdateData[]> {
-  const gameType = gameState.setup.gameType // Get the game type
-
-  // Clones (gamePlayers with `botRef` set) share the underlying bot's
-  // identity and ranking doc — they exist purely as extra in-game snakes.
-  // Excluding them from MMR computation keeps a single bot from collecting
-  // multiple placement updates per game when it's fielded as N instances.
-  const mmrEligiblePlayers = gameState.setup.gamePlayers.filter((p) => !p.botRef)
-
-  const playerIDs = mmrEligiblePlayers.map((p) => p.id)
-  const playerTypes = new Map<string, "human" | "bot">()
-  mmrEligiblePlayers.forEach((p) => {
-    playerTypes.set(p.id, p.type)
-  })
+): Promise<void> {
+  const teams = gameState.setup.teams
 
   // Build references to the rankings documents
-  const rankingRefs = playerIDs.map((id) =>
-    admin.firestore().collection("rankings").doc(id)
+  const rankingRefs = teams.map((team) =>
+    admin.firestore().collection("rankings").doc(team.id)
   )
 
   // Fetch existing rankings
@@ -92,87 +62,79 @@ async function preparePlayerUpdates(
     rankingRefs.map((ref) => transaction.get(ref))
   )
 
-  const playerData: PlayerData[] = rankingDocs.map((doc, index) => {
+  const teamData: TeamData[] = rankingDocs.map((doc) => {
     const data = doc.data() as Ranking | undefined
-    const type = playerTypes.get(doc.id)!
-
-    const rankings = data?.rankings
-    const rankingForGameType = rankings ? rankings[gameType] : null
 
     return {
       id: doc.id,
-      type: type,
       rankingRef: doc.ref,
       rankingData: data || null,
-      currentMMR: rankingForGameType?.currentMMR ?? DEFAULT_MMR,
-      gamesPlayed: rankingForGameType?.gamesPlayed ?? 0,
+      currentMMR: data?.currentMMR ?? DEFAULT_MMR,
+      gamesPlayed: data?.gamesPlayed ?? 0,
       exists: doc.exists,
     }
   })
 
-  // Map of playerID to placement, handling draws
-  // First, create an array of player results. Clones are absent from
-  // playerData, so they neither receive nor contribute to MMR updates.
-  const playerResults = playerData.map((player) => {
-    const winner = winners.find((w) => w.playerID === player.id)
-    const score = winner ? winner.score : 0
-    return { playerID: player.id, score }
+  // Map of team ID to placement, handling draws
+  const teamResults = teamData.map((team) => {
+    const score = winners.find((w) => w.teamID === team.id)?.teamScore ?? 0
+    return { teamID: team.id, score }
   })
 
   // Sort by score in descending order
-  playerResults.sort((a, b) => b.score - a.score)
+  teamResults.sort((a, b) => b.score - a.score)
 
   // Assign placements, handling ties
   const placementsMap = new Map<string, number>()
   let currentPlacement = 1
-  for (let i = 0; i < playerResults.length; i++) {
-    const playerID = playerResults[i].playerID
-    const score = playerResults[i].score
+  for (let i = 0; i < teamResults.length; i++) {
+    const teamID = teamResults[i].teamID
+    const score = teamResults[i].score
 
-    // If not the first player and score is equal to previous score, same placement
-    if (i > 0 && score === playerResults[i - 1].score) {
+    // If not the first team and score is equal to previous score, same placement
+    if (i > 0 && score === teamResults[i - 1].score) {
       // Same placement as previous
-      placementsMap.set(playerID, currentPlacement)
+      placementsMap.set(teamID, currentPlacement)
     } else {
       // New placement
       currentPlacement = i + 1
-      placementsMap.set(playerID, currentPlacement)
+      placementsMap.set(teamID, currentPlacement)
     }
   }
 
-  // Get the list of placements in the same order as playerData
-  const placements: number[] = playerData.map(
-    (player) => placementsMap.get(player.id)!
+  // Get the list of placements in the same order as teamData
+  const placements: number[] = teamData.map(
+    (team) => placementsMap.get(team.id)!
   )
 
   // Prepare data for MMR calculation
-  const playersForMMR = playerData.map((player) => ({
-    mmr: player.currentMMR,
-    gamesPlayed: player.gamesPlayed,
+  const teamsForMMR = teamData.map((team) => ({
+    mmr: team.currentMMR,
+    gamesPlayed: team.gamesPlayed,
   }))
 
-  // Calculate MMR changes for all players
-  const mmrChanges = calculateMMRChanges(playersForMMR, placements)
+  // Calculate MMR changes for all teams
+  const mmrChanges = calculateMMRChanges(teamsForMMR, placements)
 
-  const updates: PlayerUpdateData[] = []
+  const mmrChangeByTeam = new Map<string, { mmrChange: number; newMMR: number }>()
   const now = Date.now()
 
-  for (let i = 0; i < playerData.length; i++) {
-    const player = playerData[i]
+  for (let i = 0; i < teamData.length; i++) {
+    const team = teamData[i]
     const mmrChange = mmrChanges[i]
     const placement = placements[i]
 
-    const newMMR = player.currentMMR + mmrChange
+    const newMMR = team.currentMMR + mmrChange
 
     const gameResult: GameResult = {
       sessionID,
       gameID,
       timestamp: Timestamp.fromMillis(now),
-      previousMMR: player.currentMMR,
+      previousMMR: team.currentMMR,
       mmrChange,
       placement,
-      opponents: playerData
-        .filter((p) => p.id !== player.id)
+      opponents: teamData
+        .filter((t) => t.id !== team.id)
         .map((opponent) => ({
           playerID: opponent.id,
           mmr: opponent.currentMMR,
@@ -180,7 +142,7 @@ async function preparePlayerUpdates(
         })),
     }
 
-    const existingRanking = player.rankingData?.rankings?.[gameType] ?? {
+    const existingRanking = team.rankingData ?? {
       currentMMR: DEFAULT_MMR,
       gamesPlayed: 0,
       wins: 0,
@@ -191,7 +153,7 @@ async function preparePlayerUpdates(
 
     const gameHistory = [...existingRanking.gameHistory, gameResult].slice(-100)
 
-    const newRanking: GameRanking = {
+    const newRanking: Ranking = {
       currentMMR: newMMR,
       gamesPlayed: existingRanking.gamesPlayed + 1,
       wins: existingRanking.wins + (placement === 1 ? 1 : 0),
@@ -200,71 +162,32 @@ async function preparePlayerUpdates(
       lastUpdated: FieldValue.serverTimestamp(),
     }
 
-    // Prepare the updated rankings object
-    const updatedRankings = {
-      ...(player.rankingData?.rankings || {}),
-      [gameType]: newRanking,
-    }
+    mmrChangeByTeam.set(team.id, { mmrChange, newMMR })
 
-    // // Prepare the full Ranking document
-    // const updatedRankingDoc: Ranking = {
-    //   playerID: player.id,
-    //   type: player.type,
-    //   rankings: updatedRankings,
-    //   lastUpdated: FieldValue.serverTimestamp(),
-    // }
-
-    updates.push({
-      playerID: player.id,
-      type: player.type,
-      ref: player.rankingRef,
-      newRanking: newRanking,
-      shouldCreate: !player.exists,
-      mmrChange,
-      newMMR,
-    })
-
-    logger.info(`Preparing ranking update for player ${player.id}`, {
-      previousMMR: player.currentMMR,
+    logger.info(`Preparing ranking update for team ${team.id}`, {
+      previousMMR: team.currentMMR,
       newMMR: newMMR,
       mmrChange,
       placement,
-      gamesPlayed: player.gamesPlayed,
-      creating: !player.exists,
+      gamesPlayed: team.gamesPlayed,
+      creating: !team.exists,
     })
 
-    // Now, write the updated ranking document
-    if (player.exists) {
-      // Update existing ranking document
-      transaction.update(player.rankingRef, {
-        playerID: player.id,
-        type: player.type,
-        rankings: updatedRankings,
-        lastUpdated: FieldValue.serverTimestamp(),
-      })
+    if (team.exists) {
+      transaction.update(team.rankingRef, { ...newRanking })
     } else {
-      // Create new ranking document
-      transaction.create(player.rankingRef, {
-        playerID: player.id,
-        type: player.type,
-        rankings: {
-          [gameType]: newRanking,
-        },
-        lastUpdated: FieldValue.serverTimestamp(),
-      })
+      transaction.create(team.rankingRef, newRanking)
     }
   }
 
   // Update the winners array to include mmrChange and newMMR
   for (const winner of winners) {
-    const playerUpdate = updates.find((u) => u.playerID === winner.playerID)
-    if (playerUpdate) {
-      winner.mmrChange = playerUpdate.mmrChange
-      winner.newMMR = playerUpdate.newMMR
+    const teamUpdate = mmrChangeByTeam.get(winner.teamID)
+    if (teamUpdate) {
+      winner.mmrChange = teamUpdate.mmrChange
+      winner.newMMR = teamUpdate.newMMR
     }
   }
-
-  return updates
 }
 
 export async function processTurn(
@@ -364,11 +287,7 @@ export async function processTurn(
       return { newTurnCreated: false }
     }
 
-    const processor = getGameProcessor(gameState)
-    if (!processor) {
-      logger.error(`No processor available `, { gameID })
-      throw `Processor not known: ${gameState.setup.gameType}`
-    }
+    const processor = new TeamSnekProcessor(gameState)
 
     const nextTurn = await processor.applyMoves(currentTurn, latestMoves)
     const now = Date.now()
@@ -379,8 +298,7 @@ export async function processTurn(
     nextTurn.endTime = Timestamp.fromDate(endTime)
 
     if (nextTurn.winners.length > 0) {
-      // Prepare all player ranking updates (reads and writes are done in preparePlayerUpdates)
-      // All ranking updates are handled within preparePlayerUpdates
+      // Prepare all ranking updates (reads and writes are done in preparePlayerUpdates)
       await preparePlayerUpdates(
         transaction,
         sessionID,
@@ -402,8 +320,8 @@ export async function processTurn(
       logger.info(`Game ${gameID} finished and rankings updated.`, {
         winners: nextTurn.winners,
       })
-      
-      return { newTurnCreated: false, tournamentSchedule: createResult.tournamentSchedule, gameEnded: true, gameState, winners: nextTurn.winners, finalTurnNumber: gameState.turns.length, finalScores: nextTurn.scores }
+
+      return { newTurnCreated: false, tournamentSchedule: createResult.tournamentSchedule }
     } else {
       // normal turn
       transaction.update(gameStateRef, {
@@ -433,12 +351,11 @@ export async function processTurn(
         }
       )
 
-      // Return metadata for caller to handle task scheduling and bot notifications
+      // Return metadata for caller to handle task scheduling
       return {
         newTurnCreated: true,
         newTurnNumber,
         turnDurationSeconds,
-        turnExpiryTime: now + turnDurationMillis,
       }
     }
   } catch (error) {

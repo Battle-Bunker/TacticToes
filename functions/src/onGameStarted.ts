@@ -30,7 +30,7 @@ export const onGameStarted = functions.firestore
     }
 
     if (afterData.tournamentMode) {
-      // Tournament games start on a schedule, not on readiness. Enqueue the
+      // Tournament games start on a schedule, not on start requests. Enqueue the
       // scheduler whenever the scheduled time is set or moved; a stale task
       // detects the change and no-ops.
       const scheduledChanged =
@@ -69,5 +69,5 @@ export const onGameStarted = functions.firestore
       return
     }
 
-    await startGame(sessionID, gameID, { kind: "playersReady" }, "onGameStarted")
+    await startGame(sessionID, gameID, { kind: "startRequested" }, "onGameStarted")
   })

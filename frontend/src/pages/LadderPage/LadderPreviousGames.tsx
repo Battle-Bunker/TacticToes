@@ -2,6 +2,8 @@
 
 import {
     Box,
+    CircularProgress,
+    Stack,
     Table,
     TableBody,
     TableCell,
@@ -9,22 +11,13 @@ import {
     TableHead,
     TableRow,
     Typography,
-    Stack,
 } from '@mui/material'
 import { GameResult } from '@shared/types/Game'
-import { doc, onSnapshot } from 'firebase/firestore'
-import React, { useEffect, useState } from 'react'
+import React from 'react'
 import { useNavigate } from 'react-router-dom'
-import { db } from '../../firebaseConfig'
-import { RankingData } from './types'
+import { useLadder } from './LadderContext'
 import { usePlayerInfo } from './usePlayerInfo'
-import { formatPlayerName, ordinalSuffix } from './utils'
-import { EmojiCycler } from '../../components/EmojiCycler'
-
-interface Props {
-    playerID: string
-    gameType: string
-}
+import { baseCentaurId, formatCentaurName, ordinalSuffix } from './utils'
 
 const formatDate = (date: Date) => {
     const hours = date.getHours().toString().padStart(2, '0')
@@ -32,32 +25,18 @@ const formatDate = (date: Date) => {
     return `${hours}:${minutes}`
 }
 
-export const LadderPreviousGames: React.FC<Props> = ({ playerID, gameType }) => {
+export const LadderPreviousGames: React.FC = () => {
     const navigate = useNavigate()
-    const [gameHistory, setGameHistory] = useState<GameResult[]>([])
-    const [loading, setLoading] = useState(true)
-    const { players, loadingPlayers } = usePlayerInfo(
+    const { selectedRanking, loadingSelected } = useLadder()
+    const gameHistory = [...(selectedRanking?.gameHistory ?? [])]
+        .reverse()
+        .slice(0, 10)
+    const { centaurs, loadingCentaurs } = usePlayerInfo(
         gameHistory.flatMap(game => game.opponents.map(opp => opp.playerID))
     )
 
-    useEffect(() => {
-        const rankingRef = doc(db, 'rankings', playerID)
-        const unsubscribe = onSnapshot(rankingRef, (doc) => {
-            if (doc.exists()) {
-                const data = doc.data() as RankingData
-                const history = data.rankings[gameType]?.gameHistory || []
-                setGameHistory([...history].reverse().slice(0, 10))
-            } else {
-                setGameHistory([])
-            }
-            setLoading(false)
-        })
-
-        return () => unsubscribe()
-    }, [playerID, gameType])
-
-    if (loading || loadingPlayers) {
-        <EmojiCycler fontSize="2rem" />
+    if (loadingSelected || loadingCentaurs) {
+        return <CircularProgress size={24} />
     }
 
     if (gameHistory.length === 0) {
@@ -100,7 +79,7 @@ export const LadderPreviousGames: React.FC<Props> = ({ playerID, gameType }) => 
                                         colSpan={3}
                                         sx={{
                                             backgroundColor: 'rgba(0,0,0,0.04)',
-                                            fontWeight: 'bold'
+                                            fontWeight: 'bold',
                                         }}
                                     >
                                         {dateStr}
@@ -117,24 +96,25 @@ export const LadderPreviousGames: React.FC<Props> = ({ playerID, gameType }) => 
                                             </a>
                                         </TableCell>
                                         <TableCell sx={{ whiteSpace: 'nowrap', p: 0 }}>
-                                            <Stack >
+                                            <Stack>
                                                 {game.opponents.map((opp) => {
-                                                    const player = players[opp.playerID]
+                                                    const opponentId = baseCentaurId(opp.playerID)
                                                     return (
                                                         <Box
                                                             key={opp.playerID}
-                                                            onClick={() => navigate(`/ladder/${opp.playerID}`)}
+                                                            onClick={() => navigate(`/ladder/${opponentId}`)}
                                                             sx={{
                                                                 cursor: 'pointer',
                                                                 '&:hover': {
-                                                                    opacity: 0.7
+                                                                    opacity: 0.7,
                                                                 },
-                                                                backgroundColor: player?.colour || 'inherit',
                                                                 display: 'inline-block',
-
                                                             }}
                                                         >
-                                                            {formatPlayerName(player, opp.playerID)}
+                                                            {formatCentaurName(
+                                                                centaurs[opponentId],
+                                                                opp.playerID
+                                                            )}
                                                         </Box>
                                                     )
                                                 })}

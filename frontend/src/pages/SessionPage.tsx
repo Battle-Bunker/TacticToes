@@ -1,4 +1,4 @@
-import { Box, Stack } from "@mui/material"
+import { Box, CircularProgress, Stack } from "@mui/material"
 import { Session } from "@shared/types/Game"
 import {
   doc,
@@ -9,7 +9,6 @@ import {
 import React, { useEffect, useState, useRef } from "react"
 import { useNavigate, useParams, useLocation } from "react-router-dom"
 import { db } from "../firebaseConfig"
-import { EmojiCycler } from "../components/EmojiCycler"
 import { useUser } from "../context/UserContext"
 
 const Sessionpage: React.FC = () => {
@@ -89,7 +88,7 @@ const Sessionpage: React.FC = () => {
           height: "100vh",
         }}
       >
-        <EmojiCycler />
+        <CircularProgress />
       </Box>
     </Stack>
   )

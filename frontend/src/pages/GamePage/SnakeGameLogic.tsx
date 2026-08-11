@@ -2,7 +2,7 @@ import { Box, SxProps, Theme } from "@mui/material"
 import React from "react"
 import { GameLogicProps, GameLogicReturn } from "./GameGrid"
 
-const BORDER_WIDTH = 4 // Width of the white border and corner size
+const BORDER_WIDTH = 4 // Width of the outline border and corner size
 
 interface BorderStyles {
   borderTop: string
@@ -87,26 +87,23 @@ interface CellSnakeSegments {
 
 const GameLogic = ({
   gameState,
-  players,
   cellSize,
   selectedTurnIndex,
 }: GameLogicProps): GameLogicReturn => {
   const cellContentMap: { [index: number]: JSX.Element } = {}
   const cellBackgroundMap: { [index: number]: string } = {}
-  const cellAllowedMoveMap: { [index: number]: boolean } = {}
   const clashesAtPosition: { [index: number]: ClashInfo } = {}
-  const selectedTurn = gameState?.turns[selectedTurnIndex]
+  const selectedTurn = gameState.turns[selectedTurnIndex]
 
-  if (!selectedTurn || !gameState) {
+  if (!selectedTurn) {
     return {
       cellContentMap,
       cellBackgroundMap,
-      cellAllowedMoveMap,
       clashesAtPosition,
     }
   }
 
-  const { playerPieces, allowedMoves, clashes, food, hazards, walls, fertileTiles, invulnerabilityPotions, playerInvulnerabilityLevel } =
+  const { playerPieces, clashes, food, hazards, walls, fertileTiles, invulnerabilityPotions, playerInvulnerabilityLevel } =
     selectedTurn
 
   // Map clashes to positions
@@ -116,35 +113,15 @@ const GameLogic = ({
     })
   }
 
-  // Map allowed moves for all players
-  Object.entries(allowedMoves).forEach(([, moves]) => {
-    moves.forEach((position) => {
-      cellAllowedMoveMap[position] = true
-    })
-  })
-
   const cellSnakeSegments: CellSnakeSegments = {}
 
-  const getSnakeColor = (playerID: string): string => {
-    const playerInfo = players.find((p) => p.id === playerID)
-    
-    if (
-      (gameState.setup.gameType === "teamsnek" ||
-        gameState.setup.gameType === "kingsnek") &&
-      gameState.setup.teams
-    ) {
-      const gamePlayer = gameState.setup.gamePlayers.find(
-        (gp) => gp.id === playerID,
-      )
-      if (gamePlayer?.teamID) {
-        const team = gameState.setup.teams.find((t) => t.id === gamePlayer.teamID)
-        if (team) {
-          return team.color
-        }
-      }
-    }
+  const getGamePlayer = (playerID: string) =>
+    gameState.setup.gamePlayers.find((gp) => gp.id === playerID)
 
-    return playerInfo?.colour || "white"
+  const getSnakeColor = (playerID: string): string => {
+    const teamID = getGamePlayer(playerID)?.teamID
+    const team = gameState.setup.teams.find((t) => t.id === teamID)
+    return team?.color ?? "white"
   }
 
   const getOutlineColor = (playerID: string): string => {
@@ -226,7 +203,6 @@ const GameLogic = ({
 
     Object.entries(playersInCell).forEach(([playerID, segmentInfo]) => {
       const { hasHead, hasTail, count } = segmentInfo as SnakeSegmentInfo
-      const playerInfo = players.find((p) => p.id === playerID)
       const positions = playerPieces[playerID]
 
       const outlineColor = getOutlineColor(playerID)
@@ -238,7 +214,7 @@ const GameLogic = ({
       )
 
       let content: JSX.Element | null = null
-      
+
       const snakeColor = getSnakeColor(playerID)
 
       const commonBoxStyle: SxProps<Theme> = {
@@ -252,10 +228,8 @@ const GameLogic = ({
       }
 
       if (hasHead) {
-        const gamePlayer = gameState.setup.gamePlayers.find(gp => gp.id === playerID)
-        const isKing = gameState.setup.gameType === 'kingsnek' && gamePlayer?.isKing
-        const displayEmoji = isKing ? "👑" : (playerInfo?.emoji || "⭕")
-        
+        const letter = getGamePlayer(playerID)?.letter ?? "?"
+
         content = (
           <Cell
             key={`head-${playerID}-${position}-${selectedTurnIndex}`}
@@ -264,9 +238,18 @@ const GameLogic = ({
             cornerColor={outlineColor}
           >
             <span
-              style={{ fontSize: cellSize * 0.8, lineHeight: 1, zIndex: 2 }}
+              style={{
+                fontSize: cellSize * 0.65,
+                lineHeight: 1,
+                zIndex: 2,
+                color: "white",
+                fontWeight: 900,
+                fontFamily: "sans-serif",
+                textShadow:
+                  "0 0 3px rgba(0, 0, 0, 0.9), 0 1px 2px rgba(0, 0, 0, 0.7)",
+              }}
             >
-              {displayEmoji}
+              {letter}
             </span>
           </Cell>
         )
@@ -439,7 +422,6 @@ const GameLogic = ({
   return {
     cellContentMap,
     cellBackgroundMap,
-    cellAllowedMoveMap,
     clashesAtPosition,
   }
 }

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react"
+import React from "react"
 import {
   Dialog,
   DialogTitle,
@@ -7,68 +7,30 @@ import {
   DialogActions,
   Button,
 } from "@mui/material"
-import {
-  ColorClashRules,
-  Connect4Rules,
-  KingSnekRules,
-  LongBoiRules,
-  ReversiRules,
-  SnekRules,
-  TacticToesRules,
-  TeamSnekRules,
-} from "../../constants/Rules"
-import { GameType } from "@shared/types/Game"
+import { TeamSnekRules } from "../../constants/Rules"
 
 interface RulesDialogProps {
   open: boolean
   onClose: () => void
-  rules?: GameType
 }
 
-export const getRulesComponent = (rules?: GameType): React.FC => {
-  switch (rules) {
-    case "connect4":
-      return Connect4Rules
-    case "longboi":
-      return LongBoiRules
-    case "tactictoes":
-      return TacticToesRules
-    case "snek":
-      return SnekRules
-    case "teamsnek":
-      return TeamSnekRules
-    case "kingsnek":
-      return KingSnekRules
-    case "colourclash":
-      return ColorClashRules
-    case "reversi":
-      return ReversiRules
-    default:
-      return Connect4Rules // Fallback if no valid rules type is provided
-  }
-}
-
-const RulesDialog: React.FC<RulesDialogProps> = ({ open, onClose, rules }) => {
-  const [RulesComponent, setRulesComponent] = useState<React.FC>(() =>
-    getRulesComponent(rules),
-  )
-
-  useEffect(() => {
-    setRulesComponent(() => getRulesComponent(rules))
-  }, [rules])
-
+const RulesDialog: React.FC<RulesDialogProps> = ({ open, onClose }) => {
   return (
-    <Dialog open={open} onClose={onClose} PaperProps={{
-      sx: {
-        border: "2px solid black",
-        borderRadius: 0,
-        boxShadow: "none",
-      },
-    }}>
-      <DialogTitle>{rules} rules</DialogTitle>
+    <Dialog
+      open={open}
+      onClose={onClose}
+      PaperProps={{
+        sx: {
+          border: "2px solid black",
+          borderRadius: 0,
+          boxShadow: "none",
+        },
+      }}
+    >
+      <DialogTitle>Team Snek rules</DialogTitle>
       <DialogContent>
-        <DialogContentText>
-          <RulesComponent />
+        <DialogContentText component="div">
+          <TeamSnekRules />
         </DialogContentText>
       </DialogContent>
       <DialogActions>

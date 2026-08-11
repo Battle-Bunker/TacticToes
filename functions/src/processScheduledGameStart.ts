@@ -4,7 +4,7 @@ import { startGame } from "./utils/startGame"
 
 /**
  * Tournament-mode game start. Same job as onGameStarted, just triggered by the
- * clock instead of by readiness — so it delegates to the same startGame(),
+ * clock instead of by the owner — so it delegates to the same startGame(),
  * which re-validates the schedule against fresh data and guarantees a single
  * start even if this task is delivered more than once.
  */

@@ -1,13 +1,15 @@
 // src/pages/LadderPage/index.tsx
 
-import { Stack } from '@mui/material'
-import { Route, Routes, useParams } from 'react-router-dom'
+import { Box, Stack } from '@mui/material'
+import { useParams } from 'react-router-dom'
 import { LadderProvider } from './LadderContext'
-import { LadderGameView } from './LadderGameView'
-import { LadderOverview } from './LadderOverview'
+import { LadderLeaderboard } from './LadderLeaderboard'
+import { LadderPlayerStats } from './LadderPlayerStats'
+import { LadderPreviousGames } from './LadderPreviousGames'
+import { PlayerInfoHeader } from './PlayerInfoHeader'
 
-const LadderPageLayout = () => {
-    const { playerID } = useParams<{ playerID: string }>()
+const LadderPage = () => {
+    const { centaurId } = useParams<{ centaurId: string }>()
 
     return (
         <Stack
@@ -18,21 +20,25 @@ const LadderPageLayout = () => {
                 justifyContent: "flex-start",
             }}
         >
-            <LadderProvider playerID={playerID}>
-                <Routes>
-                    <Route path="/" element={<LadderOverview />} />
-                    <Route path="/:gameType" element={<LadderGameView />} />
-                </Routes>
+            <LadderProvider centaurId={centaurId}>
+                {centaurId && (
+                    <>
+                        <PlayerInfoHeader centaurId={centaurId} />
+                        <Box sx={{ mt: 3 }}>
+                            <LadderPlayerStats />
+                        </Box>
+                    </>
+                )}
+                <Box sx={{ mt: 3 }}>
+                    <LadderLeaderboard centaurId={centaurId} />
+                </Box>
+                {centaurId && (
+                    <Box sx={{ mt: 3 }}>
+                        <LadderPreviousGames />
+                    </Box>
+                )}
             </LadderProvider>
         </Stack>
-    )
-}
-
-const LadderPage = () => {
-    return (
-        <Routes>
-            <Route path="/:playerID/*" element={<LadderPageLayout />} />
-        </Routes>
     )
 }
 

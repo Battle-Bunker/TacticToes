@@ -1,209 +1,169 @@
-  // @shared/types/Game.ts
+// @shared/types/Game.ts
 
-  export type Timestamp = any
-  export type FieldValue = any
+export type Timestamp = any
+export type FieldValue = any
 
-  // Define the Winner interface
-  export interface Winner {
-    playerID: string
-    score: number
-    winningSquares: number[]
-    mmrChange?: number // Added mmrChange to include resulting MMR for the game
-    newMMR?: number    // Added newMMR to include the player's new MMR
-    teamID?: string
-    teamScore?: number
-  }
+export interface Winner {
+  playerID: string
+  score: number
+  winningSquares: number[]
+  mmrChange?: number
+  newMMR?: number
+  teamID: string
+  teamScore: number
+}
 
-  // Move interface
-  export interface Move {
-    gameID: string
-    moveNumber: number // The turn number
-    playerID: string
-    move: number // The index of the square the player wants to move into
-    timestamp: FieldValue | Timestamp // Server timestamp when the move was submitted
-  }
+export interface Move {
+  gameID: string
+  moveNumber: number
+  playerID: string
+  move: number // Full-board index of the target square (perimeter included)
+  timestamp: FieldValue | Timestamp // Must be a server timestamp
+}
 
-  // Public interface for move statuses
-  export interface MoveStatus {
-    moveNumber: number
-    alivePlayerIDs: string[]
-    movedPlayerIDs: string[]
-  }
+export interface MoveStatus {
+  moveNumber: number
+  alivePlayerIDs: string[]
+  movedPlayerIDs: string[]
+}
 
-  export type GameType =
-    | "connect4"
-    | "longboi"
-    | "tactictoes"
-    | "snek"
-    | "colourclash"
-    | "reversi"
-    | "teamsnek"
-    | "kingsnek"
+export interface Session {
+  latestGameID: string | null
+  timeCreated: Timestamp | FieldValue
+  owner?: string | null
+}
 
-  export interface Session {
-    latestGameID: string | null
-    timeCreated: Timestamp | FieldValue
-    owner?: string | null
-  }
+// A team is one centaur plus its snakes: id and name come from the centaur.
+export interface Team {
+  id: string // == centaur id
+  name: string // snapshot of the centaur's name when added
+  color: string
+}
 
-  // Team type
-  export interface Team {
-    id: string
-    name: string
-    color: string
-  }
+export interface GameSetup {
+  teams: Team[]
+  snakesPerTeam: number
+  boardWidth: number
+  boardHeight: number
+  maxTurnTime: number // Time limit per turn in seconds
+  firstTurnTime?: number // Time limit for turn 0 in seconds (defaults to 60)
+  startRequested: boolean
+  started: boolean // Set true when GameState is created to avoid double handling
+  timeCreated: Timestamp | FieldValue
+  maxTurns?: number
+  hazardPercentage?: number // Percentage of the board to fill with hazards (defaults to 0)
+  teamClustersEnabled?: boolean
+  fertileGroundEnabled?: boolean
+  fertileGroundDensity?: number // Percentage of tiles that are fertile (0-100)
+  fertileGroundClustering?: number // Clustering level 1-20 (1=scattered, 20=blobby, 10=default)
+  presetFertileTiles?: number[]
+  presetHazards?: number[]
+  presetPlayerPositions?: { [playerID: string]: number }
+  presetFood?: number[]
+  usePreviewBoard?: boolean
+  foodSpawnRate?: number // Expected food spawned per turn (0-5, defaults to 0.5)
+  invulnerabilityPotionEnabled?: boolean
+  invulnerabilityPotionSpawnRate?: number // 0.05 to 1, defaults to 0.15
+  tournamentMode?: boolean
+  scheduledStartTime?: Timestamp | null
+  remainingRounds?: number
+  interludeDuration?: number
+}
 
+// One snake on the board. Generated server-side at game start from
+// teams x snakesPerTeam: the first snake of a team has id == team.id,
+// the rest are `${team.id}#${k}` (k = 2..snakesPerTeam).
+export interface GamePlayer {
+  id: string
+  teamID: string
+  letter: string // "A".."Z", consecutive within the team
+}
 
-  export interface GameSetup {
-    gameType: GameType
-    gamePlayers: GamePlayer[]
-    boardWidth: number // The width of the board
-    boardHeight: number // The height of the board
-    playersReady: string[]
-    maxTurnTime: number // Time limit per turn in seconds
-    firstTurnTime?: number // Time limit for first turn (turn 0) in seconds (optional for backward compatibility, defaults to 60)
-    startRequested: boolean
-    started: boolean // Set true when GameState is created to avoid double handling
-    timeCreated: Timestamp | FieldValue
-    teams?: Team[]
-    maxTurns?: number // Default: 100
-    hazardPercentage?: number // Percentage of the board to fill with hazards (defaults to 0)
-    gameMode?: "individual" | "team"
-    teamClustersEnabled?: boolean
-    fertileGroundEnabled?: boolean // Enable fertile ground tiles
-    fertileGroundDensity?: number // Percentage of tiles that are fertile (0-100)
-    fertileGroundClustering?: number // Clustering level 1-20 (1=scattered, 20=blobby, 10=default)
-    presetFertileTiles?: number[]
-    presetHazards?: number[]
-    presetPlayerPositions?: { [playerID: string]: number }
-    presetFood?: number[]
-    usePreviewBoard?: boolean
-    foodSpawnRate?: number // Expected food spawned per turn (0-5, defaults to 0.5)
-    invulnerabilityPotionEnabled?: boolean
-    invulnerabilityPotionSpawnRate?: number // 0.05 to 1, defaults to 0.15
-    skipConfirmation?: boolean
-    tournamentMode?: boolean
-    scheduledStartTime?: Timestamp | null
-    remainingRounds?: number
-    interludeDuration?: number
-  }
+// The setup as embedded in a started game document.
+export interface StartedGameSetup extends GameSetup {
+  gamePlayers: GamePlayer[]
+}
 
-  // Updated GameState interface with the new 'winners' structure
-  export interface GameState {
-    setup: GameSetup
-    turns: Turn[]
-    timeCreated: Timestamp | FieldValue
-    timeFinished: Timestamp | FieldValue | null
-  }
+export interface GameState {
+  setup: StartedGameSetup
+  turns: Turn[]
+  timeCreated: Timestamp | FieldValue
+  timeFinished: Timestamp | FieldValue | null
+}
 
-  export interface GamePlayer {
-    id: string
-    type: "bot" | "human"
-    teamID?: string
-    isKing?: boolean
-    /**
-     * For bot clones: the underlying `bots/<id>` document this clone points to.
-     * Unset for the original (first) instance of a bot, where `id === botID`.
-     */
-    botRef?: string
-    /**
-     * For bot clones: the per-game display name shown in the UI and
-     * forwarded to the bot in `you.name` / `snakes[*].name`.
-     */
-    displayName?: string
-    /**
-     * For bot clones: the per-game display emoji shown in the UI and
-     * forwarded to the bot in `you.emoji` / `snakes[*].emoji`.
-     */
-    displayEmoji?: string
-  }
+// users/{uid} — Google-authenticated account. Only `name` is stored.
+export interface UserProfile {
+  name: string
+}
 
-  export interface Player {
-    id: string
-    name: string
-    emoji: string
-    colour: string
-    createdAt: Timestamp | FieldValue
-  }
+// centaurs/{id} — a centaur is a Firebase-connected snake controller.
+export interface Centaur {
+  id: string
+  name: string
+  owner: string // uid of the owning user
+  public: boolean // whether other users may add this centaur to their games
+  createdAt: Timestamp | FieldValue
+}
 
-  export interface Human extends Player {
-    email?: string
-  }
+export interface Turn {
+  playerHealth: { [playerID: string]: number }
+  startTime: Timestamp
+  endTime: Timestamp
+  scores: { [playerID: string]: number }
+  alivePlayers: string[]
+  food: number[]
+  hazards: number[]
+  playerPieces: { [playerID: string]: number[] } // Snake body, index 0 = head
+  allowedMoves: { [playerID: string]: number[] }
+  walls: number[]
+  clashes: Clash[]
+  moves: { [playerID: string]: number } // Move actually applied for each player
+  winners: Winner[]
+  teamScores?: { [teamID: string]: number }
+  scoringUnit?: "individual" | "team"
+  teamClusterFallback?: boolean // Team clusters requested but fell back
+  fertileTiles?: number[]
+  invulnerabilityPotions?: number[]
+  playerInvulnerabilityLevel?: { [playerID: string]: number }
+  activeEffects?: ActiveEffect[]
+}
 
-  export interface Bot extends Player {
-    owner: string
-    url: string
-    capabilities: GameType[]
-    public: boolean
-  }
+export interface ActiveEffect {
+  playerID: string
+  type: "invulnerability_buff" | "invulnerability_debuff"
+  level: number
+  expiryTurn: number
+  sourcePlayerID: string
+}
 
-  export interface Turn {
-    playerHealth: { [playerID: string]: number } // Map of playerID to health
-    startTime: Timestamp // When the turn started
-    endTime: Timestamp // When the turn should end
-    scores: { [playerID: string]: number } // Map of playerID to score
-    alivePlayers: string[] // List of player IDs who are still alive
-    food: number[] // Positions of food on the board
-    hazards: number[] // Positions of hazards on the board
-    playerPieces: { [playerID: string]: number[] } // Each snake is represented by a map entry
-    allowedMoves: { [playerID: string]: number[] } // Map of playerID to allowed move indexes
-    walls: number[] // Positions of walls on the board
-    clashes: Clash[] // Array of clashes
-    moves: { [playerID: string]: number }
-    winners: Winner[] // Updated to an array of winner objects
-    teamScores?: { [teamID: string]: number } // Optional: only for team games
-    eliminatedTeams?: string[] // Optional: only for team games
-    turnNumber?: number // Optional: only for team games
-    scoringUnit?: 'individual' | 'team' // How scores/winners are aggregated
-    teamClusterFallback?: boolean // Optional: team clusters requested but fell back
-    fertileTiles?: number[] // Positions of fertile ground tiles
-    invulnerabilityPotions?: number[]
-    playerInvulnerabilityLevel?: { [playerID: string]: number }
-    activeEffects?: ActiveEffect[]
-  }
+export interface Clash {
+  index: number
+  playerIDs: string[]
+  reason: string
+}
 
-  export interface ActiveEffect {
-    playerID: string
-    type: 'invulnerability_buff' | 'invulnerability_debuff'
-    level: number
-    expiryTurn: number
-    sourcePlayerID: string
-  }
+export interface GameResult {
+  sessionID: string
+  gameID: string
+  timestamp: Timestamp
+  previousMMR: number
+  mmrChange: number
+  placement: number
+  opponents: OpponentInfo[]
+}
 
-  export interface Clash {
-    index: number
-    playerIDs: string[]
-    reason: string
-  }
+// rankings/{centaurId}
+export interface Ranking {
+  currentMMR: number
+  gamesPlayed: number
+  wins: number
+  losses: number
+  gameHistory: GameResult[]
+  lastUpdated: Timestamp | FieldValue
+}
 
-  export interface GameResult {
-    sessionID: string
-    gameID: string
-    timestamp: Timestamp
-    previousMMR: number
-    mmrChange: number
-    placement: number
-    opponents: OpponentInfo[]
-  }
-
-  export interface Ranking {
-    playerID: string // ID of the player (user ID or bot ID)
-    type: "human" | "bot" // Type of player
-    rankings: { [gameType: string]: GameRanking } // Map of gameType to GameRanking
-    lastUpdated: Timestamp | FieldValue
-  }
-
-  export interface GameRanking {
-    currentMMR: number
-    gamesPlayed: number
-    wins: number
-    losses: number
-    gameHistory: GameResult[]
-    lastUpdated: Timestamp | FieldValue
-  }
-
-  export interface OpponentInfo {
-    playerID: string
-    mmr: number
-    placement: number
-  }
+export interface OpponentInfo {
+  playerID: string
+  mmr: number
+  placement: number
+}

@@ -1,8 +1,8 @@
 import * as functions from "firebase-functions/v1"
 import * as admin from "firebase-admin"
-import { GameSetup, GameState, GameType } from "@shared/types/Game"
-import { getProcessorClass } from "./gameprocessors/ProcessorFactory"
-import { SnekProcessor } from "./gameprocessors/SnekProcessor"
+import { GameSetup, GameState, StartedGameSetup } from "@shared/types/Game"
+import { TeamSnekProcessor } from "./gameprocessors/TeamSnekProcessor"
+import { expandTeams } from "./utils/expandTeams"
 import { Timestamp } from "firebase-admin/firestore"
 
 export const generatePreviewBoard = functions.https.onCall(async (data, context) => {
@@ -28,21 +28,9 @@ export const generatePreviewBoard = functions.https.onCall(async (data, context)
 
   const setup = setupSnap.data() as GameSetup
 
-  const snekTypes: GameType[] = ["snek", "teamsnek", "kingsnek"]
-  if (!snekTypes.includes(setup.gameType)) {
-    throw new functions.https.HttpsError("invalid-argument", "Preview board is only supported for snek game types")
-  }
-
-  const ProcessorClass = getProcessorClass(setup.gameType)
-  if (!ProcessorClass) {
-    throw new functions.https.HttpsError("internal", "Could not find processor for game type")
-  }
-
-  const activePlayers = ProcessorClass.filterActivePlayers(setup)
-
-  const previewSetup: GameSetup = {
+  const previewSetup: StartedGameSetup = {
     ...setup,
-    gamePlayers: activePlayers,
+    gamePlayers: expandTeams(setup.teams, setup.snakesPerTeam),
     usePreviewBoard: false,
     presetFertileTiles: [],
     presetHazards: [],
@@ -57,7 +45,7 @@ export const generatePreviewBoard = functions.https.onCall(async (data, context)
     timeFinished: null,
   }
 
-  const processor = new ProcessorClass(mockGameState) as SnekProcessor
+  const processor = new TeamSnekProcessor(mockGameState)
   const previewData = processor.generatePreviewBoard()
 
   await setupRef.update({

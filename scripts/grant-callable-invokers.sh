@@ -8,10 +8,9 @@ PROJECT_ID="${1:-tactic-toes-cyphid-dev}"
 REGION="${2:-us-central1}"
 
 CALLABLE_FUNCTIONS=(
-  "wakeBot"
-  "createBotApiKey"
-  "exchangeBotApiKey"
-  "getBotApiKeyStatus"
+  "createCentaurApiKey"
+  "exchangeCentaurApiKey"
+  "getCentaurApiKeyStatus"
 )
 
 if ! command -v gcloud >/dev/null 2>&1; then

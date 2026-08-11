@@ -1,4 +1,4 @@
-# Tactic Toes — Development & Deployment Guide
+# Team Snek — Development & Deployment Guide
 
 This project runs on **Firebase Functions** and uses **Google Cloud Tasks** for background jobs.  
 It is configured to support both:
@@ -204,11 +204,10 @@ gcloud services enable   cloudtasks.googleapis.com   appengine.googleapis.com   
 gcloud app create --region=us-central
 ```
 
-### 4.4 Create the Cloud Tasks queues
+### 4.4 Create the Cloud Tasks queue
 
 ```bash
 gcloud tasks queues create turn-expirations --location=us-central1
-gcloud tasks queues create bot-notifications --location=us-central1
 ```
 
 ### 4.5 Grant IAM roles to the calling Service Account
@@ -319,9 +318,8 @@ gcloud services enable cloudtasks.googleapis.com appengine.googleapis.com cloudf
 # Create App Engine (us-central)
 gcloud app create --region=us-central
 
-# Create queues (us-central1)
+# Create queue (us-central1)
 gcloud tasks queues create turn-expirations --location=us-central1
-gcloud tasks queues create bot-notifications --location=us-central1
 
 # IAM roles
 PROJECT_ID=<YOUR_PROJECT_ID>

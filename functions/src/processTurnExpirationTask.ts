@@ -3,7 +3,6 @@ import { onTaskDispatched } from "firebase-functions/v2/tasks"
 import { getFunctions } from "firebase-admin/functions"
 import * as logger from "firebase-functions/logger"
 import { processTurn } from "./gameprocessors/processTurn"
-import { notifyBotsGameEnd } from "./utils/notifyBots"
 import { announceTurn } from "./utils/announceTurn"
 
 /**
@@ -66,20 +65,18 @@ export const processTurnExpirationTask = onTaskDispatched(
     })
     logger.info(`[processTurnExpirationTask] Transaction completed`, { gameID, turnNumber, result })
 
-    // After transaction commits, schedule turn expiration and notify bots —
-    // the same announceTurn() path turn 0 goes through.
+    // After transaction commits, schedule turn expiration — the same
+    // announceTurn() path turn 0 goes through.
     if (
       result?.newTurnCreated &&
       result.newTurnNumber !== undefined &&
-      result.turnDurationSeconds !== undefined &&
-      result.turnExpiryTime !== undefined
+      result.turnDurationSeconds !== undefined
     ) {
       await announceTurn({
         sessionID,
         gameID,
         turnNumber: result.newTurnNumber,
         turnDurationSeconds: result.turnDurationSeconds,
-        turnExpiryTime: result.turnExpiryTime,
         source: "processTurnExpirationTask",
       })
     } else {
@@ -104,14 +101,6 @@ export const processTurnExpirationTask = onTaskDispatched(
         )
       } catch (error) {
         logger.error(`[processTurnExpirationTask] Error scheduling tournament game start`, { schedGameID, error })
-      }
-    }
-
-    if (result?.gameEnded && result.gameState && result.winners && result.finalTurnNumber !== undefined && result.finalScores) {
-      try {
-        await notifyBotsGameEnd(sessionID, gameID, result.gameState, result.winners, result.finalTurnNumber, result.finalScores)
-      } catch (error) {
-        logger.error(`[processTurnExpirationTask] Error sending /end to bots for game ${gameID}`, error)
       }
     }
 

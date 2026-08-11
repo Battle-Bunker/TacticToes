@@ -1,4 +1,4 @@
-// src/pages/GamePage/components/GameSetup.tsx
+// src/pages/GamePage/GameSetup.tsx
 
 import {
   arrayUnion,
@@ -16,13 +16,10 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link } from "react-router-dom";
 import { useUser } from "../../context/UserContext";
 import { db, functions } from "../../firebaseConfig";
-import { TeamConfiguration } from "../../components/TeamConfiguration";
 import { SnekConfiguration } from "../../components/SnekConfiguration";
-import { PlayerConfiguration } from "../../components/PlayerConfiguration";
-import {
-  BotHealthProvider,
-  useBotHealth,
-} from "../../context/BotHealthContext";
+import { TeamList } from "../../components/TeamList";
+import { TeamSnekRules } from "../../constants/Rules";
+import { nextTeamColor } from "../../utils/teamColors";
 
 import {
   Box,
@@ -38,18 +35,11 @@ import {
   SelectChangeEvent,
   Slider,
   Stack,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
   TextField,
   Typography,
 } from "@mui/material";
-import { GamePlayer, GameType, Team } from "@shared/types/Game";
+import { Centaur, Team } from "@shared/types/Game";
 import { useGameStateContext } from "../../context/GameStateContext";
-import { getRulesComponent } from "./RulesDialog";
 
 // Define the board size mapping
 const BOARD_SIZE_MAPPING = {
@@ -67,41 +57,13 @@ const MAX_BOARD_DIMENSION = 99;
 
 type BoardSize = keyof typeof BOARD_SIZE_MAPPING | "custom";
 
-// Curated set of visually-distinct, easy-to-name emojis used to give bot
-// clones a recognisable per-game identity. Drawn at clone-creation time and
-// stored on the GamePlayer entry so the choice is stable for the game.
-const CLONE_EMOJI_POOL = [
-  "🐶", "🐱", "🦊", "🐻", "🐯", "🐸", "🐙", "🐢", "🦄", "🐝",
-  "🦋", "🐳", "🦖", "🐧", "🐔", "🦒", "🦘", "🐮", "🐷", "🐵",
-  "🐰", "🦔", "🐌", "🐞", "🦀", "🐍", "🌵", "🍕", "🌈", "⚡",
-];
-
-function pickCloneEmoji(usedEmojis: Set<string>): string {
-  const available = CLONE_EMOJI_POOL.filter((e) => !usedEmojis.has(e));
-  const pool = available.length > 0 ? available : CLONE_EMOJI_POOL;
-  return pool[Math.floor(Math.random() * pool.length)];
-}
-
-// Short, URL-safe suffix used to disambiguate clone GamePlayer ids from the
-// underlying bot id. Clone ids take the form `${botID}#${suffix}`, where the
-// suffix keeps logs/IDs short while remaining collision-resistant.
-function generateCloneSuffix(): string {
-  const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
-  let s = "";
-  for (let i = 0; i < 6; i++) {
-    s += alphabet[Math.floor(Math.random() * alphabet.length)];
-  }
-  return s;
-}
+const SNAKES_PER_TEAM_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8];
 
 const GameSetup: React.FC = () => {
-  const { userID, colour } = useUser();
+  const { userID } = useUser();
   const {
     gameSetup,
-    players,
-    bots,
-    gameType,
-    setGameType,
+    centaurs,
     sessionName,
     gameID,
     gameState,
@@ -113,14 +75,12 @@ const GameSetup: React.FC = () => {
   const isConfigDisabled = hasOwner && !isOwner;
 
   const [secondsPerTurn, setSecondsPerTurn] = useState<string>("10");
-  const [RulesComponent, setRulesComponent] = useState<React.FC | null>(null);
   const [boardSize, setBoardSize] = useState<BoardSize>("medium");
   // Local text state for the Custom width/height inputs so partial typing
   // (e.g. clearing the field) doesn't write invalid values to Firestore.
   const [customWidth, setCustomWidth] = useState<string>("21");
   const [customHeight, setCustomHeight] = useState<string>("21");
-  const [teams, setTeams] = useState<Team[]>(gameSetup?.teams || []);
-  const [botSearchQuery, setBotSearchQuery] = useState("");
+  const [centaurSearchQuery, setCentaurSearchQuery] = useState("");
   const [maxTurnsEnabled, setMaxTurnsEnabled] = useState<boolean>(
     gameSetup?.maxTurns !== undefined,
   );
@@ -163,13 +123,11 @@ const GameSetup: React.FC = () => {
   const [scheduledStartInput, setScheduledStartInput] = useState<string>("");
   const [tournamentCountdown, setTournamentCountdown] = useState<string>("");
 
-  const { getBotStatus } = useBotHealth();
-
   const [ownerNames, setOwnerNames] = useState<Record<string, string>>({});
 
   const ownerIDs = useMemo(
-    () => Array.from(new Set(bots.map((b) => b.owner))),
-    [bots],
+    () => Array.from(new Set(centaurs.map((c) => c.owner))),
+    [centaurs],
   );
 
   useEffect(() => {
@@ -216,13 +174,10 @@ const GameSetup: React.FC = () => {
   const usePreviewBoardRef = useRef(usePreviewBoard);
   useEffect(() => { usePreviewBoardRef.current = usePreviewBoard; }, [usePreviewBoard]);
 
-  const isSnekGame = gameType === "snek" || gameType === "teamsnek" || gameType === "kingsnek";
-
   const requestCounterRef = useRef(0);
   const initialGenerationDoneRef = useRef(false);
 
   const firePreviewRequest = useCallback(async (shouldUncheck: boolean) => {
-    if (!isSnekGame) return;
     if (shouldUncheck && usePreviewBoardRef.current) {
       updateDoc(gameDocRef, { usePreviewBoard: false });
     }
@@ -237,16 +192,15 @@ const GameSetup: React.FC = () => {
         setIsGeneratingPreview(false);
       }
     }
-  }, [isSnekGame, sessionName, gameID]);
+  }, [sessionName, gameID]);
 
   const debouncedRegeneratePreview = useCallback(() => {
-    if (!isSnekGame) return;
     if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
     setIsGeneratingPreview(true);
     debounceTimerRef.current = setTimeout(() => {
       firePreviewRequest(true);
     }, 500);
-  }, [firePreviewRequest, isSnekGame]);
+  }, [firePreviewRequest]);
 
   const immediateRegeneratePreview = useCallback(() => {
     if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
@@ -255,14 +209,10 @@ const GameSetup: React.FC = () => {
 
   useEffect(() => {
     if (!gameSetup || initialGenerationDoneRef.current) return;
-    const isCurrentlySnekGame = gameSetup.gameType === "snek" || gameSetup.gameType === "teamsnek" || gameSetup.gameType === "kingsnek";
-    if (!isCurrentlySnekGame) return;
     const hasPreviewData = gameSetup.presetFertileTiles || gameSetup.presetHazards || gameSetup.presetPlayerPositions || gameSetup.presetFood;
+    initialGenerationDoneRef.current = true;
     if (!hasPreviewData) {
-      initialGenerationDoneRef.current = true;
       firePreviewRequest(false);
-    } else {
-      initialGenerationDoneRef.current = true;
     }
   }, [gameSetup]);
 
@@ -273,7 +223,7 @@ const GameSetup: React.FC = () => {
   }, []);
 
   // Inject the shake animation styles once the component mounts
-  React.useEffect(() => {
+  useEffect(() => {
     addStyles();
   }, []);
 
@@ -295,15 +245,8 @@ const GameSetup: React.FC = () => {
       setCustomWidth(`${gameSetup.boardWidth}`);
       setCustomHeight(`${gameSetup.boardHeight}`);
 
-      // Update game type
-      if (gameSetup.gameType) {
-        setGameType(gameSetup.gameType);
-      }
-
-      // Update turn time
       setSecondsPerTurn(`${gameSetup.maxTurnTime}`);
 
-      //  Update max turns
       if (gameSetup.maxTurns !== undefined) {
         setMaxTurns(gameSetup.maxTurns);
         setMaxTurnsEnabled(true);
@@ -311,7 +254,6 @@ const GameSetup: React.FC = () => {
         setMaxTurnsEnabled(false);
       }
 
-      // Update hazard percentage
       if (gameSetup.hazardPercentage !== undefined) {
         setHazardPercentage(gameSetup.hazardPercentage);
       }
@@ -327,13 +269,8 @@ const GameSetup: React.FC = () => {
       setTournamentMode(gameSetup.tournamentMode ?? false);
       setRemainingRounds(gameSetup.remainingRounds ?? 1);
       setInterludeDuration(gameSetup.interludeDuration ?? 30);
-
-      //  Update teams
-      if (gameSetup.teams) {
-        setTeams(gameSetup.teams);
-      }
     }
-  }, [gameSetup, setGameType]);
+  }, [gameSetup]);
 
   useEffect(() => {
     if (!gameSetup?.tournamentMode || !gameSetup?.scheduledStartTime) {
@@ -366,192 +303,48 @@ const GameSetup: React.FC = () => {
     return () => clearInterval(interval);
   }, [gameSetup?.tournamentMode, gameSetup?.scheduledStartTime, gameSetup?.remainingRounds]);
 
-  useEffect(() => {
-    setRulesComponent(() => getRulesComponent(gameSetup?.gameType));
-  }, [gameSetup?.gameType, gameSetup]);
-
   if (!gameSetup) return null;
 
-  // Start game
-  const handleReady = async () => {
-    await updateDoc(gameDocRef, {
-      playersReady: arrayUnion(userID),
-    });
-  };
-
-  const handleIncrementBotCount = async (botID: string) => {
-    // Check if bot is dead before adding to game
-    const botHealthStatus = getBotStatus(botID);
-    if (botHealthStatus === "dead") {
-      console.log(`Cannot add bot ${botID} to game - bot is dead`);
-      return;
-    }
-
-    const bot = bots.find((b) => b.id === botID);
-    if (!bot) {
-      console.warn(`Bot ${botID} not found in available bots`);
-      return;
-    }
-
-    const existingInstances = gameSetup.gamePlayers.filter(
-      (p) => p.type === "bot" && (p.botRef === botID || p.id === botID),
-    );
-
-    let newInstance: GamePlayer;
-    if (existingInstances.length === 0) {
-      // First (original) instance: keep canonical id, no overrides
-      newInstance = {
-        id: botID,
-        type: "bot",
-      };
-    } else {
-      // Subsequent clone: synthesise a unique id and overrides
-      const usedEmojis = new Set<string>(
-        existingInstances
-          .map((p) => p.displayEmoji)
-          .filter((e): e is string => !!e),
-      );
-      usedEmojis.add(bot.emoji);
-      const cloneEmoji = pickCloneEmoji(usedEmojis);
-      newInstance = {
-        id: `${botID}#${generateCloneSuffix()}`,
-        type: "bot",
-        botRef: botID,
-        displayName: `${bot.name} ${existingInstances.length + 1}`,
-        displayEmoji: cloneEmoji,
-      };
-    }
-
-    await updateDoc(gameDocRef, {
-      gamePlayers: arrayUnion(newInstance),
-    });
-    debouncedRegeneratePreview();
-  };
-
-  const handleDecrementBotCount = async (botID: string) => {
-    // Find every gamePlayer entry pointing at this bot, in insertion order.
-    const matchingIndexes: number[] = [];
-    gameSetup.gamePlayers.forEach((p, idx) => {
-      if (p.type !== "bot") return;
-      const underlying = p.botRef ?? p.id;
-      if (underlying === botID) matchingIndexes.push(idx);
-    });
-
-    if (matchingIndexes.length === 0) return;
-
-    // Remove the most recently added instance (last in array order).
-    const removeIdx = matchingIndexes[matchingIndexes.length - 1];
-    const updatedGamePlayers = gameSetup.gamePlayers.filter(
-      (_, idx) => idx !== removeIdx,
-    );
-
-    await updateDoc(gameDocRef, {
-      gamePlayers: updatedGamePlayers,
-    });
-    debouncedRegeneratePreview();
-  };
-
-  // Start game
   const handleStart = async () => {
     await updateDoc(gameDocRef, {
       startRequested: true,
     });
   };
 
-  const handlePlayerKick = async (playerID: string, _type: "bot" | "human") => {
-    const updatedGamePlayers = gameSetup.gamePlayers.filter(
-      (p) => p.id !== playerID
-    );
+  const handleAddCentaur = async (centaur: Centaur) => {
+    if (gameSetup.teams.some((team) => team.id === centaur.id)) return;
+    const newTeam: Team = {
+      id: centaur.id,
+      name: centaur.name,
+      color: nextTeamColor(gameSetup.teams.map((team) => team.color)),
+    };
     await updateDoc(gameDocRef, {
-      gamePlayers: updatedGamePlayers,
+      teams: arrayUnion(newTeam),
     });
     debouncedRegeneratePreview();
   };
 
-  // Handle team assignment for a player
-  const handleTeamChange = async (playerID: string, teamID: string) => {
-    if (!gameSetup) return;
-
-    // Check if this is a dead bot trying to be assigned to a team
-    const player = gameSetup.gamePlayers.find((p) => p.id === playerID);
-    if (player?.type === "bot") {
-      const botStatus = getBotStatus(playerID);
-      if (botStatus === "dead") {
-        console.log(`Cannot assign dead bot ${playerID} to team`);
-        return;
-      }
-    }
-
-    const updatedGamePlayers = gameSetup.gamePlayers.map((player) =>
-      player.id === playerID ? { ...player, teamID } : player,
-    );
-
+  const handleRemoveTeam = async (teamID: string) => {
+    const updatedTeams = gameSetup.teams.filter((team) => team.id !== teamID);
     await updateDoc(gameDocRef, {
-      gamePlayers: updatedGamePlayers,
+      teams: updatedTeams,
     });
     debouncedRegeneratePreview();
   };
 
-  // Handle team configuration changes
-  const handleTeamsChange = async (newTeams: Team[]) => {
+  const handleTeamColorChange = async (teamID: string, color: string) => {
+    const updatedTeams = gameSetup.teams.map((team) =>
+      team.id === teamID ? { ...team, color } : team,
+    );
     await updateDoc(gameDocRef, {
-      teams: newTeams,
+      teams: updatedTeams,
     });
-    setTeams(newTeams);
   };
 
-  // Handle King selection for a player
-  const handleKingToggle = async (playerID: string, teamID: string) => {
-    if (!gameSetup) return;
-
-    const updatedGamePlayers = gameSetup.gamePlayers.map((player) => {
-      if (player.teamID === teamID) {
-        return { ...player, isKing: player.id === playerID };
-      }
-      return player;
-    });
-
-    const teamPlayers = updatedGamePlayers.filter((p) => p.teamID === teamID);
-    const kingPlayer = teamPlayers.find((p) => p.isKing);
-    const otherPlayers = teamPlayers.filter((p) => !p.isKing);
-    const nonTeamPlayers = updatedGamePlayers.filter(
-      (p) => p.teamID !== teamID,
-    );
-
-    const reorderedPlayers = [
-      ...(kingPlayer ? [kingPlayer] : []),
-      ...otherPlayers,
-      ...nonTeamPlayers,
-    ];
-
+  const handleSnakesPerTeamChange = async (event: SelectChangeEvent<number>) => {
+    const value = Number(event.target.value);
     await updateDoc(gameDocRef, {
-      gamePlayers: reorderedPlayers,
-    });
-    debouncedRegeneratePreview();
-  };
-
-  const handlePlayerTeamKick = async (playerID: string, teamID: string) => {
-    if (!gameSetup) return;
-
-    const playerIndex = gameSetup.gamePlayers.findIndex(
-      (player: GamePlayer) =>
-        player.id === playerID && player.teamID === teamID,
-    );
-
-    if (playerIndex === -1) {
-      console.log("Player not found.");
-      return;
-    }
-
-    //  Use null instead of deleteField()
-    const updatedGamePlayers = gameSetup.gamePlayers.map((player, index) =>
-      index === playerIndex
-        ? { ...player, teamID: null } //  Set to null
-        : player,
-    );
-
-    await updateDoc(gameDocRef, {
-      gamePlayers: updatedGamePlayers,
+      snakesPerTeam: value,
     });
     debouncedRegeneratePreview();
   };
@@ -710,21 +503,6 @@ const GameSetup: React.FC = () => {
     });
   };
 
-  // Handler for selecting game type
-  const handleGameTypeChange = async (event: SelectChangeEvent<GameType>) => {
-    const selectedGameType = event.target.value as GameType;
-    setGameType(selectedGameType);
-
-    // Update Firestore when game type is selected
-    if (!gameSetup?.started) {
-      await updateDoc(gameDocRef, { gameType: selectedGameType });
-    }
-    const snekTypes = ["snek", "teamsnek", "kingsnek"];
-    if (snekTypes.includes(selectedGameType)) {
-      debouncedRegeneratePreview();
-    }
-  };
-
   // Handler for selecting board size
   const handleBoardSizeChange = async (event: SelectChangeEvent<BoardSize>) => {
     const selectedBoardSize = event.target.value as BoardSize;
@@ -740,7 +518,6 @@ const GameSetup: React.FC = () => {
 
     const { width, height } = BOARD_SIZE_MAPPING[selectedBoardSize];
 
-    // Update Firestore when board size is selected
     if (!gameSetup?.started) {
       await updateDoc(gameDocRef, {
         boardWidth: width,
@@ -777,63 +554,22 @@ const GameSetup: React.FC = () => {
 
   if (gameState) return null;
 
-  const { started, playersReady } = gameSetup;
-  const notReadyPlayers = gameSetup.gamePlayers
-    .filter((gamePlayer) => gamePlayer.type === "human")
-    .filter((player) => !gameSetup.playersReady.includes(player.id))
-    .map(
-      (notReadyPlayer) =>
-        players.find((player) => player.id === notReadyPlayer.id)?.name,
-    );
+  const { started } = gameSetup;
 
-  // Validation for Team Snek and King Snek games
-  const canStartGame = () => {
-    if (gameType !== "teamsnek" && gameType !== "kingsnek") return true;
+  const boardValid =
+    gameSetup.boardWidth >= MIN_BOARD_DIMENSION &&
+    gameSetup.boardWidth <= MAX_BOARD_DIMENSION &&
+    gameSetup.boardHeight >= MIN_BOARD_DIMENSION &&
+    gameSetup.boardHeight <= MAX_BOARD_DIMENSION;
+  const turnTimeValid = gameSetup.maxTurnTime > 0;
+  const enoughTeams = gameSetup.teams.length >= 2;
+  const canStartGame = enoughTeams && boardValid && turnTimeValid;
 
-    const populatedTeams = teams.filter((team) =>
-      gameSetup.gamePlayers.some((player) => player.teamID === team.id),
-    );
-
-    if (populatedTeams.length < 2) return false;
-
-    if (gameType === "kingsnek") {
-      const teamsWithKing = populatedTeams.filter((team) =>
-        gameSetup.gamePlayers.some(
-          (player) => player.teamID === team.id && player.isKing,
-        ),
-      );
-      return teamsWithKing.length === populatedTeams.length;
-    }
-
-    return true;
-  };
-
-  const getTeamValidationMessage = () => {
-    if (gameType !== "teamsnek" && gameType !== "kingsnek") return "";
-
-    const populatedTeams = teams.filter((team) =>
-      gameSetup.gamePlayers.some((player) => player.teamID === team.id),
-    );
-
-    if (populatedTeams.length === 0) {
-      return "Assign players to teams before starting the game";
-    } else if (populatedTeams.length === 1) {
-      return "At least 2 teams must have players before starting the game";
-    }
-
-    if (gameType === "kingsnek") {
-      const teamsWithKing = populatedTeams.filter((team) =>
-        gameSetup.gamePlayers.some(
-          (player) => player.teamID === team.id && player.isKing,
-        ),
-      );
-      if (teamsWithKing.length < populatedTeams.length) {
-        return "Each team must have a King selected before starting the game";
-      }
-    }
-
-    return "";
-  };
+  const teamValidationMessage = !enoughTeams
+    ? gameSetup.teams.length === 0
+      ? "Add centaurs to create teams before starting the game"
+      : "At least 2 teams are needed before starting the game"
+    : "";
 
   return (
     <Stack spacing={2} pt={2}>
@@ -847,7 +583,7 @@ const GameSetup: React.FC = () => {
           Abdicate Ownership
         </Button>
       )}
-      {/* Ready / Start / Tournament Section */}
+      {/* Start / Tournament Section */}
       {tournamentMode ? (
         <Box
           sx={{
@@ -886,88 +622,33 @@ const GameSetup: React.FC = () => {
         </Box>
       ) : (
         <>
-          {!gameSetup.gamePlayers
-            .filter((gamePlayer) => gamePlayer.type === "human")
-            .map((human) => human.id)
-            .every((player) => gameSetup.playersReady.includes(player)) ? (
-            <>
-              <Button
-                disabled={
-                  started ||
-                  gameSetup.boardWidth < MIN_BOARD_DIMENSION ||
-                  gameSetup.boardWidth > MAX_BOARD_DIMENSION ||
-                  parseInt(secondsPerTurn) <= 0 ||
-                  gameSetup.playersReady.includes(userID)
-                }
-                onClick={handleReady}
-                sx={{ backgroundColor: colour, height: "70px", fontSize: "32px" }}
-                fullWidth
-              >
-                {gameSetup.playersReady.includes(userID) ? `Waiting` : "I'm ready!"}
-              </Button>
-              {(gameType === "teamsnek" || gameType === "kingsnek") &&
-                !canStartGame() &&
-                getTeamValidationMessage() && (
-                  <Typography color="error" sx={{ textAlign: "center", mt: 1 }}>
-                    {getTeamValidationMessage()}
-                  </Typography>
-                )}
-            </>
-          ) : (
-            <>
-              <Button
-                disabled={gameSetup.startRequested || !canStartGame() || isConfigDisabled}
-                onClick={handleStart}
-                sx={{
-                  backgroundColor: canStartGame() ? colour : "#ccc",
-                  height: "70px",
-                  fontSize: "32px",
-                  "&:hover": {
-                    backgroundColor: canStartGame() ? colour : "#ccc",
-                  },
-                }}
-                className={canStartGame() ? "shake" : ""}
-                fullWidth
-              >
-                {gameSetup.startRequested ? "Game starting" : "Start game"}
-              </Button>
-              {!canStartGame() && getTeamValidationMessage() && (
-                <Typography color="error" sx={{ textAlign: "center", mt: 1 }}>
-                  {getTeamValidationMessage()}
-                </Typography>
-              )}
-            </>
+          <Button
+            disabled={
+              started ||
+              gameSetup.startRequested ||
+              !canStartGame ||
+              isConfigDisabled
+            }
+            onClick={handleStart}
+            variant="contained"
+            sx={{ height: "70px", fontSize: "32px" }}
+            className={
+              canStartGame && !started && !gameSetup.startRequested && !isConfigDisabled
+                ? "shake"
+                : ""
+            }
+            fullWidth
+          >
+            {gameSetup.startRequested ? "Game starting" : "Start game"}
+          </Button>
+          {teamValidationMessage && (
+            <Typography color="error" sx={{ textAlign: "center", mt: 1 }}>
+              {teamValidationMessage}
+            </Typography>
           )}
         </>
       )}
-      {gameSetup.playersReady.includes(userID) &&
-        notReadyPlayers.length > 0 && (
-          <Typography color="error">
-            Not ready: {notReadyPlayers.join(", ")}
-          </Typography>
-        )}
       <Box sx={{ display: "flex", gap: 2 }}>
-        {/* Game Type Dropdown */}
-        <FormControl variant="outlined" sx={{ flex: 1 }}>
-          <InputLabel id="game-type-label">Game Type</InputLabel>
-          <Select
-            labelId="game-type-label"
-            value={gameType}
-            onChange={handleGameTypeChange}
-            disabled={started || isConfigDisabled}
-            label="Game Type"
-          >
-            <MenuItem value="snek">Snek</MenuItem>
-            <MenuItem value="teamsnek">Team Snek</MenuItem>
-            <MenuItem value="kingsnek">King Snek</MenuItem>
-            <MenuItem value="connect4">Connect 4</MenuItem>
-            <MenuItem value="tactictoes">Tactic Toes</MenuItem>
-            <MenuItem value="longboi">Long Boi</MenuItem>
-            <MenuItem value="reversi">Othello</MenuItem>
-            <MenuItem value="colourclash">Colour Clash</MenuItem>
-          </Select>
-        </FormControl>
-
         {/* Game Size */}
         <FormControl variant="outlined" sx={{ flex: 1 }}>
           <InputLabel id="board-size-label">Size</InputLabel>
@@ -1037,6 +718,24 @@ const GameSetup: React.FC = () => {
           sx={{ flex: 1 }}
           inputProps={{ min: 0.5, max: 300, step: 0.1 }}
         />
+
+        {/* Snakes per Team */}
+        <FormControl variant="outlined" sx={{ flex: 1 }}>
+          <InputLabel id="snakes-per-team-label">Snakes/Team</InputLabel>
+          <Select
+            labelId="snakes-per-team-label"
+            value={gameSetup.snakesPerTeam}
+            onChange={handleSnakesPerTeamChange}
+            disabled={started || isConfigDisabled}
+            label="Snakes/Team"
+          >
+            {SNAKES_PER_TEAM_OPTIONS.map((n) => (
+              <MenuItem key={n} value={n}>
+                {n}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
       </Box>
 
       {/* Game rules */}
@@ -1057,19 +756,7 @@ const GameSetup: React.FC = () => {
             whiteSpace: "pre-wrap",
           }}
         >
-          {RulesComponent && <RulesComponent />}
-          <FormControlLabel
-            control={
-              <Checkbox
-                checked={gameSetup.skipConfirmation ?? false}
-                onChange={async (e) => {
-                  await updateDoc(gameDocRef, { skipConfirmation: e.target.checked });
-                }}
-                disabled={started || isConfigDisabled}
-              />
-            }
-            label="Skip confirmation at game start"
-          />
+          <TeamSnekRules />
         </Box>
       </FormControl>
       {/* Tournament Mode */}
@@ -1157,11 +844,34 @@ const GameSetup: React.FC = () => {
           )}
         </Box>
       </FormControl>
-      {/* Bots List */}
-      {bots.length > 0 && (
+
+      {/* Teams */}
+      <FormControl fullWidth variant="outlined" sx={{ mt: 2 }}>
+        <InputLabel shrink sx={{ backgroundColor: "white", px: 1 }}>
+          Teams
+        </InputLabel>
+        <Box
+          sx={{
+            border: "2px solid black",
+            padding: 1,
+            borderRadius: "0px",
+            minHeight: "56px",
+          }}
+        >
+          <TeamList
+            teams={gameSetup.teams}
+            onColorChange={handleTeamColorChange}
+            onRemove={handleRemoveTeam}
+            disabled={started || isConfigDisabled}
+          />
+        </Box>
+      </FormControl>
+
+      {/* Available Centaurs */}
+      {centaurs.length > 0 && (
         <FormControl fullWidth variant="outlined" sx={{ mt: 2 }}>
           <InputLabel shrink sx={{ backgroundColor: "white", px: 1, zIndex: 2 }}>
-            Available Bots
+            Available Centaurs
           </InputLabel>
           <Box
             sx={{
@@ -1177,15 +887,15 @@ const GameSetup: React.FC = () => {
               <TextField
                 size="small"
                 fullWidth
-                placeholder="Search bots..."
-                value={botSearchQuery}
-                onChange={(e) => setBotSearchQuery(e.target.value)}
+                placeholder="Search centaurs..."
+                value={centaurSearchQuery}
+                onChange={(e) => setCentaurSearchQuery(e.target.value)}
                 InputProps={{
-                  endAdornment: botSearchQuery ? (
+                  endAdornment: centaurSearchQuery ? (
                     <InputAdornment position="end">
                       <IconButton
                         size="small"
-                        onClick={() => setBotSearchQuery("")}
+                        onClick={() => setCentaurSearchQuery("")}
                         edge="end"
                         aria-label="clear search"
                       >
@@ -1206,14 +916,14 @@ const GameSetup: React.FC = () => {
             </Box>
             <Box sx={{ overflowY: "auto", flexGrow: 1 }}>
             {(() => {
-              const searchLower = botSearchQuery.toLowerCase();
-              const filtered = botSearchQuery
-                ? bots.filter((bot) => bot.name.toLowerCase().includes(searchLower))
-                : bots;
-              const grouped: Record<string, typeof bots> = {};
-              filtered.forEach((bot) => {
-                if (!grouped[bot.owner]) grouped[bot.owner] = [];
-                grouped[bot.owner].push(bot);
+              const searchLower = centaurSearchQuery.toLowerCase();
+              const filtered = centaurSearchQuery
+                ? centaurs.filter((centaur) => centaur.name.toLowerCase().includes(searchLower))
+                : centaurs;
+              const grouped: Record<string, typeof centaurs> = {};
+              filtered.forEach((centaur) => {
+                if (!grouped[centaur.owner]) grouped[centaur.owner] = [];
+                grouped[centaur.owner].push(centaur);
               });
               Object.values(grouped).forEach((group) =>
                 group.sort((a, b) => a.name.localeCompare(b.name)),
@@ -1226,10 +936,10 @@ const GameSetup: React.FC = () => {
                 return nameA.localeCompare(nameB);
               });
 
-              if (ownerOrder.length === 0 && botSearchQuery) {
+              if (ownerOrder.length === 0 && centaurSearchQuery) {
                 return (
                   <Typography sx={{ px: 2, py: 2, color: "#999", fontSize: "0.9rem" }}>
-                    No bots match "{botSearchQuery}"
+                    No centaurs match "{centaurSearchQuery}"
                   </Typography>
                 );
               }
@@ -1249,128 +959,60 @@ const GameSetup: React.FC = () => {
                       zIndex: 1,
                     }}
                   >
-                    <Link
-                      to={`/ladder/${ownerID}/${gameType}`}
-                      style={{
-                        fontSize: "0.8rem",
-                        fontWeight: 600,
-                        color: "#555",
-                        textDecoration: "none",
-                        cursor: "pointer",
-                      }}
-                      onMouseEnter={(e: React.MouseEvent<HTMLAnchorElement>) => {
-                        e.currentTarget.style.textDecoration = "underline";
-                      }}
-                      onMouseLeave={(e: React.MouseEvent<HTMLAnchorElement>) => {
-                        e.currentTarget.style.textDecoration = "none";
-                      }}
+                    <Typography
+                      sx={{ fontSize: "0.8rem", fontWeight: 600, color: "#555" }}
                     >
                       {ownerID === userID
                         ? `${ownerNames[ownerID] || "You"} (You)`
                         : ownerNames[ownerID] || ownerID}
-                    </Link>
+                    </Typography>
                   </Box>
-                  {grouped[ownerID].map((bot) => {
-                    const botStatus = getBotStatus(bot.id);
-                    const isDead = botStatus === "dead";
-                    const instanceCount = gameSetup.gamePlayers.filter(
-                      (p) =>
-                        p.type === "bot" &&
-                        ((p.botRef ?? p.id) === bot.id),
-                    ).length;
-                    const isInGame = instanceCount > 0;
-                    const canIncrement = !isDead && !isConfigDisabled;
-                    const canDecrement = instanceCount > 0 && !isConfigDisabled;
+                  {grouped[ownerID].map((centaur) => {
+                    const isInGame = gameSetup.teams.some(
+                      (team) => team.id === centaur.id,
+                    );
 
                     return (
                       <Box
-                        key={bot.id}
-                        title={
-                          isDead
-                            ? "Bot is dead and cannot be added to game"
-                            : bot.name
-                        }
+                        key={centaur.id}
+                        title={centaur.name}
                         sx={{
                           display: "flex",
                           alignItems: "center",
                           gap: 1,
                           px: 2,
                           py: 1,
-                          borderLeft: `4px solid ${isDead ? "#ccc" : bot.colour}`,
                           borderBottom: "1px solid #eee",
-                          opacity: isDead ? 0.5 : 1,
-                          backgroundColor: isDead ? "#f5f5f5" : "transparent",
                         }}
                       >
-                        <Typography sx={{ fontSize: "1.2rem", flexShrink: 0 }}>
-                          {bot.emoji}
-                        </Typography>
-                        <Typography
-                          sx={{
+                        <Link
+                          to={`/ladder/${centaur.id}`}
+                          style={{
                             fontWeight: 500,
                             flexGrow: 1,
                             wordBreak: "break-word",
+                            color: "inherit",
+                            textDecoration: "none",
+                          }}
+                          onMouseEnter={(e: React.MouseEvent<HTMLAnchorElement>) => {
+                            e.currentTarget.style.textDecoration = "underline";
+                          }}
+                          onMouseLeave={(e: React.MouseEvent<HTMLAnchorElement>) => {
+                            e.currentTarget.style.textDecoration = "none";
                           }}
                         >
-                          {bot.name}
-                          {isDead && " (DEAD)"}
-                          {isInGame && !isDead && " (IN GAME)"}
-                        </Typography>
-                        {!isDead && (
-                          <Box
-                            sx={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: 0.5,
-                              flexShrink: 0,
-                            }}
-                          >
-                            <IconButton
-                              size="small"
-                              aria-label={`Remove one ${bot.name}`}
-                              disabled={!canDecrement}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleDecrementBotCount(bot.id);
-                              }}
-                              sx={{
-                                border: "1px solid #999",
-                                borderRadius: "4px",
-                                width: 28,
-                                height: 28,
-                              }}
-                            >
-                              −
-                            </IconButton>
-                            <Typography
-                              sx={{
-                                minWidth: 20,
-                                textAlign: "center",
-                                fontVariantNumeric: "tabular-nums",
-                                fontWeight: 600,
-                              }}
-                            >
-                              {instanceCount}
-                            </Typography>
-                            <IconButton
-                              size="small"
-                              aria-label={`Add one ${bot.name}`}
-                              disabled={!canIncrement}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleIncrementBotCount(bot.id);
-                              }}
-                              sx={{
-                                border: "1px solid #999",
-                                borderRadius: "4px",
-                                width: 28,
-                                height: 28,
-                              }}
-                            >
-                              +
-                            </IconButton>
-                          </Box>
-                        )}
+                          {centaur.name}
+                          {isInGame && " (IN GAME)"}
+                        </Link>
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          disabled={isInGame || started || isConfigDisabled}
+                          onClick={() => handleAddCentaur(centaur)}
+                          sx={{ flexShrink: 0 }}
+                        >
+                          Add
+                        </Button>
                       </Box>
                     );
                   })}
@@ -1382,261 +1024,135 @@ const GameSetup: React.FC = () => {
         </FormControl>
       )}
 
-      {(gameType === "snek" ||
-        gameType === "teamsnek" ||
-        gameType === "kingsnek") && (
-        <FormControl fullWidth variant="outlined" sx={{ mt: 2 }}>
-          <InputLabel shrink sx={{ backgroundColor: "white", px: 1 }}>
-            Snek Configuration
-          </InputLabel>
-          <Box
-            sx={{
-              border: "2px solid black",
-              padding: 2,
-              borderRadius: "0px",
-              minHeight: "56px",
-            }}
-          >
-            <Box sx={isConfigDisabled ? { pointerEvents: 'none', opacity: 0.6 } : {}}>
-              <SnekConfiguration
-                maxTurns={maxTurns}
-                maxTurnsEnabled={maxTurnsEnabled}
-                onMaxTurnsToggle={handleMaxTurnsToggle}
-                onMaxTurnsChange={handleMaxTurnsChange}
-                hazardPercentage={hazardPercentage}
-                onHazardPercentageChange={handleHazardPercentageChange}
-                fertileGroundEnabled={fertileGroundEnabled}
-                onFertileGroundToggle={handleFertileGroundToggle}
-                fertileGroundDensity={fertileGroundDensity}
-                onFertileGroundDensityChange={handleFertileGroundDensityChange}
-                fertileGroundClustering={fertileGroundClustering}
-                onFertileGroundClusteringChange={handleFertileGroundClusteringChange}
-                foodSpawnRate={foodSpawnRate}
-                onFoodSpawnRateChange={handleFoodSpawnRateChange}
-                boardWidth={gameSetup.boardWidth}
-                boardHeight={gameSetup.boardHeight}
-                usePreviewBoard={usePreviewBoard}
-                onUsePreviewBoardChange={handleUsePreviewBoardChange}
-                syncedPreviewData={
-                  gameSetup.presetFertileTiles || gameSetup.presetHazards || gameSetup.presetPlayerPositions || gameSetup.presetFood
-                    ? {
-                        fertileTiles: gameSetup.presetFertileTiles || [],
-                        hazards: gameSetup.presetHazards || [],
-                        playerPositions: gameSetup.presetPlayerPositions || {},
-                        food: gameSetup.presetFood || [],
-                      }
-                    : null
-                }
-                isGeneratingPreview={isGeneratingPreview}
-                onRefreshPreview={immediateRegeneratePreview}
-                gamePlayers={gameSetup.gamePlayers}
-                gameType={gameSetup.gameType}
-                teams={gameSetup.teams}
+      {/* Snek Configuration */}
+      <FormControl fullWidth variant="outlined" sx={{ mt: 2 }}>
+        <InputLabel shrink sx={{ backgroundColor: "white", px: 1 }}>
+          Snek Configuration
+        </InputLabel>
+        <Box
+          sx={{
+            border: "2px solid black",
+            padding: 2,
+            borderRadius: "0px",
+            minHeight: "56px",
+          }}
+        >
+          <Box sx={isConfigDisabled ? { pointerEvents: 'none', opacity: 0.6 } : {}}>
+            <SnekConfiguration
+              maxTurns={maxTurns}
+              maxTurnsEnabled={maxTurnsEnabled}
+              onMaxTurnsToggle={handleMaxTurnsToggle}
+              onMaxTurnsChange={handleMaxTurnsChange}
+              hazardPercentage={hazardPercentage}
+              onHazardPercentageChange={handleHazardPercentageChange}
+              fertileGroundEnabled={fertileGroundEnabled}
+              onFertileGroundToggle={handleFertileGroundToggle}
+              fertileGroundDensity={fertileGroundDensity}
+              onFertileGroundDensityChange={handleFertileGroundDensityChange}
+              fertileGroundClustering={fertileGroundClustering}
+              onFertileGroundClusteringChange={handleFertileGroundClusteringChange}
+              foodSpawnRate={foodSpawnRate}
+              onFoodSpawnRateChange={handleFoodSpawnRateChange}
+              boardWidth={gameSetup.boardWidth}
+              boardHeight={gameSetup.boardHeight}
+              usePreviewBoard={usePreviewBoard}
+              onUsePreviewBoardChange={handleUsePreviewBoardChange}
+              syncedPreviewData={
+                gameSetup.presetFertileTiles || gameSetup.presetHazards || gameSetup.presetPlayerPositions || gameSetup.presetFood
+                  ? {
+                      fertileTiles: gameSetup.presetFertileTiles || [],
+                      hazards: gameSetup.presetHazards || [],
+                      playerPositions: gameSetup.presetPlayerPositions || {},
+                      food: gameSetup.presetFood || [],
+                    }
+                  : null
+              }
+              isGeneratingPreview={isGeneratingPreview}
+              onRefreshPreview={immediateRegeneratePreview}
+              teams={gameSetup.teams}
+              snakesPerTeam={gameSetup.snakesPerTeam}
+            />
+          </Box>
+        </Box>
+      </FormControl>
+
+      {/* Team Cluster */}
+      <FormControl fullWidth variant="outlined" sx={{ mt: 2 }}>
+        <InputLabel shrink sx={{ backgroundColor: "white", px: 1 }}>
+          Team Cluster
+        </InputLabel>
+        <Box
+          sx={{
+            border: "2px solid black",
+            padding: 2,
+            borderRadius: "0px",
+            minHeight: "56px",
+            display: "flex",
+            alignItems: "center",
+          }}
+        >
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={teamClustersEnabled}
+                onChange={(e) => handleTeamClustersToggle(e.target.checked)}
+                disabled={started || isConfigDisabled}
+              />
+            }
+            label="Team cluster"
+          />
+        </Box>
+      </FormControl>
+
+      {/* Invulnerability Potions */}
+      <FormControl fullWidth variant="outlined" sx={{ mt: 2 }}>
+        <InputLabel shrink sx={{ backgroundColor: "white", px: 1 }}>
+          (In)vulnerability Potions
+        </InputLabel>
+        <Box
+          sx={{
+            border: "2px solid black",
+            padding: 2,
+            borderRadius: "0px",
+            minHeight: "56px",
+            display: "flex",
+            flexDirection: "column",
+          }}
+        >
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={invulnerabilityPotionEnabled}
+                onChange={(e) => handleInvulnerabilityPotionToggle(e.target.checked)}
+                disabled={started || isConfigDisabled}
+              />
+            }
+            label="(In)vulnerability Potions"
+          />
+          {invulnerabilityPotionEnabled && (
+            <Box sx={{ px: 2, pt: 1 }}>
+              <Typography variant="body2" gutterBottom>
+                Spawn Rate: {invulnerabilityPotionSpawnRate.toFixed(2)}/turn
+              </Typography>
+              <Slider
+                value={invulnerabilityPotionSpawnRate}
+                onChange={(_, value) => handleInvulnerabilityPotionSpawnRateChange(value as number)}
+                min={0.01}
+                max={0.2}
+                step={0.01}
+                disabled={started || isConfigDisabled}
+                valueLabelDisplay="auto"
+                valueLabelFormat={(value) => `${value.toFixed(2)}/turn`}
               />
             </Box>
-          </Box>
-        </FormControl>
-      )}
-
-      {/* Team Cluster Configuration - Only show for team games */}
-      {(gameType === "teamsnek" || gameType === "kingsnek") && (
-        <FormControl fullWidth variant="outlined" sx={{ mt: 2 }}>
-          <InputLabel shrink sx={{ backgroundColor: "white", px: 1 }}>
-            Team Cluster
-          </InputLabel>
-          <Box
-            sx={{
-              border: "2px solid black",
-              padding: 2,
-              borderRadius: "0px",
-              minHeight: "56px",
-              display: "flex",
-              alignItems: "center",
-            }}
-          >
-            <FormControlLabel
-              control={
-                <Checkbox
-                  checked={teamClustersEnabled}
-                  onChange={(e) => handleTeamClustersToggle(e.target.checked)}
-                  disabled={started || isConfigDisabled}
-                />
-              }
-              label="Team cluster"
-            />
-          </Box>
-        </FormControl>
-      )}
-
-      {/* Invulnerability Potions - Only show for team games */}
-      {(gameType === "teamsnek" || gameType === "kingsnek") && (
-        <FormControl fullWidth variant="outlined" sx={{ mt: 2 }}>
-          <InputLabel shrink sx={{ backgroundColor: "white", px: 1 }}>
-            (In)vulnerability Potions
-          </InputLabel>
-          <Box
-            sx={{
-              border: "2px solid black",
-              padding: 2,
-              borderRadius: "0px",
-              minHeight: "56px",
-              display: "flex",
-              flexDirection: "column",
-            }}
-          >
-            <FormControlLabel
-              control={
-                <Checkbox
-                  checked={invulnerabilityPotionEnabled}
-                  onChange={(e) => handleInvulnerabilityPotionToggle(e.target.checked)}
-                  disabled={started || isConfigDisabled}
-                />
-              }
-              label="(In)vulnerability Potions"
-            />
-            {invulnerabilityPotionEnabled && (
-              <Box sx={{ px: 2, pt: 1 }}>
-                <Typography variant="body2" gutterBottom>
-                  Spawn Rate: {invulnerabilityPotionSpawnRate.toFixed(2)}/turn
-                </Typography>
-                <Slider
-                  value={invulnerabilityPotionSpawnRate}
-                  onChange={(_, value) => handleInvulnerabilityPotionSpawnRateChange(value as number)}
-                  min={0.01}
-                  max={0.2}
-                  step={0.01}
-                  disabled={started || isConfigDisabled}
-                  valueLabelDisplay="auto"
-                  valueLabelFormat={(value) => `${value.toFixed(2)}/turn`}
-                />
-              </Box>
-            )}
-          </Box>
-        </FormControl>
-      )}
-
-      {/* Team Configuration - Only show for team games */}
-      {(gameType === "teamsnek" || gameType === "kingsnek") && (
-        <FormControl fullWidth variant="outlined" sx={{ mt: 2 }}>
-          <InputLabel shrink sx={{ backgroundColor: "white", px: 1 }}>
-            Team Configuration
-          </InputLabel>
-          <Box
-            sx={{
-              border: "2px solid black",
-              padding: 2,
-              borderRadius: "0px",
-              minHeight: "56px",
-            }}
-          >
-            <Box sx={isConfigDisabled ? { pointerEvents: 'none', opacity: 0.6 } : {}}>
-              <TeamConfiguration
-                teams={teams}
-                onTeamsChange={handleTeamsChange}
-                bots={bots}
-                gamePlayers={gameSetup?.gamePlayers || []}
-              />
-            </Box>
-          </Box>
-        </FormControl>
-      )}
-
-      {/* Players Table */}
-      {(gameType === "teamsnek" || gameType === "kingsnek") &&
-      teams.length > 0 ? (
-        <FormControl fullWidth variant="outlined" sx={{ mt: 2 }}>
-          <InputLabel shrink sx={{ backgroundColor: "white", px: 1 }}>
-            Player Configuration
-          </InputLabel>
-          <Box
-            sx={{
-              border: "2px solid black",
-              padding: 2,
-              borderRadius: "0px",
-              minHeight: "56px",
-            }}
-          >
-            <PlayerConfiguration
-              teams={teams}
-              players={players}
-              gamePlayers={gameSetup.gamePlayers}
-              onTeamChange={handleTeamChange}
-              onPlayerKick={handlePlayerKick}
-              playersReady={playersReady}
-              onPlayerTeamKick={handlePlayerTeamKick}
-              getBotStatus={getBotStatus}
-              gameType={gameType}
-              onKingToggle={handleKingToggle}
-              isOwner={isOwner}
-              hasOwner={hasOwner}
-              userID={userID}
-            />
-          </Box>
-        </FormControl>
-      ) : (
-        <TableContainer>
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell>Player</TableCell>
-                <TableCell align="right">Ready</TableCell>
-                <TableCell align="right">Remove?</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {gameSetup.gamePlayers.map((gamePlayer) => {
-                const player = players.find(
-                  (player) => player.id === gamePlayer.id,
-                );
-                if (!player) return null;
-                return (
-                  <TableRow key={player.id}>
-                    <TableCell sx={{ backgroundColor: player.colour }}>
-                      {player.name} {player.emoji}
-                    </TableCell>
-                    <TableCell
-                      align="right"
-                      sx={{ backgroundColor: player.colour }}
-                    >
-                      {playersReady.includes(player.id) ? "Yeah" : "Nah"}
-                    </TableCell>
-                    {(!hasOwner || isOwner) ? (
-                      <TableCell
-                        align="right"
-                        sx={{ backgroundColor: player.colour }}
-                        onClick={() =>
-                          handlePlayerKick(player.id, gamePlayer.type)
-                        }
-                        style={{ cursor: "pointer" }}
-                      >
-                        ❌
-                      </TableCell>
-                    ) : (
-                      <TableCell
-                        align="right"
-                        sx={{ backgroundColor: player.colour }}
-                      />
-                    )}
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      )}
+          )}
+        </Box>
+      </FormControl>
     </Stack>
   );
 };
 
-const GameSetupWithProvider: React.FC = () => {
-  return (
-    <BotHealthProvider>
-      <GameSetup />
-    </BotHealthProvider>
-  );
-};
-
-export default GameSetupWithProvider;
+export default GameSetup;
 
 // Function to insert keyframe and class rules separately
 const addStyles = () => {

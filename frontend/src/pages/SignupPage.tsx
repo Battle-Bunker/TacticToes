@@ -1,68 +1,47 @@
-import React, { useState, useEffect } from "react"
-import { Box, TextField, Button, Typography, Container } from "@mui/material"
-import { Refresh } from "@mui/icons-material"
-import { emojiList } from "@shared/types/Emojis"
-import { Hue } from "@uiw/react-color"
-import { generateColor } from "../utils/colourUtils" // Import the new generateColor function
-import { signInWithPopup } from "firebase/auth"
-import { auth, provider } from "../firebaseConfig"
+import React, { useState } from "react"
+import { Box, Button, Container, TextField, Typography } from "@mui/material"
+import { signInWithPopup, User } from "firebase/auth"
+import { doc, setDoc } from "firebase/firestore"
+import { auth, db, provider } from "../firebaseConfig"
 
-interface SignUpPageProps {
-  onSave: (name: string, emoji: string, colour: string) => void
+interface SignupPageProps {
+  user: User | null
 }
 
-const SignupPage: React.FC<SignUpPageProps> = ({ onSave }) => {
-  const [name, setName] = useState<string>("")
-  const [selectedEmoji, setSelectedEmoji] = useState<string>("")
+const SignupPage: React.FC<SignupPageProps> = ({ user }) => {
+  const [name, setName] = useState<string>(user?.displayName ?? "")
   const [message, setMessage] = useState<string>("")
-  const [displayedEmojis, setDisplayedEmojis] = useState<string[]>([])
-  const [hue, setHue] = useState<number>(Math.floor(Math.random() * 360))
-  const [selectedColour, setSelectedColour] = useState<string>(
-    generateColor(hue),
-  )
-
-  const randomizeEmojis = () => {
-    const shuffledEmojis = [...emojiList].sort(() => 0.5 - Math.random())
-    const filteredEmojis = shuffledEmojis.filter(
-      (emoji) => emoji !== selectedEmoji,
-    )
-    if (selectedEmoji === "") {
-      return setDisplayedEmojis(shuffledEmojis.slice(0, 12))
-    }
-    setDisplayedEmojis([selectedEmoji, ...filteredEmojis.slice(0, 11)])
-  }
-
-  useEffect(() => {
-    randomizeEmojis()
-  }, [])
-
-  const handleHueChange = (newHue: { h: number }) => {
-    setHue(newHue.h)
-  }
-
-  useEffect(() => {
-    const newColor = generateColor(hue)
-    setSelectedColour(newColor)
-  }, [hue])
+  const [busy, setBusy] = useState<boolean>(false)
 
   const handleSignInWithGoogle = async () => {
-    const user = auth.currentUser
-    if (!user) return
-
+    setMessage("")
     try {
       await signInWithPopup(auth, provider)
     } catch (error) {
-      setMessage("Failed to connect google.")
-      console.error("Error linking Google account:", error)
+      console.error("Error signing in with Google:", error)
+      setMessage("Google sign-in failed. Try again.")
     }
   }
 
-  const handleSubmit = () => {
-    if (!name.trim() || !selectedEmoji) {
-      setMessage("Please enter a name and select an emoji.")
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    if (!user) return
+
+    const trimmed = name.trim()
+    if (!trimmed) {
+      setMessage("Friend, you need a name.")
       return
     }
-    onSave(name, selectedEmoji, selectedColour)
+
+    setBusy(true)
+    setMessage("")
+    try {
+      await setDoc(doc(db, "users", user.uid), { name: trimmed }, { merge: true })
+    } catch (error) {
+      console.error("Error saving name:", error)
+      setMessage("Couldn't save your name. Try again.")
+      setBusy(false)
+    }
   }
 
   return (
@@ -76,86 +55,42 @@ const SignupPage: React.FC<SignUpPageProps> = ({ onSave }) => {
         <Typography variant="h4" sx={{ my: 4 }}>
           Hi. Glad you're here.
         </Typography>
-        <TextField
-          label="Name"
-          variant="outlined"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          fullWidth
-        />
-        <Box
-          sx={{
-            mt: 4,
-            width: "100%",
-            maxWidth: "600px",
-            display: "flex",
-            justifyContent: "center",
-            alignItems: "center",
-            border: "2px solid #000",
-          }}
-        >
-          <Hue
-            hue={hue}
-            onChange={handleHueChange}
-            style={{ width: "100%", height: "20px" }}
-          />
-        </Box>
 
-        <Box
-          sx={{
-            display: "flex",
-            flexWrap: "wrap",
-            gap: 2,
-            justifyContent: "center",
-            my: 2,
-          }}
-        >
-          {displayedEmojis.map((emoji) => (
-            <Button
-              key={emoji}
-              onClick={() => setSelectedEmoji(emoji)}
-              sx={{
-                fontSize: "2rem",
-                width: "50px",
-                height: "50px",
-                backgroundColor:
-                  selectedEmoji === emoji ? selectedColour : "white",
-              }}
-            >
-              {emoji}
+        {!user ? (
+          <Button variant="contained" onClick={handleSignInWithGoogle}>
+            Sign in with Google
+          </Button>
+        ) : (
+          <Box
+            component="form"
+            onSubmit={handleSubmit}
+            sx={{
+              width: "100%",
+              maxWidth: "600px",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+            }}
+          >
+            <TextField
+              label="Name"
+              variant="outlined"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              disabled={busy}
+              fullWidth
+            />
+            <Button type="submit" variant="contained" disabled={busy} sx={{ mt: 2 }}>
+              Let's go
             </Button>
-          ))}
-        </Box>
-        <Button
-          onClick={randomizeEmojis}
-          startIcon={<Refresh />}
-          sx={{ mt: 2, backgroundColor: selectedColour }}
-        >
-          New emojis please.
-        </Button>
+          </Box>
+        )}
 
         {message && (
           <Typography color="error" sx={{ mt: 2 }}>
             {message}
           </Typography>
         )}
-
-        {!auth.currentUser?.isAnonymous ? (
-          <Typography sx={{ mt: 2 }}>Google connected. Still gotta pick a name and emoji.</Typography>
-        ) : (
-          <Button
-            onClick={handleSignInWithGoogle}
-            sx={{ mt: 2, backgroundColor: selectedColour }}
-          >
-            Sign in with google
-          </Button>
-        )}
-        <Button
-          onClick={handleSubmit}
-          sx={{ mt: 2, backgroundColor: selectedColour }}
-        >
-          Let's go
-        </Button>
       </Box>
     </Container>
   )
