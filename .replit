@@ -99,7 +99,7 @@ externalPort = 8000
 
 
 [deployment]
-build = ["sh", "-c", "cd frontend && npm run build && cp dist/index.html dist/404.html"]
+build = ["bash", "scripts/replit-deploy.sh"]
 deploymentTarget = "static"
 publicDir = "frontend/dist"
 
@@ -110,14 +110,17 @@ to = "/index.html"
 [userenv]
 
 [userenv.development]
-# Both region vars are deliberately unset. They exist only as escape hatches for
-# targeting a project whose Firestore is NOT in australia-southeast1, and the
-# code defaults to australia-southeast1 in both places.
+# The Replit dev environment talks to the DEV Firebase project only, so that
+# `npm run deploy` from this shell iterates against dev and can never reach
+# production. Production values are set by scripts/replit-deploy.sh, which
+# overrides rather than inherits these.
 #
-# Setting them here would be inherited by `npm run deploy` run from this shell,
-# which silently wins over the default and would deploy functions to the wrong
-# region: Firestore triggers fail outright against a Sydney database, and any
-# callable that did deploy would 404 for a client pointed at Sydney.
+# tactic-toes-cyphid-dev has its Firestore in us-central1, so the region vars
+# must match it -- the code defaults to australia-southeast1, which is correct
+# for production but wrong here.
+FIREBASE_PROJECT_ID = "tactic-toes-cyphid-dev"
+FUNCTIONS_REGION = "us-central1"
+VITE_FIREBASE_FUNCTIONS_REGION = "us-central1"
 
 [userenv.production]
 

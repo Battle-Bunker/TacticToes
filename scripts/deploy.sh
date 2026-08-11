@@ -40,12 +40,20 @@ echo "$GCP_SA_KEY_B64" | base64 -d > "$KEY_PATH"
 export GOOGLE_APPLICATION_CREDENTIALS="$KEY_PATH"
 
 # `npx firebase` has been broken since firebase-tools v12, and `npm i -g` is
-# unreliable on Replit's read-only Nix store. Invoke the local binary directly.
-FIREBASE_BIN="./node_modules/.bin/firebase"
-if [ ! -x "$FIREBASE_BIN" ]; then
-  echo "firebase-tools not installed. Run: npm install --save-dev firebase-tools" >&2
+# unreliable on Replit's read-only Nix store. Prefer the local devDependency;
+# fall back to the Nix-provided binary on PATH, which is what the deployment
+# build has, since it does not npm install at the repo root.
+if [ -x "./node_modules/.bin/firebase" ]; then
+  FIREBASE_BIN="./node_modules/.bin/firebase"
+elif command -v firebase >/dev/null 2>&1; then
+  FIREBASE_BIN="$(command -v firebase)"
+else
+  echo "firebase-tools not found. Install it with:" >&2
+  echo "  npm install --save-dev firebase-tools" >&2
+  echo "or add it to [nix] packages in .replit." >&2
   exit 1
 fi
+echo "Using firebase CLI: $FIREBASE_BIN"
 
 export CI=true
 
