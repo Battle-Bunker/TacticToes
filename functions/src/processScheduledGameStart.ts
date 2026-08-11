@@ -1,4 +1,5 @@
 import { onTaskDispatched } from "firebase-functions/v2/tasks"
+import { FUNCTIONS_REGION } from "./config/region"
 import * as logger from "firebase-functions/logger"
 import { startGame } from "./utils/startGame"
 
@@ -8,7 +9,9 @@ import { startGame } from "./utils/startGame"
  * which re-validates the schedule against fresh data and guarantees a single
  * start even if this task is delivered more than once.
  */
-export const processScheduledGameStart = onTaskDispatched(async (request) => {
+export const processScheduledGameStart = onTaskDispatched(
+  { region: FUNCTIONS_REGION },
+  async (request) => {
   const { sessionID, gameID, expectedScheduledStartMillis } = request.data
 
   logger.info(

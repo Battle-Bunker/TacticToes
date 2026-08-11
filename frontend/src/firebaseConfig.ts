@@ -26,6 +26,11 @@ if (missingVars.length > 0) {
   );
 }
 
+// Must match the region the functions are deployed to (see
+// functions/src/config/region.ts). A mismatch makes every callable 404.
+export const functionsRegion =
+  import.meta.env.VITE_FIREBASE_FUNCTIONS_REGION || "australia-southeast1";
+
 export const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
@@ -38,7 +43,7 @@ export const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig)
 export const db = getFirestore(app)
-export const functions = getFunctions(app)
+export const functions = getFunctions(app, functionsRegion)
 export const analytics = getAnalytics(app)
 export const auth = getAuth(app)
 

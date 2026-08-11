@@ -1,6 +1,7 @@
 // functions/src/onGameStarted.ts
 
 import * as functions from "firebase-functions/v1"
+import { FUNCTIONS_REGION, taskQueueName } from "./config/region"
 import { getFunctions } from "firebase-admin/functions"
 import { Timestamp } from "firebase-admin/firestore"
 import { GameSetup } from "@shared/types/Game"
@@ -22,7 +23,9 @@ import { startGame } from "./utils/startGame"
  *     lives in startGame(), because this trigger fires on every setup edit and
  *     Firestore delivers at-least-once.
  */
-export const onGameStarted = functions.firestore
+export const onGameStarted = functions
+  .region(FUNCTIONS_REGION)
+  .firestore
   .document("sessions/{sessionID}/setups/{gameID}")
   .onWrite(async (change, context) => {
     const { gameID, sessionID } = context.params
@@ -75,7 +78,7 @@ export const onGameStarted = functions.firestore
       )
 
       try {
-        const queue = getFunctions().taskQueue("processScheduledGameStart")
+        const queue = getFunctions().taskQueue(taskQueueName("processScheduledGameStart"))
         await queue.enqueue(
           { sessionID, gameID, expectedScheduledStartMillis: scheduledTime.toMillis() },
           { scheduleDelaySeconds: delaySeconds }

@@ -1,12 +1,15 @@
 import * as admin from "firebase-admin"
 import * as functions from "firebase-functions/v1"
+import { FUNCTIONS_REGION, taskQueueName } from "./config/region"
 import * as logger from "firebase-functions/logger"
 import { getFunctions } from "firebase-admin/functions"
 import { processTurn } from "./gameprocessors/processTurn"
 import { announceTurn } from "./utils/announceTurn"
 import { MoveStatus } from "./types/Game"
 
-export const onMoveCreated = functions.firestore
+export const onMoveCreated = functions
+  .region(FUNCTIONS_REGION)
+  .firestore
   .document("sessions/{sessionID}/games/{gameID}/moveStatuses/{moveNumber}")
   .onUpdate(async (snap, context) => {
     const moveData = snap.after.data() as MoveStatus
@@ -77,7 +80,7 @@ export const onMoveCreated = functions.firestore
     if (result?.tournamentSchedule) {
       const { sessionID: schedSessionID, gameID: schedGameID, delaySeconds, expectedScheduledStartMillis } = result.tournamentSchedule
       try {
-        const queue = getFunctions().taskQueue("processScheduledGameStart")
+        const queue = getFunctions().taskQueue(taskQueueName("processScheduledGameStart"))
         await queue.enqueue(
           { sessionID: schedSessionID, gameID: schedGameID, expectedScheduledStartMillis },
           { scheduleDelaySeconds: delaySeconds }

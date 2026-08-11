@@ -1,4 +1,5 @@
 import * as functions from "firebase-functions/v1"
+import { FUNCTIONS_REGION } from "./config/region"
 import * as admin from "firebase-admin"
 import * as crypto from "crypto"
 import { FieldValue } from "firebase-admin/firestore"
@@ -44,7 +45,7 @@ function timingSafeEqualHex(a: string, b: string): boolean {
  * the `centaurCredentials` collection, which has no Firestore rules and is
  * therefore inaccessible to all clients.
  */
-export const createCentaurApiKey = functions.https.onCall(async (data, context) => {
+export const createCentaurApiKey = functions.region(FUNCTIONS_REGION).https.onCall(async (data, context) => {
   if (!context.auth) {
     throw new functions.https.HttpsError(
       "unauthenticated",
@@ -99,7 +100,7 @@ export const createCentaurApiKey = functions.https.onCall(async (data, context) 
  * Owner-only status check. The plaintext key is never persisted, so clients
  * can only learn whether a credential exists—not retrieve the key itself.
  */
-export const getCentaurApiKeyStatus = functions.https.onCall(async (data, context) => {
+export const getCentaurApiKeyStatus = functions.region(FUNCTIONS_REGION).https.onCall(async (data, context) => {
   if (!context.auth) {
     throw new functions.https.HttpsError(
       "unauthenticated",
@@ -143,7 +144,7 @@ export const getCentaurApiKeyStatus = functions.https.onCall(async (data, contex
  * Custom tokens are short-lived (1h) but the sign-in yields a refresh token,
  * and centaurs can simply re-exchange whenever they need a fresh session.
  */
-export const exchangeCentaurApiKey = functions.https.onCall(async (data) => {
+export const exchangeCentaurApiKey = functions.region(FUNCTIONS_REGION).https.onCall(async (data) => {
   const { centaurId, apiKey } = data as { centaurId?: unknown; apiKey?: unknown }
 
   if (!centaurId || typeof centaurId !== "string" || !apiKey || typeof apiKey !== "string") {
