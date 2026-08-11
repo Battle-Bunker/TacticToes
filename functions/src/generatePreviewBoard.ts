@@ -20,13 +20,24 @@ export const generatePreviewBoard = functions.https.onCall(async (data, context)
   }
 
   const setupRef = admin.firestore().doc(`sessions/${sessionID}/setups/${gameID}`)
-  const setupSnap = await setupRef.get()
+  const [setupSnap, sessionSnap] = await Promise.all([
+    setupRef.get(),
+    admin.firestore().doc(`sessions/${sessionID}`).get(),
+  ])
 
   if (!setupSnap.exists) {
     throw new functions.https.HttpsError("not-found", "Game setup not found")
   }
 
   const setup = setupSnap.data() as GameSetup
+
+  if (setup.started) {
+    throw new functions.https.HttpsError("failed-precondition", "Game already started")
+  }
+  const owner = sessionSnap.data()?.owner ?? null
+  if (owner !== null && owner !== context.auth.uid) {
+    throw new functions.https.HttpsError("permission-denied", "Only the session owner can regenerate the preview")
+  }
 
   const previewSetup: StartedGameSetup = {
     ...setup,

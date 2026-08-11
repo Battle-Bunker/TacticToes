@@ -1,4 +1,4 @@
-import { Box, CircularProgress } from "@mui/material"
+import { Box, CircularProgress, Typography } from "@mui/material"
 import {
   Centaur,
   GameSetup,
@@ -444,7 +444,7 @@ export const GameStateProvider: React.FC<{
             height: "100vh",
           }}
         >
-          <CircularProgress />
+          {error ? <Typography color="error">{error}</Typography> : <CircularProgress />}
         </Box>
       )}
     </GameStateContext.Provider>

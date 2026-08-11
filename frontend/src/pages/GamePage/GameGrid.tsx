@@ -14,7 +14,6 @@ import {
 
 export interface GameLogicProps {
   gameState: GameState
-  gridWidth: number
   cellSize: number
   selectedTurnIndex: number
 }
@@ -99,13 +98,12 @@ const GameGrid: React.FC = () => {
       setGameLogicReturn(
         SnakeGameLogic({
           gameState,
-          gridWidth,
           cellSize,
           selectedTurnIndex: selectedTurnIndex >= 0 ? selectedTurnIndex : 0,
         }),
       )
     }
-  }, [gameState, gridWidth, cellSize, selectedTurnIndex])
+  }, [gameState, cellSize, selectedTurnIndex])
 
   // Navigation handlers
   const handlePrevTurn = () => {

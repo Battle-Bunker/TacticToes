@@ -108,7 +108,7 @@ export const SnekConfiguration: React.FC<SnekConfigurationProps> = ({
         <TextField
           type="number" label="Max Turns" value={maxTurns}
           onChange={(e) => onMaxTurnsChange(parseInt(e.target.value) || 0)}
-          sx={{ flex: 1 }} inputProps={{ min: 1 }} disabled={!maxTurnsEnabled}
+          sx={{ flex: 1 }} inputProps={{ min: 1, max: 1000 }} disabled={!maxTurnsEnabled}
         />
       </div>
       <Box sx={{ mt: 1 }}>

@@ -44,6 +44,22 @@ describe("reasonNotToStart (startRequested)", () => {
     expect(reasonNotToStart(baseSetup({ teams: [] }), trigger)).toMatch(/fewer than 2 teams/)
   })
 
+  it("rejects boards too small for teams × snakesPerTeam", () => {
+    // 5×5 board has a 3×3 interior = 9 spawn cells; 2 teams × 5 snakes = 10.
+    expect(
+      reasonNotToStart(
+        baseSetup({ boardWidth: 5, boardHeight: 5, snakesPerTeam: 5 }),
+        trigger
+      )
+    ).toMatch(/board too small/)
+    expect(
+      reasonNotToStart(
+        baseSetup({ boardWidth: 5, boardHeight: 5, snakesPerTeam: 4 }),
+        trigger
+      )
+    ).toBeNull()
+  })
+
   it("leaves tournament games to the scheduler", () => {
     expect(reasonNotToStart(baseSetup({ tournamentMode: true }), trigger)).toMatch(
       /tournament/

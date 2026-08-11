@@ -14,7 +14,6 @@ interface BorderStyles {
 interface CellProps {
   children?: React.ReactNode
   sx?: SxProps<Theme>
-  borders: BorderStyles
   onClick?: () => void
   cornerColor?: string
 }
@@ -234,7 +233,6 @@ const GameLogic = ({
           <Cell
             key={`head-${playerID}-${position}-${selectedTurnIndex}`}
             sx={commonBoxStyle}
-            borders={borders}
             cornerColor={outlineColor}
           >
             <span
@@ -258,7 +256,6 @@ const GameLogic = ({
           <Cell
             key={`body-length-${playerID}-${position}-${selectedTurnIndex}`}
             sx={commonBoxStyle}
-            borders={borders}
             cornerColor={outlineColor}
           >
             <Box
@@ -279,7 +276,6 @@ const GameLogic = ({
           <Cell
             key={`tail-${playerID}-${position}`}
             sx={commonBoxStyle}
-            borders={borders}
             cornerColor={outlineColor}
           >
             <Box
@@ -300,7 +296,6 @@ const GameLogic = ({
           <Cell
             key={`body-${playerID}-${position}`}
             sx={commonBoxStyle}
-            borders={borders}
             cornerColor={outlineColor}
           />
         )

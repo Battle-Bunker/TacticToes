@@ -34,28 +34,19 @@ const GameFinished: React.FC = () => {
 
   const { teams, gamePlayers } = gameState.setup
 
-  const teamResults: TeamResult[] = []
-  winners.forEach((winner) => {
-    const team = teams.find((t) => t.id === winner.teamID)
-    if (!team) return
-
-    let result = teamResults.find((r) => r.teamID === winner.teamID)
-    if (!result) {
-      result = {
-        teamID: winner.teamID,
-        teamName: team.name,
-        teamColor: team.color,
-        teamScore: winner.teamScore,
-        snakeNames: [],
-        mmr: winner.newMMR,
-        mmrChange: winner.mmrChange,
-      }
-      teamResults.push(result)
-    }
-
-    const gamePlayer = gamePlayers.find((gp) => gp.id === winner.playerID)
-    if (gamePlayer) {
-      result.snakeNames.push(`${team.name} ${gamePlayer.letter}`)
+  // Every team gets a results row; winners additionally carry MMR updates.
+  const teamResults: TeamResult[] = teams.map((team) => {
+    const winner = winners.find((w) => w.teamID === team.id)
+    return {
+      teamID: team.id,
+      teamName: team.name,
+      teamColor: team.color,
+      teamScore: winner?.teamScore ?? latestTurn.teamScores?.[team.id] ?? 0,
+      snakeNames: gamePlayers
+        .filter((gp) => gp.teamID === team.id)
+        .map((gp) => `${team.name} ${gp.letter}`),
+      mmr: winner?.newMMR,
+      mmrChange: winner?.mmrChange,
     }
   })
 

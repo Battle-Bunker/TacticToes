@@ -52,6 +52,12 @@ export function reasonNotToStart(setup: GameSetup, trigger: StartTrigger): strin
   if (setup.started) return "game already started"
   if (setup.teams.length < 2) return "fewer than 2 teams"
 
+  // Every snake needs a spawnable interior cell (the perimeter is walls).
+  const interiorCells = (setup.boardWidth - 2) * (setup.boardHeight - 2)
+  if (setup.teams.length * setup.snakesPerTeam > interiorCells) {
+    return "board too small for teams × snakesPerTeam"
+  }
+
   if (trigger.kind === "scheduled") {
     if (!setup.tournamentMode) return "tournament mode not active"
     if (!setup.scheduledStartTime) return "no scheduledStartTime set"

@@ -45,9 +45,7 @@ const useTypingEffect = (
   return placeholder
 }
 
-interface TypingEffectInputProps extends Omit<TextFieldProps, "placeholder"> {
-  colour?: string
-}
+type TypingEffectInputProps = Omit<TextFieldProps, "placeholder">
 
 const TypingEffectInput: React.FC<TypingEffectInputProps> = ({
   value,

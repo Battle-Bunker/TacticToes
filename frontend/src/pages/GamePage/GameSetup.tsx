@@ -54,6 +54,7 @@ const BOARD_SIZE_MAPPING = {
 // maximum is a client-side sanity bound.
 const MIN_BOARD_DIMENSION = 5;
 const MAX_BOARD_DIMENSION = 99;
+const MAX_TEAMS = 10;
 
 type BoardSize = keyof typeof BOARD_SIZE_MAPPING | "custom";
 
@@ -85,6 +86,7 @@ const GameSetup: React.FC = () => {
     gameSetup?.maxTurns !== undefined,
   );
   const [maxTurns, setMaxTurns] = useState<number>(gameSetup?.maxTurns ?? 100);
+  const [addingCentaur, setAddingCentaur] = useState<boolean>(false);
   const [hazardPercentage, setHazardPercentage] = useState<number>(
     gameSetup?.hazardPercentage ?? 0,
   );
@@ -208,13 +210,15 @@ const GameSetup: React.FC = () => {
   }, [firePreviewRequest]);
 
   useEffect(() => {
-    if (!gameSetup || initialGenerationDoneRef.current) return;
+    // The preview callable is owner-gated server-side, so only the owner
+    // should trigger the initial generation.
+    if (!gameSetup || !isOwner || initialGenerationDoneRef.current) return;
     const hasPreviewData = gameSetup.presetFertileTiles || gameSetup.presetHazards || gameSetup.presetPlayerPositions || gameSetup.presetFood;
     initialGenerationDoneRef.current = true;
     if (!hasPreviewData) {
       firePreviewRequest(false);
     }
-  }, [gameSetup]);
+  }, [gameSetup, isOwner]);
 
   useEffect(() => {
     return () => {
@@ -312,15 +316,22 @@ const GameSetup: React.FC = () => {
   };
 
   const handleAddCentaur = async (centaur: Centaur) => {
+    if (addingCentaur) return;
     if (gameSetup.teams.some((team) => team.id === centaur.id)) return;
+    if (gameSetup.teams.length >= MAX_TEAMS) return;
     const newTeam: Team = {
       id: centaur.id,
       name: centaur.name,
       color: nextTeamColor(gameSetup.teams.map((team) => team.color)),
     };
-    await updateDoc(gameDocRef, {
-      teams: arrayUnion(newTeam),
-    });
+    setAddingCentaur(true);
+    try {
+      await updateDoc(gameDocRef, {
+        teams: arrayUnion(newTeam),
+      });
+    } finally {
+      setAddingCentaur(false);
+    }
     debouncedRegeneratePreview();
   };
 
@@ -351,7 +362,7 @@ const GameSetup: React.FC = () => {
 
   // Handle max turns configuration
   const handleMaxTurnsChange = async (newMaxTurns: number) => {
-    const sanitizedValue = Math.max(1, newMaxTurns);
+    const sanitizedValue = Math.min(1000, Math.max(1, newMaxTurns));
     setMaxTurns(sanitizedValue);
 
     if (maxTurnsEnabled) {
@@ -563,13 +574,19 @@ const GameSetup: React.FC = () => {
     gameSetup.boardHeight <= MAX_BOARD_DIMENSION;
   const turnTimeValid = gameSetup.maxTurnTime > 0;
   const enoughTeams = gameSetup.teams.length >= 2;
-  const canStartGame = enoughTeams && boardValid && turnTimeValid;
+  const interiorCells =
+    (gameSetup.boardWidth - 2) * (gameSetup.boardHeight - 2);
+  const boardFits =
+    gameSetup.teams.length * gameSetup.snakesPerTeam <= interiorCells;
+  const canStartGame = enoughTeams && boardValid && turnTimeValid && boardFits;
 
   const teamValidationMessage = !enoughTeams
     ? gameSetup.teams.length === 0
       ? "Add centaurs to create teams before starting the game"
       : "At least 2 teams are needed before starting the game"
-    : "";
+    : !boardFits
+      ? "Board is too small for this many snakes — shrink the teams, lower snakes per team, or grow the board"
+      : "";
 
   return (
     <Stack spacing={2} pt={2}>
@@ -1007,7 +1024,13 @@ const GameSetup: React.FC = () => {
                         <Button
                           size="small"
                           variant="outlined"
-                          disabled={isInGame || started || isConfigDisabled}
+                          disabled={
+                            isInGame ||
+                            started ||
+                            isConfigDisabled ||
+                            addingCentaur ||
+                            gameSetup.teams.length >= MAX_TEAMS
+                          }
                           onClick={() => handleAddCentaur(centaur)}
                           sx={{ flexShrink: 0 }}
                         >
