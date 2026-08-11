@@ -27,7 +27,8 @@ const { getFunctions, httpsCallable } = clientRequire("firebase/functions")
 const PROJECT_ID = process.env.E2E_PROJECT_ID ?? "tactic-toes-cyphid-dev"
 const WEB_API_KEY = process.env.E2E_WEB_API_KEY ?? "AIzaSyAa5zfOcG-0sQKvHDZLWMxEhNGO87wYQhQ"
 const APP_ID = process.env.E2E_APP_ID ?? "1:142989483184:web:8e36c2a13d087e2475ef75"
-const REGION = "us-central1"
+// Must match functions/src/config/region.ts, or every callable below 404s.
+const REGION = process.env.E2E_REGION ?? "australia-southeast1"
 
 admin.initializeApp({ projectId: PROJECT_ID })
 const adb = admin.firestore()

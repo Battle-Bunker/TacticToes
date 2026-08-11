@@ -87,7 +87,7 @@ Deployment, per-project GCP bootstrap (`scripts/bootstrap-gcp-project.sh`),
 callable IAM grants (`scripts/grant-callable-invokers.sh`), and the
 `turn-expirations` Cloud Tasks queue are covered in `README.md`.
 
-Firebase project aliases (`.firebaserc`): `production` = tactic-toes-tuke,
+Firebase project aliases (`.firebaserc`): `production` = team-snek (australia-southeast1),
 `staging` = tactic-toes-cyphid-dev.
 
 # Conventions
