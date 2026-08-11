@@ -17,6 +17,7 @@ SA_NAME="firebase-deployer"
 SA_EMAIL="${SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 PROJECT_NUMBER="$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')"
 COMPUTE_SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
+APPENGINE_SA="${PROJECT_ID}@appspot.gserviceaccount.com"
 
 echo "Project: $PROJECT_ID ($PROJECT_NUMBER)"
 
@@ -43,13 +44,30 @@ for role in "${DEPLOYER_ROLES[@]}"; do
     --quiet >/dev/null
 done
 
-# actAs on the runtime SA, scoped to that resource rather than project-wide.
-echo "  Granting deployer actAs on the runtime service account..."
-gcloud iam service-accounts add-iam-policy-binding "$COMPUTE_SA" \
-  --member="serviceAccount:${SA_EMAIL}" \
-  --role="roles/iam.serviceAccountUser" \
-  --project="$PROJECT_ID" \
-  --quiet >/dev/null
+# actAs on the runtime SAs, scoped to those resources rather than project-wide.
+#
+# BOTH are needed, because this codebase mixes function generations and each
+# generation runs as a different identity:
+#   gen2 (onTaskDispatched)  -> the Compute Engine default SA
+#   gen1 (everything else)   -> the App Engine default SA
+# Granting only the compute one gets you through the gen2 deploy and then fails
+# with "Missing permissions required for functions deploy ... iam.serviceAccounts
+# .ActAs on service account PROJECT_ID@appspot.gserviceaccount.com".
+RUNTIME_SAS=("$COMPUTE_SA" "$APPENGINE_SA")
+
+for sa in "${RUNTIME_SAS[@]}"; do
+  if ! gcloud iam service-accounts describe "$sa" --project="$PROJECT_ID" >/dev/null 2>&1; then
+    echo "  Skipping actAs on $sa (does not exist yet)."
+    echo "  If a gen1 deploy later fails on it, re-run this script."
+    continue
+  fi
+  echo "  Granting deployer actAs on $sa..."
+  gcloud iam service-accounts add-iam-policy-binding "$sa" \
+    --member="serviceAccount:${SA_EMAIL}" \
+    --role="roles/iam.serviceAccountUser" \
+    --project="$PROJECT_ID" \
+    --quiet >/dev/null
+done
 
 # Since mid-2024 Cloud Build runs as the compute default SA, and (for orgs
 # created on/after 2024-05-03) that account is created with no roles at all.
