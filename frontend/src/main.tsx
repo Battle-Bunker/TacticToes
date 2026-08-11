@@ -192,7 +192,10 @@ const theme = createTheme({
           },
         },
         contained: {
-          color: "#000",
+          // The primary palette uses black as its contained-button background.
+          // Keep the default label readable; individual buttons with an
+          // explicit `color` in `sx` can still override this.
+          color: "#fff",
           "&.Mui-disabled": {
             backgroundColor: "#d3d3d3",
             border: "2px solid #a9a9a9",
