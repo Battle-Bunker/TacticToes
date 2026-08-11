@@ -33,6 +33,11 @@ DEPLOYER_ROLES=(
   "roles/datastore.indexAdmin"              # firestore:indexes
   "roles/cloudfunctions.admin"              # functions deploy (gen1 + gen2)
   "roles/serviceusage.serviceUsageConsumer" # enabling APIs during deploy
+  # Deploying an onTaskDispatched function creates and configures its Cloud
+  # Tasks queue from the options in source, and sets the enqueuer binding on it.
+  # cloudfunctions.admin does not reach Cloud Tasks, so without this the deploy
+  # fails with 403 cloudtasks.queues.get on a queue it is about to create.
+  "roles/cloudtasks.admin"                  # task queue create/update/setIamPolicy
 )
 
 for role in "${DEPLOYER_ROLES[@]}"; do
