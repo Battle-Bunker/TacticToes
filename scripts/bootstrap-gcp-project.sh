@@ -130,11 +130,102 @@ APIS=(
     # account, which is the gen2 functions runtime identity and (since 2024) the
     # Cloud Build identity. Without it the IAM grants below have no target.
     "compute.googleapis.com"
+    # Needed to read, and optionally override, the org policies checked below.
+    "orgpolicy.googleapis.com"
 )
 
 echo "Enabling ${#APIS[@]} APIs (this can take a couple of minutes)..."
 gcloud services enable "${APIS[@]}" --project="$PROJECT_ID"
 echo "APIs enabled."
+
+section "Step 1b: Organization Policy Checks"
+
+# Two org policies are enforced by default for organizations created on or after
+# 2024-05-03, and both block this setup in ways whose error messages do not
+# mention org policy at all. Checked here so they surface before a deploy fails.
+#
+# Overriding either weakens a real control, so applying is opt-in:
+#   APPLY_ORG_POLICY_OVERRIDES=1 bash scripts/bootstrap-gcp-project.sh ...
+# Both overrides need roles/orgpolicy.policyAdmin on the organization.
+
+ORG_POLICY_BLOCKED=0
+
+apply_override() {
+    # apply_override <constraint> <spec-yaml-body> <label>
+    local constraint="$1" spec="$2" label="$3"
+    local file
+    file="$(mktemp)"
+    # inheritFromParent:false matters -- without it the organization's enforcing
+    # rule merges back in and the project-level override silently does nothing.
+    printf 'name: projects/%s/policies/%s\nspec:\n  inheritFromParent: false\n  rules:\n  - %s\n' \
+        "$PROJECT_ID" "$constraint" "$spec" > "$file"
+    if gcloud org-policies set-policy "$file" --project="$PROJECT_ID" --quiet >/dev/null 2>&1; then
+        echo "    Override applied for $label."
+        echo "    Propagation can take up to 15 minutes."
+    else
+        echo "    Could not apply the override -- you likely lack" >&2
+        echo "    roles/orgpolicy.policyAdmin on the organization." >&2
+        ORG_POLICY_BLOCKED=1
+    fi
+    rm -f "$file"
+}
+
+check_org_policy() {
+    # check_org_policy <constraint> <blocked-pattern> <spec-yaml-body> <label> <why>
+    local constraint="$1" blocked="$2" spec="$3" label="$4" why="$5"
+    local effective
+    effective="$(gcloud org-policies describe "$constraint" --project="$PROJECT_ID" \
+        --effective --format=yaml 2>/dev/null || true)"
+
+    if [ -z "$effective" ]; then
+        echo "  $label: could not read (needs roles/orgpolicy.policyViewer)."
+        echo "    Check manually if a later step fails."
+        return
+    fi
+
+    if ! echo "$effective" | grep -q "$blocked"; then
+        echo "  $label: not blocking."
+        return
+    fi
+
+    echo "  $label: ENFORCED."
+    echo "    $why"
+    if [ "${APPLY_ORG_POLICY_OVERRIDES:-0}" = "1" ]; then
+        apply_override "$constraint" "$spec" "$label"
+    else
+        ORG_POLICY_BLOCKED=1
+        echo "    Re-run with APPLY_ORG_POLICY_OVERRIDES=1 to override for this"
+        echo "    project, or apply it yourself:"
+        echo "      gcloud org-policies set-policy <file> --project=$PROJECT_ID"
+        echo "    where <file> contains:"
+        echo "      name: projects/$PROJECT_ID/policies/$constraint"
+        echo "      spec:"
+        echo "        inheritFromParent: false"
+        echo "        rules:"
+        echo "        - $spec"
+    fi
+}
+
+check_org_policy \
+    "iam.disableServiceAccountKeyCreation" \
+    "enforce: true" \
+    "enforce: false" \
+    "Service account key creation" \
+    "scripts/create-deployer-sa.sh cannot mint the key Replit deploys with."
+
+# A restrictive allowedPolicyMemberDomains lists allowedValues; permissive is allowAll.
+check_org_policy \
+    "iam.allowedPolicyMemberDomains" \
+    "allowedValues" \
+    "allowAll: true" \
+    "Domain restricted sharing" \
+    "Callables cannot be granted allUsers invoker, so browsers get a Google Frontend 403 that presents as a CORS error."
+
+if [ "$ORG_POLICY_BLOCKED" = "1" ]; then
+    echo ""
+    echo "  Continuing -- everything else provisions fine. Come back to the above"
+    echo "  before deploying, or those steps will fail with unrelated-looking errors."
+fi
 
 section "Step 2: Create Firestore Database"
 
