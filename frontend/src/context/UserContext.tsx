@@ -1,8 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from "react"
-import { doc, onSnapshot } from "firebase/firestore"
+import { doc, setDoc } from "firebase/firestore"
 import { onAuthStateChanged, User } from "firebase/auth"
 import { Box, CircularProgress } from "@mui/material"
-import { UserProfile } from "@shared/types/Game"
 import { auth, db } from "../firebaseConfig"
 import SignupPage from "../pages/SignupPage"
 
@@ -18,41 +17,26 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({
 }) => {
   const [user, setUser] = useState<User | null>(null)
   const [authLoaded, setAuthLoaded] = useState<boolean>(false)
-  const [name, setName] = useState<string>("")
-  const [profileLoaded, setProfileLoaded] = useState<boolean>(false)
 
   useEffect(
     () =>
       onAuthStateChanged(auth, (currentUser) => {
         setUser(currentUser)
         setAuthLoaded(true)
+
+        // Persist the Google display name to Firestore so other consumers can read it.
+        if (currentUser?.displayName) {
+          setDoc(
+            doc(db, "users", currentUser.uid),
+            { name: currentUser.displayName },
+            { merge: true },
+          ).catch((err) => console.error("Error syncing display name:", err))
+        }
       }),
     [],
   )
 
-  useEffect(() => {
-    if (!user) {
-      setName("")
-      setProfileLoaded(false)
-      return
-    }
-
-    setProfileLoaded(false)
-    return onSnapshot(
-      doc(db, "users", user.uid),
-      (snapshot) => {
-        const profile = snapshot.data() as UserProfile | undefined
-        setName(profile?.name ?? "")
-        setProfileLoaded(true)
-      },
-      (error) => {
-        console.error("Error loading user profile:", error)
-        setProfileLoaded(true)
-      },
-    )
-  }, [user])
-
-  if (!authLoaded || (user && !profileLoaded)) {
+  if (!authLoaded) {
     return (
       <Box
         sx={{
@@ -67,9 +51,11 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({
     )
   }
 
-  if (!user || !name) {
-    return <SignupPage key={user?.uid ?? "signed-out"} user={user} />
+  if (!user) {
+    return <SignupPage />
   }
+
+  const name = user.displayName ?? ""
 
   return (
     <UserContext.Provider value={{ userID: user.uid, name }}>

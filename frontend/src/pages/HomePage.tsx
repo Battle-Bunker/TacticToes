@@ -62,14 +62,7 @@ const HomePage: React.FC = () => {
         </Typography>
       </Box>
 
-      <Box sx={{ mt: "auto", mb: 5 }}>
-        <Typography variant="body1" align="left">
-          * Toes may be involved
-        </Typography>
-        <Typography variant="body1" align="left">
-          A game by Brendo
-        </Typography>
-      </Box>
+
     </Stack>
   )
 }

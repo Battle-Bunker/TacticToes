@@ -1,18 +1,12 @@
-import CloseIcon from "@mui/icons-material/Close"
 import {
   AppBar,
   Box,
   Button,
   CircularProgress,
   Container,
-  Dialog,
-  DialogContent,
-  DialogTitle,
-  IconButton,
   Typography,
 } from "@mui/material"
-import { doc, updateDoc } from "firebase/firestore"
-import React, { ErrorInfo, ReactNode, Suspense, useState } from "react"
+import React, { ErrorInfo, ReactNode, Suspense } from "react"
 import {
   Route,
   BrowserRouter as Router,
@@ -20,8 +14,6 @@ import {
   useNavigate,
 } from "react-router-dom"
 import { UserProvider, useUser } from "./context/UserContext"
-import { db } from "./firebaseConfig"
-import Centaurs from "./pages/Centaurs"
 import GamePage from "./pages/GamePage/index"
 import HomePage from "./pages/HomePage"
 import LadderPage from "./pages/LadderPage"
@@ -91,22 +83,8 @@ const App: React.FC = () => {
 }
 
 const AppContent: React.FC = () => {
-  const { name, userID } = useUser()
-  const [isProfileOpen, setIsProfileOpen] = useState<boolean>(false)
-  const [updatedName, setUpdatedName] = useState<string>(name)
+  const { name } = useUser()
   const navigate = useNavigate()
-
-  const handleProfileOpen = (): void => {
-    setIsProfileOpen(true)
-  }
-
-  const handleProfileClose = async (): Promise<void> => {
-    setIsProfileOpen(false)
-    const trimmed = updatedName.trim()
-    if (trimmed && trimmed !== name) {
-      await updateDoc(doc(db, "users", userID), { name: trimmed })
-    }
-  }
 
   return (
     <>
@@ -140,7 +118,7 @@ const AppContent: React.FC = () => {
           <Button
             color="primary"
             sx={{ height: 30 }}
-            onClick={handleProfileOpen}
+            onClick={() => navigate("/profile")}
           >
             {name}
           </Button>
@@ -155,49 +133,13 @@ const AppContent: React.FC = () => {
               path="/session/:sessionName/:gameID"
               element={<GamePage />}
             />
-            <Route path="/centaurs" element={<Centaurs />} />
+            <Route path="/profile" element={<ProfilePage />} />
+            <Route path="/centaurs" element={<ProfilePage />} />
             <Route path="/ladder" element={<LadderPage />} />
             <Route path="/ladder/:centaurId" element={<LadderPage />} />
           </Routes>
         </Box>
       </Container>
-
-      {/* Profile Modal */}
-      <Dialog
-        open={isProfileOpen}
-        onClose={handleProfileClose}
-        fullWidth
-        maxWidth="sm"
-        PaperProps={{
-          sx: {
-            border: "2px solid black",
-            borderRadius: 0,
-            boxShadow: "none",
-          },
-        }}
-      >
-        <DialogTitle>
-          Update Profile
-          <IconButton
-            aria-label="close"
-            onClick={handleProfileClose}
-            sx={{
-              position: "absolute",
-              right: 8,
-              top: 8,
-              color: (theme) => theme.palette.grey[500],
-            }}
-          >
-            <CloseIcon />
-          </IconButton>
-        </DialogTitle>
-        <DialogContent sx={{ overflowX: "hidden" }}>
-          <ProfilePage
-            setUpdatedName={setUpdatedName}
-            handleProfileClose={handleProfileClose}
-          />
-        </DialogContent>
-      </Dialog>
     </>
   )
 }
