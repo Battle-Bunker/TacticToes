@@ -295,6 +295,56 @@ else
     echo "Repository created."
 fi
 
+# Give the repository a cleanup policy so build images do not accumulate.
+#
+# This also stops every future deploy failing at the very end. firebase-tools
+# prompts to create one, and when it cannot prompt it THROWS -- after the
+# functions have already deployed:
+#   "Functions successfully deployed but could not set up cleanup policy"
+# It is forced non-interactive by --non-interactive, by a non-TTY, and by the
+# mere presence of an AI-agent env var, so this is unavoidable in an automated
+# deploy. Any cleanup policy on the repo satisfies the check, including this one.
+#
+# Deliberately NOT solved with `firebase deploy --force`, which does set the
+# policy but also stops asking before deleting functions missing from source and
+# before applying unsafe trigger migrations.
+#
+# 30 days rather than the 1-day default firebase-tools uses. The images are not
+# needed at runtime -- Cloud Run keeps its own copy pinned to the serving
+# revision -- but they ARE needed to edit a Cloud Run revision by hand or to roll
+# back to a non-serving one, and those escape hatches are worth more than the few
+# cents of storage.
+CLEANUP_POLICY_FILE="$(mktemp)"
+cat > "$CLEANUP_POLICY_FILE" <<'POLICY'
+[
+  {
+    "name": "delete-old-build-images",
+    "action": { "type": "Delete" },
+    "condition": {
+      "tagState": "any",
+      "olderThan": "30d"
+    }
+  }
+]
+POLICY
+
+echo "Setting a 30-day cleanup policy on gcf-artifacts..."
+# --no-dry-run arms the policy. Without it the policy is stored but evaluated
+# only in audit logs, which still satisfies firebase-tools but never deletes.
+if gcloud artifacts repositories set-cleanup-policies gcf-artifacts \
+       --location="$REGION" \
+       --project="$PROJECT_ID" \
+       --policy="$CLEANUP_POLICY_FILE" \
+       --no-dry-run >/dev/null 2>&1; then
+    echo "Cleanup policy applied."
+else
+    echo "WARNING: could not set the cleanup policy. Deploys will still succeed" >&2
+    echo "but will exit non-zero afterwards. Retry with:" >&2
+    echo "  gcloud artifacts repositories set-cleanup-policies gcf-artifacts \\" >&2
+    echo "    --location=$REGION --project=$PROJECT_ID --policy=<file> --no-dry-run" >&2
+fi
+rm -f "$CLEANUP_POLICY_FILE"
+
 section "Step 3: Resolve Service Accounts"
 
 CLOUD_BUILD_SA="${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com"
