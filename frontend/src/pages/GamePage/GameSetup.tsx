@@ -62,19 +62,25 @@ type BoardSize = keyof typeof BOARD_SIZE_MAPPING | "custom";
 const SNAKES_PER_TEAM_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8];
 
 // Live centaur presence for the current setup: a centaur acks its pending
-// invite by writing setups/{gameID}/centaurStatus/{centaurId}, so a doc's
-// existence means "responsive".
+// invite by writing setups/{gameID}/centaurStatus/{centaurId} with
+// ready == true. A recheck flips existing acks to ready == false; live
+// centaurs answer by flipping them back.
 const useCentaurStatuses = (
   sessionName: string,
   gameID: string,
-): { [centaurId: string]: boolean } => {
+): {
+  statuses: { [centaurId: string]: boolean };
+  recheck: () => Promise<void>;
+} => {
   const [statuses, setStatuses] = useState<{ [centaurId: string]: boolean }>(
     {},
   );
+  const ackedIDsRef = useRef<string[]>([]);
 
   useEffect(() => {
     if (!gameID) return;
     setStatuses({});
+    ackedIDsRef.current = [];
     const statusesRef = collection(
       db,
       "sessions",
@@ -87,10 +93,13 @@ const useCentaurStatuses = (
       statusesRef,
       (snapshot) => {
         const next: { [centaurId: string]: boolean } = {};
+        const acked: string[] = [];
         snapshot.forEach((docSnap) => {
-          next[docSnap.id] = true;
+          next[docSnap.id] = docSnap.data().ready === true;
+          acked.push(docSnap.id);
         });
         setStatuses(next);
+        ackedIDsRef.current = acked;
       },
       (error) => {
         console.error("Error in centaurStatus subscription:", error);
@@ -99,7 +108,22 @@ const useCentaurStatuses = (
     return unsubscribe;
   }, [sessionName, gameID]);
 
-  return statuses;
+  const recheck = useCallback(async () => {
+    // Only existing ack docs can go stale; absent docs already read as
+    // "no response".
+    await Promise.all(
+      ackedIDsRef.current.map((centaurId) =>
+        updateDoc(
+          doc(db, "sessions", sessionName, "setups", gameID, "centaurStatus", centaurId),
+          { ready: false },
+        ).catch((error) => {
+          console.error(`Failed to reset health of ${centaurId}:`, error);
+        }),
+      ),
+    );
+  }, [sessionName, gameID]);
+
+  return { statuses, recheck };
 };
 
 const GameSetup: React.FC = () => {
@@ -116,7 +140,8 @@ const GameSetup: React.FC = () => {
 
   const hasOwner = session?.owner != null;
   const isConfigDisabled = hasOwner && !isOwner;
-  const centaurStatuses = useCentaurStatuses(sessionName, gameID);
+  const { statuses: centaurStatuses, recheck: recheckCentaurHealth } =
+    useCentaurStatuses(sessionName, gameID);
 
   const [secondsPerTurn, setSecondsPerTurn] = useState<string>("10");
   const [boardSize, setBoardSize] = useState<BoardSize>("medium");
@@ -924,6 +949,8 @@ const GameSetup: React.FC = () => {
             onRemove={handleRemoveTeam}
             disabled={started || isConfigDisabled}
             centaurStatuses={centaurStatuses}
+            onRecheck={recheckCentaurHealth}
+            recheckDisabled={started || isConfigDisabled}
           />
         </Box>
       </FormControl>

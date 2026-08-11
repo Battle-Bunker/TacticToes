@@ -8,10 +8,13 @@ interface TeamListProps {
   onColorChange: (teamID: string, color: string) => void;
   onRemove: (teamID: string) => void;
   disabled: boolean;
-  // Live presence per centaur id: true once the centaur has acked the pending
-  // invite (its centaurStatus doc exists). Purely informational — start is
-  // never gated on presence.
+  // Live presence per centaur id: true while the centaur's ack doc has
+  // ready == true. Purely informational — start is never gated on presence.
   centaurStatuses: { [centaurId: string]: boolean };
+  // Flips every existing ack back to ready == false so live centaurs must
+  // re-ack; unavailable centaurs stay grey.
+  onRecheck: () => void;
+  recheckDisabled: boolean;
 }
 
 export const TeamList: React.FC<TeamListProps> = ({
@@ -20,6 +23,8 @@ export const TeamList: React.FC<TeamListProps> = ({
   onRemove,
   disabled,
   centaurStatuses,
+  onRecheck,
+  recheckDisabled,
 }) => {
   if (teams.length === 0) {
     return (
@@ -31,6 +36,15 @@ export const TeamList: React.FC<TeamListProps> = ({
 
   return (
     <Box>
+      <Box sx={{ display: "flex", justifyContent: "flex-end", px: 1, py: 0.5 }}>
+        <Chip
+          size="small"
+          label="🔄 recheck health"
+          onClick={recheckDisabled ? undefined : onRecheck}
+          disabled={recheckDisabled}
+          variant="outlined"
+        />
+      </Box>
       {teams.map((team) => (
         <Box
           key={team.id}

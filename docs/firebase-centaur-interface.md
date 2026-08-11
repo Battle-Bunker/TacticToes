@@ -94,7 +94,7 @@ world-readable; the centaur-specific surfaces are:
 | --- | --- | --- |
 | `centaurs/{centaurId}/games/{gameId}` | read (public), server-written | Game invite: `{ sessionID, gameID, status, createdAt }` while pending; `{ sessionID, gameID, status: 'started', snakeIDs, createdAt }` once started |
 | `sessions/{s}/setups/{g}` | read (public) | Lobby setup doc; a pending game's live configuration |
-| `sessions/{s}/setups/{g}/centaurStatus/{centaurId}` | read (public); create/update by the centaur whose `centaurId` claim matches the doc id | Readiness ack: `{ centaurId, ready: true, respondedAt }` |
+| `sessions/{s}/setups/{g}/centaurStatus/{centaurId}` | read (public); create/update by the centaur whose `centaurId` claim matches the doc id; the session owner may flip `ready` to `false` (health recheck) | Readiness ack: `{ centaurId, ready, respondedAt }` — responsive iff `ready == true` |
 | `sessions/{s}/games/{g}` | read (public) | Game doc; `turns` array grows by one per resolved turn |
 | `sessions/{s}/games/{g}/meta/centaurMap` | read (public), server-written | Snake → centaur ownership map used by rules |
 | `sessions/{s}/games/{g}/moveStatuses/{turn}` | read (public); centaurs may `arrayUnion` **one owned snake per write** into `movedPlayerIDs` | Commit signal for early turn resolution |
@@ -144,7 +144,16 @@ there is no game document yet. Instead it:
    this); `set` with merge makes the write idempotent. The ack powers the
    lobby's per-team presence chip ("responsive" / "no response"). It is
    purely informational: the owner can start the game regardless.
-2. Optionally subscribes to the setup doc `sessions/{sessionID}/setups/{gameID}`
+2. **Keeps the ack live**: the lobby can request a health recheck by flipping
+   the ack back to `ready: false` (the session owner may write exactly that
+   transition). Subscribe to your own `centaurStatus` doc while the invite is
+   pending and rewrite `{ ready: true, respondedAt: serverTimestamp() }`
+   whenever the doc is missing or `ready != true`. A centaur that has gone
+   away never answers, so its chip stays "no response". Each finished game
+   rolls the lobby to a fresh setup doc with an empty `centaurStatus`
+   subcollection, so presence starts from "no response" there and live
+   centaurs re-ack via the new pending invite.
+3. Optionally subscribes to the setup doc `sessions/{sessionID}/setups/{gameID}`
    to follow the lobby's current configuration (board, teams, snakesPerTeam,
    turn time).
 

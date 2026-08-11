@@ -17,7 +17,7 @@ service cloud.firestore {
     // signInWithCustomToken. Their uid is "centaur:<centaurId>" and their
     // token carries { centaur: true, centaurId }.
     function isCentaur() {
-      return isAuthenticated() && request.auth.token.centaur == true;
+      return isAuthenticated() && request.auth.token.get('centaur', false) == true;
     }
 
     // The game-start transaction writes meta/centaurMap with
@@ -184,6 +184,15 @@ service cloud.firestore {
           allow create, update: if isCentaur() &&
             request.auth.token.centaurId == centaurStatusId &&
             isValidCentaurStatus(request.resource.data, centaurStatusId);
+          // Health recheck: a human (session owner, or anyone once ownerless)
+          // may flip an ack back to ready == false; the centaur answers by
+          // setting ready == true again.
+          allow update: if isAuthenticated() && !isCentaur() &&
+            (getSessionOwner(sessionId) == null ||
+              getSessionOwner(sessionId) == request.auth.uid) &&
+            request.resource.data.keys().hasOnly(['centaurId', 'ready', 'respondedAt']) &&
+            request.resource.data.centaurId == resource.data.centaurId &&
+            request.resource.data.ready == false;
         }
       }
 
