@@ -110,8 +110,14 @@ to = "/index.html"
 [userenv]
 
 [userenv.development]
-FUNCTIONS_REGION = "us-central1"
-VITE_FIREBASE_FUNCTIONS_REGION = "us-central1"
+# Both region vars are deliberately unset. They exist only as escape hatches for
+# targeting a project whose Firestore is NOT in australia-southeast1, and the
+# code defaults to australia-southeast1 in both places.
+#
+# Setting them here would be inherited by `npm run deploy` run from this shell,
+# which silently wins over the default and would deploy functions to the wrong
+# region: Firestore triggers fail outright against a Sydney database, and any
+# callable that did deploy would 404 for a client pointed at Sydney.
 
 [userenv.production]
 
