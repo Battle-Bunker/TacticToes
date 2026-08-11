@@ -157,7 +157,7 @@ if gcloud firestore databases describe --database='(default)' \
         echo "ERROR: existing database is in '$EXISTING_LOC', not '$REGION'." >&2
         echo "Firestore location is PERMANENT and cannot be changed. To proceed" >&2
         echo "you need a new project, or you must re-run this script with" >&2
-        echo "REGION=$EXISTING_LOC and set FUNCTIONS_REGION to match." >&2
+        echo "REGION=$EXISTING_LOC and set VITE_FIREBASE_FUNCTIONS_REGION to match." >&2
         exit 1
     fi
 else

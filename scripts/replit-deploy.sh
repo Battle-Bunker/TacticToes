@@ -13,7 +13,7 @@ set -euo pipefail
 #
 # Required in Replit DEPLOYMENT secrets (not workspace secrets):
 #   GCP_SA_KEY_B64        base64 of the team-snek deployer key
-#   VITE_FIREBASE_*       the production web app config (7 vars)
+#   VITE_FIREBASE_*       the production web app config (6 vars)
 #
 # Optional overrides:
 #   FIREBASE_PROD_PROJECT_ID   default team-snek
@@ -29,11 +29,10 @@ PROD_REGION="${FIREBASE_PROD_REGION:-australia-southeast1}"
 # out of sync. Add "hosting" here only if you intend Firebase to serve the app.
 TARGETS="${REPLIT_DEPLOY_TARGETS:-firestore:rules,firestore:indexes,functions}"
 
-# Set rather than defaulted. [userenv.development] pins these to us-central1 for
+# Set rather than defaulted. [userenv.development] pins this to us-central1 for
 # the dev project, and inheriting that here would deploy production functions to
 # the wrong region -- Firestore triggers fail outright against a Sydney database,
 # and callables that did deploy would 404 for a Sydney client.
-export FUNCTIONS_REGION="$PROD_REGION"
 export VITE_FIREBASE_FUNCTIONS_REGION="$PROD_REGION"
 
 echo "=========================================="

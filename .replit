@@ -115,11 +115,11 @@ to = "/index.html"
 # production. Production values are set by scripts/replit-deploy.sh, which
 # overrides rather than inherits these.
 #
-# tactic-toes-cyphid-dev has its Firestore in us-central1, so the region vars
-# must match it -- the code defaults to australia-southeast1, which is correct
-# for production but wrong here.
+# tactic-toes-cyphid-dev has its Firestore in us-central1, so the region must
+# match it -- the code defaults to australia-southeast1, which is correct for
+# production but wrong here. One variable serves both the client and the
+# functions deploy.
 FIREBASE_PROJECT_ID = "tactic-toes-cyphid-dev"
-FUNCTIONS_REGION = "us-central1"
 VITE_FIREBASE_FUNCTIONS_REGION = "us-central1"
 
 [userenv.production]

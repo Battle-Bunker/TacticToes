@@ -9,7 +9,8 @@ set -euo pipefail
 #                        (created by scripts/create-deployer-sa.sh)
 #
 # Optional:
-#   FUNCTIONS_REGION     defaults to australia-southeast1, must match Firestore
+#   VITE_FIREBASE_FUNCTIONS_REGION
+#                        defaults to australia-southeast1, must match Firestore
 #
 # Usage:
 #   bash scripts/deploy.sh                      # everything
@@ -21,7 +22,7 @@ TARGETS="${1:-firestore:rules,firestore:indexes,hosting,functions}"
 : "${FIREBASE_PROJECT_ID:?set FIREBASE_PROJECT_ID (Replit Secrets)}"
 : "${GCP_SA_KEY_B64:?set GCP_SA_KEY_B64 (Replit Secrets)}"
 
-export FUNCTIONS_REGION="${FUNCTIONS_REGION:-australia-southeast1}"
+export VITE_FIREBASE_FUNCTIONS_REGION="${VITE_FIREBASE_FUNCTIONS_REGION:-australia-southeast1}"
 
 # The CLI resolves credentials in this order: --token, FIREBASE_TOKEN, a cached
 # interactive login in the configstore, and only THEN application default
@@ -57,7 +58,7 @@ echo "Using firebase CLI: $FIREBASE_BIN"
 
 export CI=true
 
-echo "Deploying [$TARGETS] to $FIREBASE_PROJECT_ID (region $FUNCTIONS_REGION)"
+echo "Deploying [$TARGETS] to $FIREBASE_PROJECT_ID (region $VITE_FIREBASE_FUNCTIONS_REGION)"
 
 # --project is passed explicitly: FIREBASE_PROJECT and GCLOUD_PROJECT do NOT
 # select the deploy target, and relying on .firebaserc alone leaves the choice
