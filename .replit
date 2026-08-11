@@ -110,6 +110,8 @@ to = "/index.html"
 [userenv]
 
 [userenv.development]
+FUNCTIONS_REGION = "us-central1"
+VITE_FIREBASE_FUNCTIONS_REGION = "us-central1"
 
 [userenv.production]
 
