@@ -4,7 +4,8 @@ set -euo pipefail
 # Non-interactive Firebase deploy, intended for the Replit shell.
 #
 # Required environment (Replit Secrets):
-#   FIREBASE_PROJECT_ID  target project, e.g. tactic-toes-au
+#   VITE_FIREBASE_PROJECT_ID  target project, e.g. team-snek. Shared with the
+#                        frontend build so the two cannot disagree.
 #   GCP_SA_KEY_B64       base64 of the deployer service account JSON key
 #                        (created by scripts/create-deployer-sa.sh)
 #
@@ -19,7 +20,7 @@ set -euo pipefail
 
 TARGETS="${1:-firestore:rules,firestore:indexes,hosting,functions}"
 
-: "${FIREBASE_PROJECT_ID:?set FIREBASE_PROJECT_ID (Replit Secrets)}"
+: "${VITE_FIREBASE_PROJECT_ID:?set VITE_FIREBASE_PROJECT_ID (Replit Secrets)}"
 : "${GCP_SA_KEY_B64:?set GCP_SA_KEY_B64 (Replit Secrets)}"
 
 export VITE_FIREBASE_FUNCTIONS_REGION="${VITE_FIREBASE_FUNCTIONS_REGION:-australia-southeast1}"
@@ -58,14 +59,15 @@ echo "Using firebase CLI: $FIREBASE_BIN"
 
 export CI=true
 
-echo "Deploying [$TARGETS] to $FIREBASE_PROJECT_ID (region $VITE_FIREBASE_FUNCTIONS_REGION)"
+echo "Deploying [$TARGETS] to $VITE_FIREBASE_PROJECT_ID (region $VITE_FIREBASE_FUNCTIONS_REGION)"
 
-# --project is passed explicitly: FIREBASE_PROJECT and GCLOUD_PROJECT do NOT
-# select the deploy target, and relying on .firebaserc alone leaves the choice
-# to whatever the configstore last recorded for this directory.
+# --project is passed explicitly. Neither FIREBASE_PROJECT nor GCLOUD_PROJECT
+# selects the deploy target despite the names, and relying on .firebaserc alone
+# leaves the choice to whatever the configstore last recorded for this
+# directory.
 "$FIREBASE_BIN" deploy \
   --only "$TARGETS" \
-  --project "$FIREBASE_PROJECT_ID" \
+  --project "$VITE_FIREBASE_PROJECT_ID" \
   --non-interactive
 
 echo "Deploy complete."

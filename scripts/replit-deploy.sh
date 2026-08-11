@@ -4,42 +4,49 @@ set -euo pipefail
 # Replit Deployments build entrypoint (see [deployment] in .replit).
 #
 # Runs when you publish the Repl to production. It does two things:
-#   1. deploys the Firebase backend to the PRODUCTION project (team-snek)
+#   1. deploys the Firebase backend to the project the frontend is built for
 #   2. builds the frontend that Replit then serves as a static site
 #
 # The Replit *development* environment never reaches production: it points at
-# the dev Firebase project via [userenv.development] in .replit, and this script
-# is only invoked by the deployment build.
+# the dev Firebase project via [userenv.development] in .replit, holds no
+# production deploy key, and this script runs only in the deployment build.
 #
 # Required in Replit DEPLOYMENT secrets (not workspace secrets):
-#   GCP_SA_KEY_B64        base64 of the team-snek deployer key
-#   VITE_FIREBASE_*       the production web app config (6 vars)
+#   GCP_SA_KEY_B64        base64 of the production deployer key
+#   VITE_FIREBASE_*       the production web app config, exactly as printed by
+#                         scripts/bootstrap-gcp-project.sh
 #
-# Optional overrides:
-#   FIREBASE_PROD_PROJECT_ID   default team-snek
-#   FIREBASE_PROD_REGION       default australia-southeast1
-#   REPLIT_DEPLOY_TARGETS      default firestore:rules,firestore:indexes,functions
+# Optional:
+#   REPLIT_DEPLOY_TARGETS  default firestore:rules,firestore:indexes,functions
 
-PROD_PROJECT_ID="${FIREBASE_PROD_PROJECT_ID:-team-snek}"
-PROD_REGION="${FIREBASE_PROD_REGION:-australia-southeast1}"
+# Publishing against this project means the dev workspace secrets have leaked
+# into the deployment environment, and the publish would redeploy over dev.
+DEV_PROJECT_ID="tactic-toes-cyphid-dev"
 
 # Firebase Hosting is deliberately NOT in the default target list. Replit serves
 # the frontend from frontend/dist as a static deployment, so also publishing to
-# Firebase Hosting would leave a second live copy at team-snek.web.app drifting
+# Firebase Hosting would leave a second live copy at <project>.web.app drifting
 # out of sync. Add "hosting" here only if you intend Firebase to serve the app.
 TARGETS="${REPLIT_DEPLOY_TARGETS:-firestore:rules,firestore:indexes,functions}"
 
-# Set rather than defaulted. [userenv.development] pins this to us-central1 for
-# the dev project, and inheriting that here would deploy production functions to
-# the wrong region -- Firestore triggers fail outright against a Sydney database,
-# and callables that did deploy would 404 for a Sydney client.
-export VITE_FIREBASE_FUNCTIONS_REGION="$PROD_REGION"
+# One variable drives both the backend deploy target and the frontend build, so
+# the published site cannot end up talking to a different project than the one
+# just deployed. The frontend config throws on a missing value at import time,
+# so an unset var here would otherwise ship a site that is blank on load.
+: "${VITE_FIREBASE_PROJECT_ID:?production VITE_FIREBASE_ vars missing from the deployment secrets}"
+
+if [ "$VITE_FIREBASE_PROJECT_ID" = "$DEV_PROJECT_ID" ]; then
+    echo "ERROR: this deployment targets '$DEV_PROJECT_ID', the dev project." >&2
+    echo "Set the production VITE_FIREBASE_* values in the deployment's own" >&2
+    echo "Secrets -- the workspace values are for dev iteration only." >&2
+    exit 1
+fi
 
 echo "=========================================="
 echo "Replit production deploy"
-echo "  Firebase project: $PROD_PROJECT_ID"
-echo "  Region:           $PROD_REGION"
-echo "  Targets:          $TARGETS"
+echo "  Firebase project: $VITE_FIREBASE_PROJECT_ID"
+echo "  Region:           ${VITE_FIREBASE_FUNCTIONS_REGION:-australia-southeast1 (default)}"
+echo "  Targets:          ${TARGETS:-<none>}"
 echo "=========================================="
 
 if [ -z "${GCP_SA_KEY_B64:-}" ]; then
@@ -51,7 +58,7 @@ if [ -z "${GCP_SA_KEY_B64:-}" ]; then
 fi
 
 if [ -n "$TARGETS" ]; then
-    FIREBASE_PROJECT_ID="$PROD_PROJECT_ID" bash "$(dirname "${BASH_SOURCE[0]}")/deploy.sh" "$TARGETS"
+    bash "$(dirname "${BASH_SOURCE[0]}")/deploy.sh" "$TARGETS"
 else
     echo "REPLIT_DEPLOY_TARGETS is empty - skipping the Firebase deploy."
 fi
@@ -59,20 +66,9 @@ fi
 echo ""
 echo "Building frontend for Replit static hosting..."
 
-# Fail loudly rather than shipping a bundle wired to the wrong project. The
-# frontend config throws on missing vars at import time, so a build that omits
-# them produces a site that is blank on load.
-: "${VITE_FIREBASE_PROJECT_ID:?production VITE_FIREBASE_* vars missing from deployment secrets}"
-
-if [ "$VITE_FIREBASE_PROJECT_ID" != "$PROD_PROJECT_ID" ]; then
-    echo "WARNING: VITE_FIREBASE_PROJECT_ID is '$VITE_FIREBASE_PROJECT_ID' but this" >&2
-    echo "deploy targets '$PROD_PROJECT_ID'. The published frontend will talk to a" >&2
-    echo "different project than the backend just deployed." >&2
-fi
-
 cd frontend
 npm run build
 cp dist/index.html dist/404.html
 
 echo ""
-echo "Deploy complete: backend on $PROD_PROJECT_ID, frontend built for Replit."
+echo "Deploy complete: backend and frontend both on $VITE_FIREBASE_PROJECT_ID."

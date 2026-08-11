@@ -119,7 +119,7 @@ to = "/index.html"
 # match it -- the code defaults to australia-southeast1, which is correct for
 # production but wrong here. One variable serves both the client and the
 # functions deploy.
-FIREBASE_PROJECT_ID = "tactic-toes-cyphid-dev"
+VITE_FIREBASE_PROJECT_ID = "tactic-toes-cyphid-dev"
 VITE_FIREBASE_FUNCTIONS_REGION = "us-central1"
 
 [userenv.production]

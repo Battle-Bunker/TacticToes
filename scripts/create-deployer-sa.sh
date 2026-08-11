@@ -73,7 +73,7 @@ echo ""
 echo "=========================================="
 echo "Add these to Replit Secrets:"
 echo "=========================================="
-echo "FIREBASE_PROJECT_ID = $PROJECT_ID"
+echo "VITE_FIREBASE_PROJECT_ID = $PROJECT_ID"
 echo "GCP_SA_KEY_B64      = (the single line below)"
 echo ""
 base64 -w0 /tmp/firebase-deployer-key.json 2>/dev/null || base64 /tmp/firebase-deployer-key.json | tr -d '\n'
