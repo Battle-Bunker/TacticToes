@@ -1,6 +1,6 @@
 import * as admin from "firebase-admin"
 import { FieldValue, Transaction } from "firebase-admin/firestore"
-import { StartedGameSetup } from "@shared/types/Game"
+import { StartedGameSetup, Team } from "@shared/types/Game"
 import { logger } from "../logger"
 
 /**
@@ -11,8 +11,11 @@ import { logger } from "../logger"
  * { players: { [snakeID]: centaurId } }. Firestore rules use it to decide
  * which snakes a centaur principal may stage moves for.
  *
- * Game invites: written post-transaction at centaurs/{centaurId}/games/{gameID}
- * so a centaur can discover its games with a single collection listener.
+ * Game invites: written at centaurs/{centaurId}/games/{gameID} so a centaur
+ * can discover its games with a single collection listener. While the lobby
+ * is unstarted the invite carries status 'pending' (kept in sync with
+ * setup.teams by the setups trigger); at game start the same doc is
+ * overwritten with status 'started' plus the snake ids.
  */
 
 export function buildCentaurPlayerMap(
@@ -42,6 +45,68 @@ export function writeCentaurMap(
 }
 
 /**
+ * Which centaurs gained or lost a team between two lobby teams lists. Pure so
+ * the invite-sync diff is testable; identity is team.id (== the centaur id).
+ */
+export function diffInviteCentaurs(
+  beforeTeams: Team[],
+  afterTeams: Team[]
+): { added: string[]; removed: string[] } {
+  const before = new Set(beforeTeams.map((team) => team.id))
+  const after = new Set(afterTeams.map((team) => team.id))
+  return {
+    added: [...after].filter((id) => !before.has(id)),
+    removed: [...before].filter((id) => !after.has(id)),
+  }
+}
+
+/**
+ * Keeps pending invites in step with an unstarted lobby: a team added creates
+ * a pending invite, a team removed deletes it. Only the diff is written, so
+ * unrelated setup edits never churn an invite's createdAt.
+ */
+export async function syncPendingInvites(
+  sessionID: string,
+  gameID: string,
+  beforeTeams: Team[],
+  afterTeams: Team[]
+): Promise<void> {
+  const { added, removed } = diffInviteCentaurs(beforeTeams, afterTeams)
+  if (added.length === 0 && removed.length === 0) return
+
+  const db = admin.firestore()
+  await Promise.all([
+    ...added.map(async (centaurId) => {
+      try {
+        await db.doc(`centaurs/${centaurId}/games/${gameID}`).set({
+          sessionID,
+          gameID,
+          status: "pending",
+          createdAt: FieldValue.serverTimestamp(),
+        })
+      } catch (error) {
+        logger.error(`Failed to write pending invite for centaur ${centaurId}`, {
+          sessionID,
+          gameID,
+          error,
+        })
+      }
+    }),
+    ...removed.map(async (centaurId) => {
+      try {
+        await db.doc(`centaurs/${centaurId}/games/${gameID}`).delete()
+      } catch (error) {
+        logger.error(`Failed to delete pending invite for centaur ${centaurId}`, {
+          sessionID,
+          gameID,
+          error,
+        })
+      }
+    }),
+  ])
+}
+
+/**
  * Writes one invite doc per centaur in the game. Runs after the game-start
  * transaction commits; failures are logged but never block the game, since
  * centaurs can also watch sessions directly.
@@ -64,6 +129,7 @@ export async function writeCentaurGameInvites(
           sessionID,
           gameID,
           snakeIDs,
+          status: "started",
           createdAt: FieldValue.serverTimestamp(),
         })
       } catch (error) {

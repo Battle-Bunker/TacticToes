@@ -20,9 +20,14 @@ spectate.
   the turn resolve early once every alive snake has committed. A centaur that
   wants the full staging window simply doesn't commit and rides the turn
   timer.
-- **Push-based game discovery.** At game start the server writes an invite
-  doc under `centaurs/{centaurId}/games/{gameId}`, so a centaur discovers its
-  games with a single collection listener.
+- **Push-based game discovery.** The server writes an invite doc under
+  `centaurs/{centaurId}/games/{gameId}` as soon as the centaur is added to a
+  lobby (`status: 'pending'`) and overwrites it at game start
+  (`status: 'started'`), so a centaur discovers its games with a single
+  collection listener.
+- **Lobby presence.** A centaur acks a pending invite by writing a readiness
+  doc under the lobby's setup; the lobby UI turns that into a live per-team
+  presence chip. Acks are informational only — the game never waits for them.
 
 ## Authentication
 
@@ -87,7 +92,9 @@ world-readable; the centaur-specific surfaces are:
 
 | Path | Access | Purpose |
 | --- | --- | --- |
-| `centaurs/{centaurId}/games/{gameId}` | read (public), server-written | Game invite: `{ sessionID, gameID, snakeIDs, createdAt }` |
+| `centaurs/{centaurId}/games/{gameId}` | read (public), server-written | Game invite: `{ sessionID, gameID, status, createdAt }` while pending; `{ sessionID, gameID, status: 'started', snakeIDs, createdAt }` once started |
+| `sessions/{s}/setups/{g}` | read (public) | Lobby setup doc; a pending game's live configuration |
+| `sessions/{s}/setups/{g}/centaurStatus/{centaurId}` | read (public); create/update by the centaur whose `centaurId` claim matches the doc id | Readiness ack: `{ centaurId, ready: true, respondedAt }` |
 | `sessions/{s}/games/{g}` | read (public) | Game doc; `turns` array grows by one per resolved turn |
 | `sessions/{s}/games/{g}/meta/centaurMap` | read (public), server-written | Snake → centaur ownership map used by rules |
 | `sessions/{s}/games/{g}/moveStatuses/{turn}` | read (public); centaurs may `arrayUnion` **one owned snake per write** into `movedPlayerIDs` | Commit signal for early turn resolution |
@@ -111,10 +118,45 @@ consumes. Centaurs that think in stripped-perimeter, y-flipped coordinates
 must convert; the reference implementation in Chris-Centaur
 (`src/firebase/translate.ts`) applies the exact transform.
 
+### Pending invites and the readiness ack
+
+Invites exist for the whole life of a lobby, not just started games. The
+server keeps them in sync with the lobby's teams:
+
+- **Team added** (including teams carried into the next game's setup) → the
+  invite is created with `status: 'pending'` and no `snakeIDs`.
+- **Team removed** while the lobby is unstarted → the invite is **deleted**.
+- **Game started** → the same doc is overwritten with `status: 'started'`
+  plus the centaur's `snakeIDs`. Treat an invite with no `status` field as
+  started.
+
+A centaur that sees a pending invite should NOT open a game-doc listener —
+there is no game document yet. Instead it:
+
+1. Writes its readiness ack at
+   `sessions/{sessionID}/setups/{gameID}/centaurStatus/{centaurId}`:
+
+   ```jsonc
+   { "centaurId": "<its id>", "ready": true, "respondedAt": serverTimestamp() }
+   ```
+
+   The doc id must equal the centaur's own `centaurId` claim (rules enforce
+   this); `set` with merge makes the write idempotent. The ack powers the
+   lobby's per-team presence chip ("responsive" / "no response"). It is
+   purely informational: the owner can start the game regardless.
+2. Optionally subscribes to the setup doc `sessions/{sessionID}/setups/{gameID}`
+   to follow the lobby's current configuration (board, teams, snakesPerTeam,
+   turn time).
+
+When the invite doc's `status` flips to `'started'`, tear the pending
+tracking down and run the normal turn loop below. When the invite is deleted,
+the centaur was removed from the lobby — drop it.
+
 ### Turn loop
 
 1. Listen to `centaurs/{centaurId}/games` (ordered by `createdAt desc`) and
-   open a listener on each new game doc.
+   open a listener on each new game doc — for started invites only; pending
+   invites follow the ack flow above.
 2. On each game snapshot, read `turns.length - 1` as the current turn
    number. Skip turns already handled; stop when the final turn has
    `winners`.

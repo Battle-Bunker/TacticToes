@@ -6,6 +6,7 @@ import {
   deleteField,
   doc,
   getDocs,
+  onSnapshot,
   query,
   Timestamp,
   updateDoc,
@@ -60,6 +61,47 @@ type BoardSize = keyof typeof BOARD_SIZE_MAPPING | "custom";
 
 const SNAKES_PER_TEAM_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8];
 
+// Live centaur presence for the current setup: a centaur acks its pending
+// invite by writing setups/{gameID}/centaurStatus/{centaurId}, so a doc's
+// existence means "responsive".
+const useCentaurStatuses = (
+  sessionName: string,
+  gameID: string,
+): { [centaurId: string]: boolean } => {
+  const [statuses, setStatuses] = useState<{ [centaurId: string]: boolean }>(
+    {},
+  );
+
+  useEffect(() => {
+    if (!gameID) return;
+    setStatuses({});
+    const statusesRef = collection(
+      db,
+      "sessions",
+      sessionName,
+      "setups",
+      gameID,
+      "centaurStatus",
+    );
+    const unsubscribe = onSnapshot(
+      statusesRef,
+      (snapshot) => {
+        const next: { [centaurId: string]: boolean } = {};
+        snapshot.forEach((docSnap) => {
+          next[docSnap.id] = true;
+        });
+        setStatuses(next);
+      },
+      (error) => {
+        console.error("Error in centaurStatus subscription:", error);
+      },
+    );
+    return unsubscribe;
+  }, [sessionName, gameID]);
+
+  return statuses;
+};
+
 const GameSetup: React.FC = () => {
   const { userID } = useUser();
   const {
@@ -74,6 +116,7 @@ const GameSetup: React.FC = () => {
 
   const hasOwner = session?.owner != null;
   const isConfigDisabled = hasOwner && !isOwner;
+  const centaurStatuses = useCentaurStatuses(sessionName, gameID);
 
   const [secondsPerTurn, setSecondsPerTurn] = useState<string>("10");
   const [boardSize, setBoardSize] = useState<BoardSize>("medium");
@@ -880,6 +923,7 @@ const GameSetup: React.FC = () => {
             onColorChange={handleTeamColorChange}
             onRemove={handleRemoveTeam}
             disabled={started || isConfigDisabled}
+            centaurStatuses={centaurStatuses}
           />
         </Box>
       </FormControl>

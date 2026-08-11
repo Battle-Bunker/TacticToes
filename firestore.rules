@@ -118,6 +118,17 @@ service cloud.firestore {
         centaurControlsPlayer(sessionId, gameId, addedIds[0]);
     }
 
+    // Readiness ack a centaur writes when it sees a pending game invite.
+    // The doc id is the centaur's own id; acks power the lobby's presence
+    // indicator and never gate the game start.
+    function isValidCentaurStatus(status, centaurStatusId) {
+      return status.keys().hasOnly(['centaurId', 'ready', 'respondedAt']) &&
+        status.keys().hasAll(['centaurId', 'ready', 'respondedAt']) &&
+        status.centaurId == centaurStatusId &&
+        status.ready == true &&
+        (status.respondedAt is timestamp || status.respondedAt == request.time);
+    }
+
     function isValidCentaurData(centaurData, centaurId) {
       return centaurData.keys().hasAll(['id', 'owner', 'name', 'public', 'createdAt']) &&
         centaurData.id == centaurId &&
@@ -165,6 +176,15 @@ service cloud.firestore {
           isValidSetup(request.resource.data) &&
           request.resource.data.started == resource.data.started &&
           request.resource.data.timeCreated == resource.data.timeCreated;
+
+        // CentaurStatus Subcollection (readiness acks). A centaur may only
+        // write its own doc; reads are open so the lobby can show presence.
+        match /centaurStatus/{centaurStatusId} {
+          allow read: if true;
+          allow create, update: if isCentaur() &&
+            request.auth.token.centaurId == centaurStatusId &&
+            isValidCentaurStatus(request.resource.data, centaurStatusId);
+        }
       }
 
       // Games Subcollection

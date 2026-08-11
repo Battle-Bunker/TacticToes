@@ -1,5 +1,5 @@
 import React from "react";
-import { Box, IconButton, Typography } from "@mui/material";
+import { Box, Chip, IconButton, Typography } from "@mui/material";
 import { Team } from "@shared/types/Game";
 import { ColorPicker } from "./ColorPicker";
 
@@ -8,6 +8,10 @@ interface TeamListProps {
   onColorChange: (teamID: string, color: string) => void;
   onRemove: (teamID: string) => void;
   disabled: boolean;
+  // Live presence per centaur id: true once the centaur has acked the pending
+  // invite (its centaurStatus doc exists). Purely informational — start is
+  // never gated on presence.
+  centaurStatuses: { [centaurId: string]: boolean };
 }
 
 export const TeamList: React.FC<TeamListProps> = ({
@@ -15,6 +19,7 @@ export const TeamList: React.FC<TeamListProps> = ({
   onColorChange,
   onRemove,
   disabled,
+  centaurStatuses,
 }) => {
   if (teams.length === 0) {
     return (
@@ -51,6 +56,15 @@ export const TeamList: React.FC<TeamListProps> = ({
           >
             {team.name}
           </Typography>
+          <Chip
+            size="small"
+            label={centaurStatuses[team.id] ? "responsive" : "no response"}
+            sx={
+              centaurStatuses[team.id]
+                ? { backgroundColor: "#2e7d32", color: "#fff" }
+                : { backgroundColor: "#e0e0e0", color: "#666" }
+            }
+          />
           <IconButton
             size="small"
             aria-label={`Remove ${team.name}`}
