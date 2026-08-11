@@ -109,18 +109,17 @@ to = "/index.html"
 
 [userenv]
 
-[userenv.development]
-# The Replit dev environment talks to the DEV Firebase project only, so that
-# `npm run deploy` from this shell iterates against dev and can never reach
-# production. Production values are set by scripts/replit-deploy.sh, which
-# overrides rather than inherits these.
+# Deliberately empty. Every Firebase value is per-deployment configuration, not
+# a fact about this codebase, so it lives in Replit Secrets rather than in git:
 #
-# tactic-toes-cyphid-dev has its Firestore in us-central1, so the region must
-# match it -- the code defaults to australia-southeast1, which is correct for
-# production but wrong here. One variable serves both the client and the
-# functions deploy.
-VITE_FIREBASE_PROJECT_ID = "tactic-toes-cyphid-dev"
-VITE_FIREBASE_FUNCTIONS_REGION = "us-central1"
+#   workspace Secrets   -> the dev Firebase project, used by `npm run deploy`
+#                          and the dev server
+#   deployment Secrets  -> the production project, used by the publish build
+#
+# Keeping them out of here is also what stops a production publish inheriting
+# dev values. See frontend/.env.example for the variable names.
+
+[userenv.development]
 
 [userenv.production]
 

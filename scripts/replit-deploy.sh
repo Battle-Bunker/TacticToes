@@ -7,9 +7,10 @@ set -euo pipefail
 #   1. deploys the Firebase backend to the project the frontend is built for
 #   2. builds the frontend that Replit then serves as a static site
 #
-# The Replit *development* environment never reaches production: it points at
-# the dev Firebase project via [userenv.development] in .replit, holds no
-# production deploy key, and this script runs only in the deployment build.
+# The Replit *development* environment never reaches production: its workspace
+# Secrets name the dev project, it holds no production deploy key, and this
+# script runs only in the deployment build. Nothing in git names either project,
+# so the two cannot be confused by a stale committed value.
 #
 # Required in Replit DEPLOYMENT secrets (not workspace secrets):
 #   GCP_SA_KEY_B64        base64 of the production deployer key
@@ -18,10 +19,6 @@ set -euo pipefail
 #
 # Optional:
 #   REPLIT_DEPLOY_TARGETS  default firestore:rules,firestore:indexes,functions
-
-# Publishing against this project means the dev workspace secrets have leaked
-# into the deployment environment, and the publish would redeploy over dev.
-DEV_PROJECT_ID="tactic-toes-cyphid-dev"
 
 # Firebase Hosting is deliberately NOT in the default target list. Replit serves
 # the frontend from frontend/dist as a static deployment, so also publishing to
@@ -34,13 +31,6 @@ TARGETS="${REPLIT_DEPLOY_TARGETS:-firestore:rules,firestore:indexes,functions}"
 # just deployed. The frontend config throws on a missing value at import time,
 # so an unset var here would otherwise ship a site that is blank on load.
 : "${VITE_FIREBASE_PROJECT_ID:?production VITE_FIREBASE_ vars missing from the deployment secrets}"
-
-if [ "$VITE_FIREBASE_PROJECT_ID" = "$DEV_PROJECT_ID" ]; then
-    echo "ERROR: this deployment targets '$DEV_PROJECT_ID', the dev project." >&2
-    echo "Set the production VITE_FIREBASE_* values in the deployment's own" >&2
-    echo "Secrets -- the workspace values are for dev iteration only." >&2
-    exit 1
-fi
 
 echo "=========================================="
 echo "Replit production deploy"

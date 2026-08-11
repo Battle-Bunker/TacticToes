@@ -24,11 +24,25 @@ const {
 } = clientRequire("firebase/firestore")
 const { getFunctions, httpsCallable } = clientRequire("firebase/functions")
 
-const PROJECT_ID = process.env.E2E_PROJECT_ID ?? "tactic-toes-cyphid-dev"
-const WEB_API_KEY = process.env.E2E_WEB_API_KEY ?? "AIzaSyAa5zfOcG-0sQKvHDZLWMxEhNGO87wYQhQ"
-const APP_ID = process.env.E2E_APP_ID ?? "1:142989483184:web:8e36c2a13d087e2475ef75"
+// Falls back to the Firebase config already in the environment, so this runs
+// against whichever project the shell is pointed at with no extra setup. The
+// E2E_ overrides exist for targeting a different project than the frontend.
+// Nothing is defaulted to a literal: these are per-deployment values, and a
+// committed fallback is both a stale-config trap and, for the API key, a leak.
+const req = (name, ...candidates) => {
+  const value = candidates.find(Boolean)
+  if (!value) {
+    console.error(`E2E: set ${name} (or the matching VITE_FIREBASE_* secret)`)
+    process.exit(1)
+  }
+  return value
+}
+
+const PROJECT_ID = req("E2E_PROJECT_ID", process.env.E2E_PROJECT_ID, process.env.VITE_FIREBASE_PROJECT_ID)
+const WEB_API_KEY = req("E2E_WEB_API_KEY", process.env.E2E_WEB_API_KEY, process.env.VITE_FIREBASE_API_KEY)
+const APP_ID = req("E2E_APP_ID", process.env.E2E_APP_ID, process.env.VITE_FIREBASE_APP_ID)
 // Must match functions/src/config/region.ts, or every callable below 404s.
-const REGION = process.env.E2E_REGION ?? "australia-southeast1"
+const REGION = process.env.E2E_REGION ?? process.env.VITE_FIREBASE_FUNCTIONS_REGION ?? "australia-southeast1"
 
 admin.initializeApp({ projectId: PROJECT_ID })
 const adb = admin.firestore()
