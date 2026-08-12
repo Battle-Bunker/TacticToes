@@ -1,8 +1,8 @@
 // functions/src/onGameStarted.ts
 
 import * as functions from "firebase-functions/v1"
-import { FUNCTIONS_REGION, taskQueueName } from "./config/region"
-import { getFunctions } from "firebase-admin/functions"
+import { FUNCTIONS_REGION } from "./config/region"
+import { enqueueTask } from "./utils/enqueueTask"
 import { Timestamp } from "firebase-admin/firestore"
 import { GameSetup } from "@shared/types/Game"
 import { logger } from "./logger"
@@ -77,22 +77,14 @@ export const onGameStarted = functions
         Math.round((scheduledTime.toMillis() - Date.now()) / 1000)
       )
 
-      try {
-        const queue = getFunctions().taskQueue(taskQueueName("processScheduledGameStart"))
-        await queue.enqueue(
-          { sessionID, gameID, expectedScheduledStartMillis: scheduledTime.toMillis() },
-          { scheduleDelaySeconds: delaySeconds }
-        )
-        logger.info(
-          `[onGameStarted] Enqueued processScheduledGameStart for game ${gameID} in ${delaySeconds}s`,
-          { sessionID, gameID, scheduledMillis: scheduledTime.toMillis(), delaySeconds }
-        )
-      } catch (error) {
-        logger.error(`[onGameStarted] Error scheduling tournament game start`, {
-          gameID,
-          error,
-        })
-      }
+      await enqueueTask({
+        functionName: "processScheduledGameStart",
+        payload: { sessionID, gameID, expectedScheduledStartMillis: scheduledTime.toMillis() },
+        scheduleDelaySeconds: delaySeconds,
+        source: "onGameStarted",
+        purpose: "Scheduled tournament game start",
+        context: { sessionID, gameID, scheduledMillis: scheduledTime.toMillis() },
+      })
       return
     }
 

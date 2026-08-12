@@ -1,7 +1,7 @@
 import * as admin from "firebase-admin"
 import { onTaskDispatched } from "firebase-functions/v2/tasks"
-import { FUNCTIONS_REGION, taskQueueName } from "./config/region"
-import { getFunctions } from "firebase-admin/functions"
+import { FUNCTIONS_REGION } from "./config/region"
+import { enqueueTask } from "./utils/enqueueTask"
 import * as logger from "firebase-functions/logger"
 import { processTurn } from "./gameprocessors/processTurn"
 import { announceTurn } from "./utils/announceTurn"
@@ -91,19 +91,14 @@ export const processTurnExpirationTask = onTaskDispatched(
 
     if (result?.tournamentSchedule) {
       const { sessionID: schedSessionID, gameID: schedGameID, delaySeconds, expectedScheduledStartMillis } = result.tournamentSchedule
-      try {
-        const queue = getFunctions().taskQueue(taskQueueName("processScheduledGameStart"))
-        await queue.enqueue(
-          { sessionID: schedSessionID, gameID: schedGameID, expectedScheduledStartMillis },
-          { scheduleDelaySeconds: delaySeconds }
-        )
-        logger.info(
-          `[processTurnExpirationTask] Scheduled next tournament game start`,
-          { sessionID: schedSessionID, gameID: schedGameID, delaySeconds }
-        )
-      } catch (error) {
-        logger.error(`[processTurnExpirationTask] Error scheduling tournament game start`, { schedGameID, error })
-      }
+      await enqueueTask({
+        functionName: "processScheduledGameStart",
+        payload: { sessionID: schedSessionID, gameID: schedGameID, expectedScheduledStartMillis },
+        scheduleDelaySeconds: delaySeconds,
+        source: "processTurnExpirationTask",
+        purpose: "Scheduled tournament game start",
+        context: { sessionID: schedSessionID, gameID: schedGameID },
+      })
     }
 
     logger.info(
