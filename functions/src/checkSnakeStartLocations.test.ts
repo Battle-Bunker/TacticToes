@@ -122,7 +122,7 @@ describe("snake start locations", () => {
 
   function getPositionMap(
     gameState: GameState,
-    initializedGame: ReturnType<TeamSnekProcessor["initializeGame"]>,
+    initializedGame: ReturnType<TeamSnekProcessor["firstTurn"]>,
   ): Map<string, { x: number; y: number }> {
     const positions = new Map<string, { x: number; y: number }>()
     gameState.setup.gamePlayers.forEach((player) => {
@@ -138,7 +138,7 @@ describe("snake start locations", () => {
   test("initializes game with correct board size", () => {
     const gameState = createGameState(7, 7, 4)
     const game = new TeamSnekProcessor(gameState)
-    const initializedGame = game.initializeGame()
+    const initializedGame = game.firstTurn()
     const board = game.visualizeBoard(initializedGame)
     const lines = board.split("\n")
     expect(lines.length).toBe(7)
@@ -148,7 +148,7 @@ describe("snake start locations", () => {
   test("places correct number of players", () => {
     const gameState = createGameState(9, 9, 4)
     const game = new TeamSnekProcessor(gameState)
-    const initializedGame = game.initializeGame()
+    const initializedGame = game.firstTurn()
     const board = game.visualizeBoard(initializedGame)
     const playerCount = (board.match(/[1-4]/g) || []).length
     expect(playerCount).toBe(4)
@@ -157,7 +157,7 @@ describe("snake start locations", () => {
   test("places players on even squares", () => {
     const gameState = createGameState(11, 11, 8)
     const game = new TeamSnekProcessor(gameState)
-    const initializedGame = game.initializeGame()
+    const initializedGame = game.firstTurn()
     const board = game.visualizeBoard(initializedGame)
     const lines = board.split("\n")
     for (let y = 0; y < lines.length; y++) {
@@ -173,7 +173,7 @@ describe("snake start locations", () => {
   test("places players near edges for small number of players", () => {
     const gameState = createGameState(7, 7, 2)
     const game = new TeamSnekProcessor(gameState)
-    const initializedGame = game.initializeGame()
+    const initializedGame = game.firstTurn()
     const board = game.visualizeBoard(initializedGame)
     const lines = board.split("\n")
     const playerPositions = []
@@ -203,7 +203,7 @@ describe("snake start locations", () => {
     testCases.forEach(({ width, height, players }) => {
       const gameState = createGameState(width, height, players)
       const game = new TeamSnekProcessor(gameState)
-      const initializedGame = game.initializeGame()
+      const initializedGame = game.firstTurn()
       const board = game.visualizeBoard(initializedGame)
       const lines = board.split("\n")
 
@@ -231,7 +231,7 @@ describe("snake start locations", () => {
         const intraTeamSpacing = 2
         const gameState = createTeamGameState(17, 17, 3, 2)
         const game = new TeamSnekProcessor(gameState)
-        const initializedGame = game.initializeGame()
+        const initializedGame = game.firstTurn()
         const positions = getPositionMap(gameState, initializedGame)
 
         const teamMap = new Map<string, string[]>()
