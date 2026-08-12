@@ -13,35 +13,29 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
-    // Bot principals authenticate via exchangeBotApiKey -> signInWithCustomToken.
-    // Their uid is "bot:<botId>" and their token carries { bot: true, botId }.
-    function isBot() {
-      return isAuthenticated() && request.auth.token.bot == true;
+    // Centaur principals authenticate via exchangeCentaurApiKey ->
+    // signInWithCustomToken. Their uid is "centaur:<centaurId>" and their
+    // token carries { centaur: true, centaurId }.
+    function isCentaur() {
+      return isAuthenticated() && request.auth.token.get('centaur', false) == true;
     }
 
-    // The game-start transaction writes meta/botMap with
-    // { players: { [gamePlayerID]: underlyingBotID } }, covering Team Snek
-    // clones whose in-game id differs from the bot id. A bot may act for a
-    // gamePlayer iff the map points that player at its botId claim.
-    function botControlsPlayer(sessionId, gameId, playerID) {
-      return get(/databases/$(database)/documents/sessions/$(sessionId)/games/$(gameId)/meta/botMap).data.players[playerID] == request.auth.token.botId;
+    // The game-start transaction writes meta/centaurMap with
+    // { players: { [snakeID]: centaurId } }, covering every snake expanded
+    // from teams x snakesPerTeam (ids `centaurId` and `centaurId#k`). A
+    // centaur may act for a snake iff the map points that snake at its
+    // centaurId claim.
+    function centaurControlsPlayer(sessionId, gameId, playerID) {
+      return get(/databases/$(database)/documents/sessions/$(sessionId)/games/$(gameId)/meta/centaurMap).data.players[playerID] == request.auth.token.centaurId;
     }
 
-    // Commitment is binding: once a player appears in the turn's
+    // Commitment is binding: once a snake appears in the turn's
     // movedPlayerIDs, its staged move is frozen for the turn (no further
     // privateMoves creates). This makes movedPlayerIDs represent TRUE
     // commitment, so clients can reason robustly about what a committed
-    // player's move will be without waiting for turn resolution.
+    // snake's move will be without waiting for turn resolution.
     function hasCommittedForTurn(sessionId, gameId, moveNumber, playerID) {
       return playerID in get(/databases/$(database)/documents/sessions/$(sessionId)/games/$(gameId)/moveStatuses/$(string(moveNumber))).data.movedPlayerIDs;
-    }
-
-    function isValidGameType(type) {
-      return type in ['connect4', 'longboi', 'tactictoes', 'snek', 'colourclash', 'reversi', 'teamsnek', 'kingsnek'];
-    }
-
-    function isValidGamePlayers(players) {
-      return players is list && players.size() > 0; // Assuming at least one player
     }
 
     function isValidTeam(team) {
@@ -54,10 +48,8 @@ service cloud.firestore {
     // Validate teams array - manually check each possible index since Firestore rules don't support loops
     // This validates up to 10 teams (our max) by checking each index individually
     function isValidTeams(teams) {
-      return teams is list && 
-        teams.size() >= 2 && 
+      return teams is list &&
         teams.size() <= 10 &&
-        // Validate each team based on array size
         (teams.size() < 1 || isValidTeam(teams[0])) &&
         (teams.size() < 2 || isValidTeam(teams[1])) &&
         (teams.size() < 3 || isValidTeam(teams[2])) &&
@@ -72,25 +64,21 @@ service cloud.firestore {
 
     function isValidSetup(setup) {
       let hasRequiredFields = setup.keys().hasAll([
-          'gameType', 'gamePlayers', 'boardWidth', 'boardHeight', 
-          'playersReady', 'maxTurnTime', 'startRequested', 'started', 'timeCreated'
+          'teams', 'snakesPerTeam', 'boardWidth', 'boardHeight',
+          'maxTurnTime', 'startRequested', 'started', 'timeCreated'
         ]);
-      
-      let validBaseFields = isValidGameType(setup.gameType) &&
-        isValidGamePlayers(setup.gamePlayers) &&
-        setup.boardWidth is int && setup.boardWidth >= 5 &&
-        setup.boardHeight is int && setup.boardHeight >= 5 &&
-        setup.playersReady is list &&
-        setup.maxTurnTime is int && setup.maxTurnTime > 0 &&
+
+      let validBaseFields = isValidTeams(setup.teams) &&
+        setup.snakesPerTeam is int && setup.snakesPerTeam >= 1 && setup.snakesPerTeam <= 26 &&
+        setup.boardWidth is int && setup.boardWidth >= 5 && setup.boardWidth <= 99 &&
+        setup.boardHeight is int && setup.boardHeight >= 5 && setup.boardHeight <= 99 &&
+        setup.maxTurnTime is number && setup.maxTurnTime > 0 &&
         setup.startRequested is bool &&
         setup.started is bool &&
         (setup.timeCreated is timestamp || setup.timeCreated == request.time);
-      
-      // Additional validation for team-based games and optional fields
-      let validOptionalFields = (!setup.keys().hasAny(['teams', 'maxTurns', 'gameMode', 'firstTurnTime'])) || (
-        (!('teams' in setup.keys()) || isValidTeams(setup.teams)) &&
+
+      let validOptionalFields = (
         (!('maxTurns' in setup.keys()) || (setup.maxTurns is int && setup.maxTurns > 0 && setup.maxTurns <= 1000)) &&
-        (!('gameMode' in setup.keys()) || (setup.gameMode is string && setup.gameMode in ['individual', 'team'])) &&
         (!('firstTurnTime' in setup.keys()) || (setup.firstTurnTime is int && setup.firstTurnTime > 0))
       );
 
@@ -98,10 +86,9 @@ service cloud.firestore {
         (!('tournamentMode' in setup.keys()) || setup.tournamentMode is bool) &&
         (!('scheduledStartTime' in setup.keys()) || setup.scheduledStartTime == null || setup.scheduledStartTime is timestamp) &&
         (!('remainingRounds' in setup.keys()) || (setup.remainingRounds is int && setup.remainingRounds >= 0)) &&
-        (!('interludeDuration' in setup.keys()) || (setup.interludeDuration is int && setup.interludeDuration >= 0)) &&
-        (!('skipConfirmation' in setup.keys()) || setup.skipConfirmation is bool)
+        (!('interludeDuration' in setup.keys()) || (setup.interludeDuration is int && setup.interludeDuration >= 0))
       );
-      
+
       return hasRequiredFields && validBaseFields && validOptionalFields && validTournamentFields;
     }
 
@@ -119,43 +106,42 @@ service cloud.firestore {
         (move.timestamp is timestamp || move.timestamp == request.time); // Allow server timestamp on create
     }
 
-    function isValidMoveStatusUpdate(current, next) {
+    // A centaur commits exactly one of its own snakes (per centaurMap) per
+    // write. Committing is optional — it lets the turn resolve early once
+    // every snake has committed; uncommitted centaurs simply ride the turn
+    // timer.
+    function isValidMoveStatusUpdate(current, next, sessionId, gameId) {
       let addedIds = next.movedPlayerIDs.removeAll(current.movedPlayerIDs);
       return current.moveNumber == next.moveNumber &&
         current.alivePlayerIDs == next.alivePlayerIDs &&
         addedIds.size() == 1 &&
-        addedIds[0] == request.auth.uid;
+        centaurControlsPlayer(sessionId, gameId, addedIds[0]);
     }
 
-    // Bot variant of isValidMoveStatusUpdate: a bot commits one of its own
-    // snakes (per botMap) instead of its auth uid. Committing is optional —
-    // it lets the turn resolve early once every player has committed;
-    // uncommitted bots simply ride the turn timer.
-    function isValidBotMoveStatusUpdate(current, next, sessionId, gameId) {
-      let addedIds = next.movedPlayerIDs.removeAll(current.movedPlayerIDs);
-      return current.moveNumber == next.moveNumber &&
-        current.alivePlayerIDs == next.alivePlayerIDs &&
-        addedIds.size() == 1 &&
-        botControlsPlayer(sessionId, gameId, addedIds[0]);
+    // Readiness ack a centaur writes when it sees a pending game invite.
+    // The doc id is the centaur's own id; acks power the lobby's presence
+    // indicator and never gate the game start.
+    function isValidCentaurStatus(status, centaurStatusId) {
+      return status.keys().hasOnly(['centaurId', 'ready', 'respondedAt']) &&
+        status.keys().hasAll(['centaurId', 'ready', 'respondedAt']) &&
+        status.centaurId == centaurStatusId &&
+        status.ready == true &&
+        (status.respondedAt is timestamp || status.respondedAt == request.time);
     }
 
-    function isValidBotData(botData, botId) {
-      return botData.keys().hasAll(['id', 'owner', 'name', 'url', 'capabilities', 'emoji', 'colour', 'createdAt']) &&
-        botData.id == botId &&
-        botData.owner is string &&
-        botData.name is string && botData.name.size() > 0 && botData.name.size() < 100 &&
-        botData.url is string && botData.url.size() > 10 && botData.url.size() < 500 &&
-        botData.capabilities is list && botData.capabilities.size() > 0 && botData.capabilities.size() < 10 &&
-        botData.emoji is string && botData.emoji.size() > 0 && botData.emoji.size() < 10 &&
-        botData.colour is string && botData.colour.matches('hsl\\([0-9]+(\\.[0-9]+)?,\\s*[0-9]+(\\.[0-9]+)?%,\\s*[0-9]+(\\.[0-9]+)?%\\)') &&
-        (!botData.keys().hasAny(['public']) || botData.public is bool);
+    function isValidCentaurData(centaurData, centaurId) {
+      return centaurData.keys().hasAll(['id', 'owner', 'name', 'public', 'createdAt']) &&
+        centaurData.id == centaurId &&
+        centaurData.owner is string &&
+        centaurData.name is string && centaurData.name.size() >= 1 && centaurData.name.size() <= 50 &&
+        centaurData.public is bool;
     }
 
-    function isValidBotUpdate(botData, botId, currentData) {
-      return isValidBotData(botData, botId) &&
+    function isValidCentaurUpdate(centaurData, centaurId, currentData) {
+      return isValidCentaurData(centaurData, centaurId) &&
         currentData.owner == request.auth.uid &&
-        botData.owner == currentData.owner &&
-        botData.createdAt == currentData.createdAt;
+        centaurData.owner == currentData.owner &&
+        centaurData.createdAt == currentData.createdAt;
     }
 
     // =========== USERS COLLECTION ===========
@@ -177,46 +163,44 @@ service cloud.firestore {
       // Setups Subcollection
       match /setups/{setupId} {
         allow read: if true;
-        allow create: if isAuthenticated() && isValidSetup(request.resource.data);
+        allow create: if isAuthenticated() &&
+          isValidSetup(request.resource.data) &&
+          request.resource.data.started == false;
+        // Owner-only while owned; open to any signed-in user once the owner
+        // has abdicated. `started` is server-only: the start transaction
+        // flips it with the Admin SDK, which bypasses rules.
         allow update: if isAuthenticated() && (
-          getSessionOwner(sessionId) == null ||
-          getSessionOwner(sessionId) == request.auth.uid ||
-          (
-            isValidSetup(request.resource.data) &&
-            request.resource.data.gameType == resource.data.gameType &&
-            request.resource.data.boardWidth == resource.data.boardWidth &&
-            request.resource.data.boardHeight == resource.data.boardHeight &&
-            request.resource.data.maxTurnTime == resource.data.maxTurnTime &&
-            request.resource.data.startRequested == resource.data.startRequested &&
-            request.resource.data.started == resource.data.started &&
-            request.resource.data.timeCreated == resource.data.timeCreated &&
-            (!('tournamentMode' in request.resource.data) || request.resource.data.tournamentMode == resource.data.tournamentMode) &&
-            (!('scheduledStartTime' in request.resource.data) || request.resource.data.scheduledStartTime == resource.data.scheduledStartTime) &&
-            (!('remainingRounds' in request.resource.data) || request.resource.data.remainingRounds == resource.data.remainingRounds) &&
-            (!('interludeDuration' in request.resource.data) || request.resource.data.interludeDuration == resource.data.interludeDuration) &&
-            (!('maxTurns' in request.resource.data) || request.resource.data.maxTurns == resource.data.maxTurns) &&
-            (!('hazardPercentage' in request.resource.data) || request.resource.data.hazardPercentage == resource.data.hazardPercentage) &&
-            (!('gameMode' in request.resource.data) || request.resource.data.gameMode == resource.data.gameMode) &&
-            (!('firstTurnTime' in request.resource.data) || request.resource.data.firstTurnTime == resource.data.firstTurnTime) &&
-            (!('teamClustersEnabled' in request.resource.data) || request.resource.data.teamClustersEnabled == resource.data.teamClustersEnabled) &&
-            (!('fertileGroundEnabled' in request.resource.data) || request.resource.data.fertileGroundEnabled == resource.data.fertileGroundEnabled) &&
-            (!('fertileGroundDensity' in request.resource.data) || request.resource.data.fertileGroundDensity == resource.data.fertileGroundDensity) &&
-            (!('fertileGroundClustering' in request.resource.data) || request.resource.data.fertileGroundClustering == resource.data.fertileGroundClustering) &&
-            (!('foodSpawnRate' in request.resource.data) || request.resource.data.foodSpawnRate == resource.data.foodSpawnRate) &&
-            (!('usePreviewBoard' in request.resource.data) || request.resource.data.usePreviewBoard == resource.data.usePreviewBoard) &&
-            (!('invulnerabilityPotionEnabled' in request.resource.data) || request.resource.data.invulnerabilityPotionEnabled == resource.data.invulnerabilityPotionEnabled) &&
-            (!('invulnerabilityPotionSpawnRate' in request.resource.data) || request.resource.data.invulnerabilityPotionSpawnRate == resource.data.invulnerabilityPotionSpawnRate) &&
-            (!('skipConfirmation' in request.resource.data) || request.resource.data.skipConfirmation == resource.data.skipConfirmation) &&
-            (!('teams' in request.resource.data) || request.resource.data.teams == resource.data.teams)
-          )
-        );
+            getSessionOwner(sessionId) == null ||
+            getSessionOwner(sessionId) == request.auth.uid
+          ) &&
+          isValidSetup(request.resource.data) &&
+          request.resource.data.started == resource.data.started &&
+          request.resource.data.timeCreated == resource.data.timeCreated;
+
+        // CentaurStatus Subcollection (readiness acks). A centaur may only
+        // write its own doc; reads are open so the lobby can show presence.
+        match /centaurStatus/{centaurStatusId} {
+          allow read: if true;
+          allow create, update: if isCentaur() &&
+            request.auth.token.centaurId == centaurStatusId &&
+            isValidCentaurStatus(request.resource.data, centaurStatusId);
+          // Health recheck: a human (session owner, or anyone once ownerless)
+          // may flip an ack back to ready == false; the centaur answers by
+          // setting ready == true again.
+          allow update: if isAuthenticated() && !isCentaur() &&
+            (getSessionOwner(sessionId) == null ||
+              getSessionOwner(sessionId) == request.auth.uid) &&
+            request.resource.data.keys().hasOnly(['centaurId', 'ready', 'respondedAt']) &&
+            request.resource.data.centaurId == resource.data.centaurId &&
+            request.resource.data.ready == false;
+        }
       }
 
       // Games Subcollection
       match /games/{gameId} {
         allow read: if true;
 
-        // Meta Subcollection (botMap etc. — written server-side only)
+        // Meta Subcollection (centaurMap — written server-side only)
         match /meta/{metaId} {
           allow read: if true;
         }
@@ -224,66 +208,53 @@ service cloud.firestore {
         // MoveStatuses Subcollection
         match /moveStatuses/{moveStatusId} {
           allow read: if true;
-          allow update: if isAuthenticated() && (
-            isValidMoveStatusUpdate(resource.data, request.resource.data) ||
-            (isBot() && isValidBotMoveStatusUpdate(resource.data, request.resource.data, sessionId, gameId))
-          );
+          allow update: if isCentaur() &&
+            isValidMoveStatusUpdate(resource.data, request.resource.data, sessionId, gameId);
         }
 
         // PrivateMoves Subcollection
-        // Multiple creates per player per turn are allowed: each write stages
+        // Multiple creates per snake per turn are allowed: each write stages
         // a move, and turn resolution takes the last staged move submitted
-        // before the turn's endTime — UNTIL the player commits
-        // (movedPlayerIDs), which freezes their staged move for the turn.
-        // Reads are permitted only for one's OWN moves (moves stay hidden
-        // from opponents): queries must therefore filter on playerID so the
-        // rules engine can prove every result belongs to the caller. This is
-        // what lets a Firebase-connected bot confirm which staged move the
-        // server will actually use.
+        // before the turn's endTime — UNTIL the centaur commits the snake
+        // (movedPlayerIDs), which freezes its staged move for the turn.
+        // Reads are permitted only for one's OWN snakes' moves (moves stay
+        // hidden from opponents): queries must therefore filter on playerID
+        // so the rules engine can prove every result belongs to the caller.
+        // This is what lets a centaur confirm which staged move the server
+        // will actually use.
         match /privateMoves/{moveId} {
-          allow read: if isAuthenticated() && (
-            request.auth.uid == resource.data.playerID ||
-            (isBot() && botControlsPlayer(sessionId, gameId, resource.data.playerID))
-          );
-          allow create: if isAuthenticated() &&
+          allow read: if isCentaur() &&
+            centaurControlsPlayer(sessionId, gameId, resource.data.playerID);
+          allow create: if isCentaur() &&
             isValidPrivateMove(request.resource.data) &&
-            !hasCommittedForTurn(sessionId, gameId, request.resource.data.moveNumber, request.resource.data.playerID) &&
-            (
-              request.auth.uid == request.resource.data.playerID ||
-              (isBot() && botControlsPlayer(sessionId, gameId, request.resource.data.playerID))
-            );
-        }
-
-        // ExpirationRequests Subcollection
-        match /expirationRequests/{requestId} {
-          allow read: if true;
-          allow create: if isAuthenticated();
+            centaurControlsPlayer(sessionId, gameId, request.resource.data.playerID) &&
+            !hasCommittedForTurn(sessionId, gameId, request.resource.data.moveNumber, request.resource.data.playerID);
         }
       }
     }
 
-    // =========== BOTS COLLECTION ===========
-    match /bots/{botId} {
-      allow read: if true;
+    // =========== CENTAURS COLLECTION ===========
+    match /centaurs/{centaurId} {
+      allow read: if isAuthenticated();
       allow create: if isAuthenticated() &&
                        request.resource.data.owner == request.auth.uid &&
-                       isValidBotData(request.resource.data, botId) &&
+                       isValidCentaurData(request.resource.data, centaurId) &&
                        request.resource.data.createdAt == request.time;
       allow update: if isAuthenticated() &&
-                       isValidBotUpdate(request.resource.data, botId, resource.data);
+                       isValidCentaurUpdate(request.resource.data, centaurId, resource.data);
       allow delete: if isAuthenticated() && resource.data.owner == request.auth.uid;
 
-      // Game invites written server-side at game start so Firebase-connected
-      // bots can discover their games with a single collection listener.
-      // Contents mirror world-readable game/bot data, so reads are open;
-      // writes are server-only.
+      // Game invites written server-side at game start so centaurs can
+      // discover their games with a single collection listener. Contents
+      // mirror world-readable game data, so reads are open; writes are
+      // server-only.
       match /games/{gameId} {
         allow read: if true;
       }
     }
 
     // =========== RANKINGS COLLECTION ===========
-    match /rankings/{playerID} {
+    match /rankings/{centaurId} {
       allow read: if true;
     }
   }

@@ -1,19 +1,13 @@
-import { Box } from "@mui/material"
+import { Box, CircularProgress, Typography } from "@mui/material"
 import {
-  Bot,
+  Centaur,
   GameSetup,
   GameState,
-  GameType,
-  Human,
   MoveStatus,
-  Player,
   Session,
   Turn,
 } from "@shared/types/Game"
 import {
-  addDoc,
-  and,
-  arrayUnion,
   collection,
   doc,
   DocumentSnapshot,
@@ -23,9 +17,7 @@ import {
   orderBy,
   query,
   QuerySnapshot,
-  serverTimestamp,
   Timestamp,
-  updateDoc,
   where,
 } from "firebase/firestore"
 import React, {
@@ -35,26 +27,16 @@ import React, {
   useRef,
   useState,
 } from "react"
-import { EmojiCycler } from "../components/EmojiCycler"
 import { db } from "../firebaseConfig"
 import { useUser } from "./UserContext"
 
 interface GameStateContextType {
   gameState: GameState | null
   latestTurn: Turn | null
-  hasSubmittedMove: boolean
-  selectedSquare: number | null
-  setSelectedSquare: React.Dispatch<React.SetStateAction<number | null>>
-  startGame: () => Promise<void>
-  submitMove: (selectedSquare: number) => Promise<void>
   error: string | null
   gameID: string
   timeRemaining: number
-  bots: Bot[]
-  humans: Human[]
-  gameType: GameType
-  setGameType: React.Dispatch<React.SetStateAction<GameType>>
-  players: Player[]
+  centaurs: Centaur[]
   sessionName: string
   gameSetup: GameSetup | null
   latestMoveStatus: MoveStatus | null
@@ -82,21 +64,13 @@ export const GameStateProvider: React.FC<{
   const [latestMoveStatus, setLatestMoveStatus] = useState<MoveStatus | null>(
     null,
   )
-  const [humans, setHumans] = useState<Human[]>([])
   const [latestTurn, setLatestTurn] = useState<Turn | null>(null)
-  const [hasSubmittedMove, setHasSubmittedMove] = useState<boolean>(false)
   const [error, setError] = useState<string | null>(null)
   const [timeRemaining, setTimeRemaining] = useState<number>(0)
-  const [selectedSquare, setSelectedSquare] = useState<number | null>(null)
-  const [bots, setBots] = useState<Bot[]>([])
-  const [gameParticipantBots, setGameParticipantBots] = useState<Bot[]>([])
-  const gameParticipantBotMapRef = useRef<{ [id: string]: Bot }>({})
-  const gameParticipantBotUnsubsRef = useRef<{ [id: string]: () => void }>({})
-  const [gameType, setGameType] = useState<GameType>("snek")
+  const [centaurs, setCentaurs] = useState<Centaur[]>([])
   const [connectivityStatus, setConnectivityStatus] = useState<'connected' | 'disconnected'>('connected')
   const [queryTimedOut, setQueryTimedOut] = useState<boolean>(false)
 
-  const humanMapRef = useRef<{ [id: string]: Human }>({})
   const intervalIdRef = useRef<NodeJS.Timeout | null>(null)
   const initialGameIDRef = useRef(gameID)
 
@@ -134,14 +108,18 @@ export const GameStateProvider: React.FC<{
         updateConnectivityStatus(docSnapshot)
 
         if (!docSnapshot.exists()) {
-          setError("Game not found.")
+          // The game document only exists once the game has started.
+          if (!docSnapshot.metadata.fromCache) {
+            clearQueryTimeout()
+            setQueryTimedOut(false)
+          }
           return
         }
 
         const gameData = docSnapshot.data() as GameState
         const safeTurns = Array.isArray(gameData.turns) ? gameData.turns : []
         const latestTurnData = safeTurns.length ? safeTurns[safeTurns.length - 1] : null
-        
+
         setGameState({ ...gameData, turns: safeTurns })
         setLatestTurn(latestTurnData)
 
@@ -216,7 +194,7 @@ export const GameStateProvider: React.FC<{
 
   // Subscribe to game setup
   useEffect(() => {
-    if (!gameID || userID === "") return
+    if (!gameID) return
     const gameDocRef = doc(db, `sessions/${sessionName}/setups`, gameID)
     let timeoutId: NodeJS.Timeout | null = null
 
@@ -239,7 +217,7 @@ export const GameStateProvider: React.FC<{
     const unsubscribe = onSnapshot(
       gameDocRef,
       { includeMetadataChanges: true },
-      async (docSnapshot) => {
+      (docSnapshot) => {
         updateConnectivityStatus(docSnapshot)
 
         if (!docSnapshot.exists()) {
@@ -254,24 +232,6 @@ export const GameStateProvider: React.FC<{
           clearQueryTimeout()
           setQueryTimedOut(false)
         }
-
-        const userExists = gameData.gamePlayers.find(
-          (player) => player.id === userID,
-        )
-        if (!gameData.started && !userExists) {
-          try {
-            const newGamePlayer = {
-              id: userID,
-              type: "human",
-            }
-            await updateDoc(gameDocRef, {
-              gamePlayers: arrayUnion(newGamePlayer),
-            })
-          } catch (err) {
-            console.error("Error adding user to the game:", err)
-            setError("Failed to join the game.")
-          }
-        }
       },
       (error) => {
         console.error("Error in game setup subscription:", error)
@@ -283,19 +243,17 @@ export const GameStateProvider: React.FC<{
       unsubscribe()
       clearQueryTimeout()
     }
-  }, [gameID, userID, sessionName])
+  }, [gameID, sessionName])
 
-  // Subscribe to the "bots" collection
+  // Subscribe to the "centaurs" collection: everything public plus the
+  // current user's own private centaurs.
   useEffect(() => {
-    if (!gameSetup?.gameType) return
-    const botsQuery = query(
-      collection(db, "bots"),
-      and(
-        where("capabilities", "array-contains", gameSetup.gameType),
-        or(
-          where("public", "==", true),
-          where("owner", "==", userID)
-        )
+    if (userID === "") return
+    const centaursQuery = query(
+      collection(db, "centaurs"),
+      or(
+        where("public", "==", true),
+        where("owner", "==", userID)
       )
     )
     let timeoutId: NodeJS.Timeout | null = null
@@ -303,7 +261,7 @@ export const GameStateProvider: React.FC<{
     const startQueryTimeout = () => {
       timeoutId = setTimeout(() => {
         setQueryTimedOut(true)
-        setError("Loading bots data is taking longer than usual.")
+        setError("Loading centaurs data is taking longer than usual.")
       }, queryMaxDuration)
     }
 
@@ -317,13 +275,13 @@ export const GameStateProvider: React.FC<{
     startQueryTimeout()
 
     const unsubscribe = onSnapshot(
-      botsQuery,
+      centaursQuery,
       { includeMetadataChanges: true },
       (snapshot) => {
         updateConnectivityStatus(snapshot)
 
-        const botsData = snapshot.docs.map((doc) => doc.data() as Bot)
-        setBots(botsData)
+        const centaursData = snapshot.docs.map((doc) => doc.data() as Centaur)
+        setCentaurs(centaursData)
 
         if (!snapshot.metadata.fromCache) {
           clearQueryTimeout()
@@ -331,8 +289,8 @@ export const GameStateProvider: React.FC<{
         }
       },
       (error) => {
-        console.error("Error in bots subscription:", error)
-        setError("An error occurred while fetching bots data.")
+        console.error("Error in centaurs subscription:", error)
+        setError("An error occurred while fetching centaurs data.")
         clearQueryTimeout()
       }
     )
@@ -340,164 +298,11 @@ export const GameStateProvider: React.FC<{
       unsubscribe()
       clearQueryTimeout()
     }
-  }, [gameSetup?.gameType])
-
-  // Subscribe to bot documents for private bots added to this game by other players
-  useEffect(() => {
-    const unsubs = gameParticipantBotUnsubsRef.current
-    const botMap = gameParticipantBotMapRef.current
-
-    if (!gameSetup?.gamePlayers) {
-      for (const id of Object.keys(unsubs)) {
-        unsubs[id]()
-        delete unsubs[id]
-        delete botMap[id]
-      }
-      setGameParticipantBots([])
-      return
-    }
-
-    // Subscribe based on the *underlying* bot doc id. Clones share an
-    // endpoint, so a clone id like `botID#abc123` is not a real Firestore
-    // doc and querying it would 404.
-    const botPlayerIDs = gameSetup.gamePlayers
-      .filter((gp) => gp.type === "bot")
-      .map((gp) => gp.botRef ?? gp.id)
-
-    const uniqueBotPlayerIDs = Array.from(new Set(botPlayerIDs))
-    const existingBotIDs = new Set(bots.map((b) => b.id))
-    const neededIDs = new Set(uniqueBotPlayerIDs.filter((id) => !existingBotIDs.has(id)))
-
-    // Unsubscribe from bots no longer needed
-    for (const id of Object.keys(unsubs)) {
-      if (!neededIDs.has(id)) {
-        unsubs[id]()
-        delete unsubs[id]
-        delete botMap[id]
-      }
-    }
-
-    // Subscribe to newly needed bots
-    for (const botID of neededIDs) {
-      if (unsubs[botID]) continue
-      const botDocRef = doc(db, "bots", botID)
-
-      const unsubscribe = onSnapshot(
-        botDocRef,
-        (docSnap) => {
-          if (docSnap.exists()) {
-            const botData = docSnap.data() as Bot
-            gameParticipantBotMapRef.current[botID] = {
-              ...botData,
-              id: botID,
-            }
-          } else {
-            delete gameParticipantBotMapRef.current[botID]
-          }
-          setGameParticipantBots(Object.values(gameParticipantBotMapRef.current))
-        },
-        (error) => {
-          console.error(`Error in game participant bot subscription for ${botID}:`, error)
-        }
-      )
-
-      unsubs[botID] = unsubscribe
-    }
-
-    setGameParticipantBots(Object.values(botMap))
-  }, [gameSetup?.gamePlayers, bots])
-
-  // Cleanup all game participant bot subscriptions on unmount
-  useEffect(() => {
-    return () => {
-      const unsubs = gameParticipantBotUnsubsRef.current
-      for (const id of Object.keys(unsubs)) {
-        unsubs[id]()
-        delete unsubs[id]
-      }
-      gameParticipantBotMapRef.current = {}
-    }
-  }, [])
-
-  // Subscribe to player documents
-  useEffect(() => {
-    if (!gameSetup?.gamePlayers) return
-
-    const unsubscribes: Record<string, () => void> = {}
-    const humanMap = humanMapRef.current
-
-    const playerIDs = gameSetup.gamePlayers
-      .filter((player) => player.type === "human")
-      .map((player) => player.id)
-
-    playerIDs.forEach((playerID) => {
-      if (!unsubscribes[playerID]) {
-        const playerDocRef = doc(db, "users", playerID)
-        let timeoutId: NodeJS.Timeout | null = null
-
-        const startQueryTimeout = () => {
-          timeoutId = setTimeout(() => {
-            setQueryTimedOut(true)
-            setError("Loading player data is taking longer than usual.")
-          }, queryMaxDuration)
-        }
-
-        const clearQueryTimeout = () => {
-          if (timeoutId) {
-            clearTimeout(timeoutId)
-            timeoutId = null
-          }
-        }
-
-        startQueryTimeout()
-
-        const unsubscribe = onSnapshot(
-          playerDocRef,
-          { includeMetadataChanges: true },
-          (docSnap) => {
-            updateConnectivityStatus(docSnap)
-
-            if (docSnap.exists()) {
-              const playerData = docSnap.data() as Human
-              humanMap[playerID] = {
-                id: playerID,
-                name: playerData?.name || "Unknown",
-                emoji: playerData.emoji || "🦍",
-                colour: playerData.colour,
-                createdAt: playerData.createdAt,
-              }
-            } else {
-              delete humanMap[playerID]
-            }
-            setHumans(Object.values(humanMap))
-
-            if (!docSnap.metadata.fromCache) {
-              clearQueryTimeout()
-              setQueryTimedOut(false)
-            }
-          },
-          (error) => {
-            console.error(`Error in player subscription for ${playerID}:`, error)
-            setError("An error occurred while fetching player updates.")
-            clearQueryTimeout()
-          }
-        )
-
-        unsubscribes[playerID] = () => {
-          unsubscribe()
-          clearQueryTimeout()
-        }
-      }
-    })
-
-    return () => {
-      Object.values(unsubscribes).forEach((unsubscribe) => unsubscribe())
-    }
-  }, [gameSetup?.gamePlayers])
+  }, [userID])
 
   // Subscribe to moveStatuses collection
   useEffect(() => {
-    if (!gameID || userID === "") return
+    if (!gameID) return
 
     const moveStatusesRef = collection(
       db,
@@ -540,9 +345,6 @@ export const GameStateProvider: React.FC<{
         if (!querySnapshot.empty) {
           const highestMoveStatus = querySnapshot.docs[0].data() as MoveStatus
           setLatestMoveStatus(highestMoveStatus)
-          
-          const userHasMoved = highestMoveStatus.movedPlayerIDs?.includes(userID) || false
-          setHasSubmittedMove(userHasMoved)
         }
 
         if (!querySnapshot.metadata.fromCache) {
@@ -561,7 +363,7 @@ export const GameStateProvider: React.FC<{
       unsubscribe()
       clearQueryTimeout()
     }
-  }, [gameID, userID, sessionName])
+  }, [gameID, sessionName])
 
   // Timer effect
   useEffect(() => {
@@ -586,9 +388,7 @@ export const GameStateProvider: React.FC<{
       return
     }
 
-    const intervalTime = 1000
-
-    const intervalFunction = async () => {
+    const intervalFunction = () => {
       if (shouldClearInterval()) {
         return
       }
@@ -598,38 +398,14 @@ export const GameStateProvider: React.FC<{
         latestTurn?.endTime instanceof Timestamp
           ? latestTurn.endTime.seconds
           : 0
-      const remaining = endTimeSeconds - now
-
-      setTimeRemaining(remaining)
-
-      // if (remaining > -1 || !gameState) {
-      //   return
-      // }
-
-      // const expirationRequestsRef = collection(
-      //   db,
-      //   `sessions/${sessionName}/games/${gameID}/expirationRequests`,
-      // )
-
-      // await addDoc(expirationRequestsRef, {
-      //   timestamp: new Date(),
-      //   playerID: userID,
-      // })
-
-      // console.log(`Turn expiration request created for gameID: ${gameID}`)
-
-      // if (intervalIdRef.current) {
-      //   clearInterval(intervalIdRef.current)
-      // }
-      // intervalTime = 10000
-      // intervalIdRef.current = setInterval(intervalFunction, intervalTime)
+      setTimeRemaining(endTimeSeconds - now)
     }
 
     if (intervalIdRef.current) {
       clearInterval(intervalIdRef.current)
     }
 
-    intervalIdRef.current = setInterval(intervalFunction, intervalTime)
+    intervalIdRef.current = setInterval(intervalFunction, 1000)
 
     return () => {
       if (intervalIdRef.current) {
@@ -637,102 +413,15 @@ export const GameStateProvider: React.FC<{
         intervalIdRef.current = null
       }
     }
-  }, [latestTurn, userID, gameState, gameID, sessionName, gameSetup])
-
-  // Function to start the game
-  const startGame = async () => {
-    if (gameID && gameState && !gameSetup?.started) {
-      const gameDocRef = doc(db, "games", gameID)
-      try {
-        await updateDoc(gameDocRef, {
-          started: true,
-          firstPlayerReadyTime: serverTimestamp(),
-        })
-      } catch (err) {
-        console.error("Error starting the game:", err)
-        setError("Failed to start the game.")
-      }
-    }
-  }
-
-  // Function to submit a move
-  const submitMove = async (selectedSquare: number) => {
-    if (!latestTurn || !gameState || !userID || !gameID) {
-      setError("Cannot submit move at this time.")
-      return
-    }
-
-    const moveRef = collection(db, `games/${gameID}/privateMoves`)
-    const moveNumber = gameState.turns.length - 1
-
-    try {
-      await addDoc(moveRef, {
-        gameID,
-        moveNumber,
-        playerID: userID,
-        move: selectedSquare,
-        timestamp: serverTimestamp(),
-      })
-      setHasSubmittedMove(true)
-    } catch (err) {
-      console.error("Error submitting move:", err)
-      setError("Failed to submit move.")
-    }
-  }
+  }, [latestTurn, gameID, gameSetup])
 
   const providerValue: GameStateContextType = {
     gameState,
-    humans,
     latestTurn,
-    hasSubmittedMove,
-    selectedSquare,
-    setSelectedSquare,
-    startGame,
-    submitMove,
     error,
     gameID,
     timeRemaining,
-    bots,
-    gameType,
-    setGameType,
-    players: (() => {
-      const result: Player[] = []
-      const seen = new Set<string>()
-      for (const h of humans) {
-        if (!seen.has(h.id)) {
-          seen.add(h.id)
-          result.push(h)
-        }
-      }
-
-      // Build a quick lookup of every bot record we know about, keyed by
-      // underlying bot id. This covers both the public/owner-bot listing
-      // (`bots`) and any privately subscribed clones' underlying records
-      // (`gameParticipantBots`).
-      const botByID = new Map<string, Bot>()
-      for (const b of [...bots, ...gameParticipantBots]) {
-        if (!botByID.has(b.id)) botByID.set(b.id, b)
-      }
-
-      // Emit one synthesised Player per bot GamePlayer entry. Clones share
-      // an underlying bot record but get their own per-game name/emoji.
-      for (const gp of gameSetup?.gamePlayers ?? []) {
-        if (gp.type !== "bot") continue
-        if (seen.has(gp.id)) continue
-        const underlyingID = gp.botRef ?? gp.id
-        const bot = botByID.get(underlyingID)
-        if (!bot) continue
-        seen.add(gp.id)
-        result.push({
-          id: gp.id,
-          name: gp.displayName ?? bot.name,
-          emoji: gp.displayEmoji ?? bot.emoji,
-          colour: bot.colour,
-          createdAt: bot.createdAt,
-        })
-      }
-      return result
-    })(),
+    centaurs,
     sessionName,
     gameSetup,
     latestMoveStatus,
@@ -755,7 +444,7 @@ export const GameStateProvider: React.FC<{
             height: "100vh",
           }}
         >
-          <EmojiCycler />
+          {error ? <Typography color="error">{error}</Typography> : <CircularProgress />}
         </Box>
       )}
     </GameStateContext.Provider>

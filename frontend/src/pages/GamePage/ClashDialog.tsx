@@ -9,7 +9,7 @@ import {
   ListItem,
   ListItemText,
 } from "@mui/material"
-import { GamePlayer, Player } from "@shared/types/Game"
+import { GamePlayer, Team } from "@shared/types/Game"
 import React from "react"
 
 interface ClashDialogProps {
@@ -17,7 +17,7 @@ interface ClashDialogProps {
   onClose: () => void
   clashReason: string
   clashPlayersList: GamePlayer[]
-  players: Player[]
+  teams: Team[]
 }
 
 const ClashDialog: React.FC<ClashDialogProps> = ({
@@ -25,7 +25,7 @@ const ClashDialog: React.FC<ClashDialogProps> = ({
   onClose,
   clashReason,
   clashPlayersList,
-  players,
+  teams,
 }) => {
   return (
     <Dialog open={open} onClose={onClose} sx={{ zIndex: 99999999 }}>
@@ -34,11 +34,11 @@ const ClashDialog: React.FC<ClashDialogProps> = ({
         <DialogContentText>{clashReason}</DialogContentText>
         <List>
           {clashPlayersList.map((gamePlayer) => {
-            const player = players.find((player) => player.id === gamePlayer.id)
-            if (!player) return null
+            const team = teams.find((t) => t.id === gamePlayer.teamID)
+            if (!team) return null
             return (
-              <ListItem key={player.id}>
-                <ListItemText primary={`${player.name} ${player.emoji}`} />
+              <ListItem key={gamePlayer.id}>
+                <ListItemText primary={`${team.name} ${gamePlayer.letter}`} />
               </ListItem>
             )
           })}

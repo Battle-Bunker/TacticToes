@@ -1,7 +1,8 @@
 import React, { useMemo } from "react"
 import { Checkbox, FormControl, FormControlLabel, IconButton, Slider, TextField, Typography, Box } from "@mui/material"
 import { RefreshCw } from "lucide-react"
-import { GamePlayer, GameType, Team } from "../../../shared/types/Game"
+import { Team } from "../../../shared/types/Game"
+import { expandTeams } from "../utils/expandTeams"
 
 export interface BoardPresetData {
   fertileTiles: number[]
@@ -32,9 +33,8 @@ interface SnekConfigurationProps {
   syncedPreviewData: BoardPresetData | null
   isGeneratingPreview: boolean
   onRefreshPreview: () => void
-  gamePlayers: GamePlayer[]
-  gameType: GameType
-  teams?: Team[]
+  teams: Team[]
+  snakesPerTeam: number
 }
 
 function getFertileTileColor(index: number, w: number, fertileSet: Set<number>): string {
@@ -53,17 +53,6 @@ function getFertileTileColor(index: number, w: number, fertileSet: Set<number>):
   return `hsl(${hue}, ${saturation}%, ${lightness}%)`
 }
 
-function getPlayerColor(index: number, total: number): string {
-  const hue = (index * 360 / Math.max(total, 1)) % 360
-  return `hsl(${hue}, 70%, 55%)`
-}
-
-function getTeamColor(teamID: string | undefined, teams: Team[] | undefined): string | null {
-  if (!teamID || !teams) return null
-  const team = teams.find(t => t.id === teamID)
-  return team?.color || null
-}
-
 export const SnekConfiguration: React.FC<SnekConfigurationProps> = ({
   maxTurns, maxTurnsEnabled, onMaxTurnsToggle, onMaxTurnsChange,
   hazardPercentage, onHazardPercentageChange,
@@ -75,13 +64,18 @@ export const SnekConfiguration: React.FC<SnekConfigurationProps> = ({
   usePreviewBoard, onUsePreviewBoardChange,
   syncedPreviewData,
   isGeneratingPreview, onRefreshPreview,
-  gamePlayers, gameType, teams,
+  teams, snakesPerTeam,
 }) => {
-  const activePlayers = useMemo(() => {
-    const isTeamGame = gameType === "teamsnek" || gameType === "kingsnek"
-    if (!isTeamGame) return gamePlayers
-    return gamePlayers.filter(p => p.teamID)
-  }, [gamePlayers, gameType])
+  const previewPlayers = useMemo(
+    () => expandTeams(teams, snakesPerTeam),
+    [teams, snakesPerTeam],
+  )
+
+  const teamColorByID = useMemo(() => {
+    const map = new Map<string, string>()
+    teams.forEach((team) => map.set(team.id, team.color))
+    return map
+  }, [teams])
 
   const displayData = useMemo(() => {
     if (!syncedPreviewData) return null
@@ -100,7 +94,7 @@ export const SnekConfiguration: React.FC<SnekConfigurationProps> = ({
     return map
   }, [displayData])
 
-  const showPreview = fertileGroundEnabled || hazardPercentage > 0 || gamePlayers.length > 0
+  const showPreview = fertileGroundEnabled || hazardPercentage > 0 || previewPlayers.length > 0
   const clusteringLabel = fertileGroundClustering <= 6 ? "Scattered" : fertileGroundClustering <= 14 ? "Clustered" : "Blobby"
   const cellSize = Math.max(6, Math.min(16, Math.floor(280 / Math.max(boardWidth, boardHeight))))
 
@@ -114,7 +108,7 @@ export const SnekConfiguration: React.FC<SnekConfigurationProps> = ({
         <TextField
           type="number" label="Max Turns" value={maxTurns}
           onChange={(e) => onMaxTurnsChange(parseInt(e.target.value) || 0)}
-          sx={{ flex: 1 }} inputProps={{ min: 1 }} disabled={!maxTurnsEnabled}
+          sx={{ flex: 1 }} inputProps={{ min: 1, max: 1000 }} disabled={!maxTurnsEnabled}
         />
       </div>
       <Box sx={{ mt: 1 }}>
@@ -174,7 +168,6 @@ export const SnekConfiguration: React.FC<SnekConfigurationProps> = ({
                   const isFertile = displayData.fertileTiles.has(i)
                   const isFood = displayData.foodTiles.has(i)
                   const playerId = playerPosToId.get(i)
-                  const isPlayer = !!playerId
 
                   let bg: string
                   if (isBorder) {
@@ -188,11 +181,9 @@ export const SnekConfiguration: React.FC<SnekConfigurationProps> = ({
                   }
 
                   let content: React.ReactNode = null
-                  if (isPlayer && playerId) {
-                    const player = activePlayers.find(p => p.id === playerId)
-                    const teamColor = getTeamColor(player?.teamID, teams)
-                    const playerIdx = activePlayers.findIndex(p => p.id === playerId)
-                    const color = teamColor || getPlayerColor(playerIdx, activePlayers.length)
+                  if (playerId) {
+                    const player = previewPlayers.find(p => p.id === playerId)
+                    const color = (player && teamColorByID.get(player.teamID)) || "#fff"
                     content = (
                       <Box sx={{
                         width: "100%", height: "100%",

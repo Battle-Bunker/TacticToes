@@ -4,7 +4,7 @@ import RulesDialog from "./RulesDialog"
 import { useGameStateContext } from "../../context/GameStateContext"
 
 const GameHeader: React.FC = () => {
-  const { gameSetup, sessionName } = useGameStateContext()
+  const { sessionName } = useGameStateContext()
 
   const [openRulesDialog, setOpenRulesDialog] = useState(false)
 
@@ -50,7 +50,6 @@ const GameHeader: React.FC = () => {
                 backgroundColor: "#ffb6c1", // Slightly darker pastel pink
               },
             }}
-            // startIcon={<Book />}
           >
             📖 Rules
           </Button>
@@ -71,11 +70,9 @@ const GameHeader: React.FC = () => {
         </Box>
       </Box>
 
-      {/* Rules Dialog */}
       <RulesDialog
         open={openRulesDialog}
         onClose={() => setOpenRulesDialog(false)}
-        rules={gameSetup?.gameType}
       />
     </Box>
   )

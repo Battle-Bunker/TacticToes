@@ -1,6 +1,7 @@
 import { GamePlayer, GameState } from "@shared/types/Game"
 import { Timestamp } from "firebase/firestore"
-import { SnekProcessor } from "./gameprocessors/SnekProcessor" // Adjust the import path as needed
+import { TeamSnekProcessor } from "./gameprocessors/TeamSnekProcessor"
+import { expandTeams } from "./utils/expandTeams"
 
 // Mock Timestamp.now() to return a consistent value
 jest.mock("firebase/firestore", () => ({
@@ -14,27 +15,30 @@ jest.mock("firebase/firestore", () => ({
   },
 }))
 
-describe("SnekProcessor", () => {
+describe("snake start locations", () => {
   function createGameState(
     width: number,
     height: number,
     playerCount: number,
   ): GameState {
-    const gamePlayers: GamePlayer[] = Array.from(
-      { length: playerCount },
-      (_, i) => ({
-        id: `p${i + 1}`,
-        type: "human",
-      }),
-    )
+    const teams = Array.from({ length: playerCount }, (_, i) => ({
+      id: `p${i + 1}`,
+      name: `Team ${i + 1}`,
+      color: "#ff0000",
+    }))
+    const gamePlayers: GamePlayer[] = teams.map((team) => ({
+      id: team.id,
+      teamID: team.id,
+      letter: "A",
+    }))
     return {
       turns: [],
       setup: {
-        gameType: "snek",
-        gamePlayers: gamePlayers,
+        teams,
+        snakesPerTeam: 1,
+        gamePlayers,
         boardWidth: width,
         boardHeight: height,
-        playersReady: [],
         maxTurnTime: 10,
         startRequested: false,
         started: true,
@@ -49,36 +53,27 @@ describe("SnekProcessor", () => {
     width: number,
     height: number,
     teamCount: number,
-    playersPerTeam: number,
-    gameType: "teamsnek" | "kingsnek",
+    snakesPerTeam: number,
   ): GameState {
     const teams = Array.from({ length: teamCount }, (_, i) => ({
       id: `t${i + 1}`,
       name: `Team ${i + 1}`,
       color: `#00${i + 1}0${i + 1}0`,
     }))
-    const gamePlayers: GamePlayer[] = teams.flatMap((team) =>
-      Array.from({ length: playersPerTeam }, (_, i) => ({
-        id: `${team.id}p${i + 1}`,
-        type: "human",
-        teamID: team.id,
-        isKing: gameType === "kingsnek" && i === 0,
-      })),
-    )
+    const gamePlayers: GamePlayer[] = expandTeams(teams, snakesPerTeam)
 
     return {
       turns: [],
       setup: {
-        gameType,
+        teams,
+        snakesPerTeam,
         gamePlayers,
         boardWidth: width,
         boardHeight: height,
-        playersReady: [],
         maxTurnTime: 10,
         startRequested: false,
         started: true,
         timeCreated: Timestamp.now(),
-        teams,
         teamClustersEnabled: true,
       },
       timeCreated: Timestamp.fromMillis(0),
@@ -125,7 +120,7 @@ describe("SnekProcessor", () => {
 
   function getPositionMap(
     gameState: GameState,
-    initializedGame: ReturnType<SnekProcessor["initializeGame"]>,
+    initializedGame: ReturnType<TeamSnekProcessor["initializeGame"]>,
   ): Map<string, { x: number; y: number }> {
     const positions = new Map<string, { x: number; y: number }>()
     gameState.setup.gamePlayers.forEach((player) => {
@@ -140,7 +135,7 @@ describe("SnekProcessor", () => {
 
   test("initializes game with correct board size", () => {
     const gameState = createGameState(7, 7, 4)
-    const game = new SnekProcessor(gameState)
+    const game = new TeamSnekProcessor(gameState)
     const initializedGame = game.initializeGame()
     const board = game.visualizeBoard(initializedGame)
     const lines = board.split("\n")
@@ -150,7 +145,7 @@ describe("SnekProcessor", () => {
 
   test("places correct number of players", () => {
     const gameState = createGameState(9, 9, 4)
-    const game = new SnekProcessor(gameState)
+    const game = new TeamSnekProcessor(gameState)
     const initializedGame = game.initializeGame()
     const board = game.visualizeBoard(initializedGame)
     const playerCount = (board.match(/[1-4]/g) || []).length
@@ -159,7 +154,7 @@ describe("SnekProcessor", () => {
 
   test("places players on even squares", () => {
     const gameState = createGameState(11, 11, 8)
-    const game = new SnekProcessor(gameState)
+    const game = new TeamSnekProcessor(gameState)
     const initializedGame = game.initializeGame()
     const board = game.visualizeBoard(initializedGame)
     const lines = board.split("\n")
@@ -175,7 +170,7 @@ describe("SnekProcessor", () => {
 
   test("places players near edges for small number of players", () => {
     const gameState = createGameState(7, 7, 2)
-    const game = new SnekProcessor(gameState)
+    const game = new TeamSnekProcessor(gameState)
     const initializedGame = game.initializeGame()
     const board = game.visualizeBoard(initializedGame)
     const lines = board.split("\n")
@@ -205,7 +200,7 @@ describe("SnekProcessor", () => {
 
     testCases.forEach(({ width, height, players }) => {
       const gameState = createGameState(width, height, players)
-      const game = new SnekProcessor(gameState)
+      const game = new TeamSnekProcessor(gameState)
       const initializedGame = game.initializeGame()
       const board = game.visualizeBoard(initializedGame)
       const lines = board.split("\n")
@@ -225,15 +220,15 @@ describe("SnekProcessor", () => {
     })
   })
 
-  test.each(["teamsnek", "kingsnek"] as const)(
-    "spawns %s team clusters with teammate proximity and separation",
-    (gameType) => {
+  test(
+    "spawns team clusters with teammate proximity and separation",
+    () => {
       const originalRandom = Math.random
       Math.random = () => 0
       try {
         const intraTeamSpacing = 2
-        const gameState = createTeamGameState(17, 17, 3, 2, gameType)
-        const game = new SnekProcessor(gameState)
+        const gameState = createTeamGameState(17, 17, 3, 2)
+        const game = new TeamSnekProcessor(gameState)
         const initializedGame = game.initializeGame()
         const positions = getPositionMap(gameState, initializedGame)
 
@@ -309,10 +304,12 @@ describe("SnekProcessor", () => {
           }
         })
 
+        // Spawn candidates are every other ring cell (parity requirement), so
+        // an intra-team spacing of N candidates is 2N raw ring steps.
         teamRanges.forEach((range) => {
           for (let i = 1; i < range.indices.length; i++) {
             expect(range.indices[i] - range.indices[i - 1]).toBe(
-              intraTeamSpacing,
+              intraTeamSpacing * 2,
             )
           }
         })

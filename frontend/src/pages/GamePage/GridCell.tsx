@@ -7,94 +7,55 @@ interface GridCellProps {
   cellContent: React.ReactNode
   backgroundColor: string
   isWinningSquare: boolean
-  isLatestMove: boolean
-  isAllowedMove: boolean
-  isSelected: boolean
+  hasClash: boolean
   onClick: (index: number) => void
-  disabled: boolean
 }
 
-const BORDER_WIDTH = 4
-
-const GridCell: React.FC<GridCellProps> = React.memo(({
-  index,
-  cellSize,
-  cellContent,
-  backgroundColor,
-  isWinningSquare,
-  isLatestMove,
-  isAllowedMove,
-  isSelected,
-  onClick,
-  disabled,
-}) => {
-  return (
-    <Box
-      onClick={() => {
-        if (disabled) return
-        onClick(index)
-      }}
-      sx={{
-        width: "100%",
-        paddingBottom: "100%",
-        position: "relative",
-        border: "1px solid black",
-        cursor: disabled ? "default" : "pointer",
-        backgroundColor: isWinningSquare ? "green" : backgroundColor || "white",
-        transition: "background-color 0.3s",
-        boxSizing: "border-box",
-      }}
-    >
-      {isAllowedMove && (
-        <Box
-          sx={{
-            position: "absolute",
-            top: BORDER_WIDTH,
-            left: BORDER_WIDTH,
-            right: BORDER_WIDTH,
-            bottom: BORDER_WIDTH,
-            border: `2px ${isSelected ? "solid" : "dotted"} green`,
-            pointerEvents: "none",
-            zIndex: 2,
-          }}
-        />
-      )}
-
-      {isLatestMove && (
-        <Box
-          sx={{
-            position: "absolute",
-            top: BORDER_WIDTH,
-            left: BORDER_WIDTH,
-            right: BORDER_WIDTH,
-            bottom: BORDER_WIDTH,
-            border: `2px solid yellow`,
-            pointerEvents: "none",
-            zIndex: 3,
-          }}
-        />
-      )}
-
+const GridCell: React.FC<GridCellProps> = React.memo(
+  ({
+    index,
+    cellSize,
+    cellContent,
+    backgroundColor,
+    isWinningSquare,
+    hasClash,
+    onClick,
+  }) => {
+    return (
       <Box
+        onClick={() => onClick(index)}
         sx={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          display: "flex",
-          justifyContent: "center",
-          alignItems: "center",
-          fontSize: `${cellSize}px`,
-          textAlign: "center",
-          userSelect: "none",
-          zIndex: 1,
+          width: "100%",
+          paddingBottom: "100%",
+          position: "relative",
+          border: "1px solid black",
+          cursor: hasClash ? "pointer" : "default",
+          backgroundColor: isWinningSquare ? "green" : backgroundColor || "white",
+          transition: "background-color 0.3s",
+          boxSizing: "border-box",
         }}
       >
-        {!isWinningSquare && cellContent}
+        <Box
+          sx={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            fontSize: `${cellSize}px`,
+            textAlign: "center",
+            userSelect: "none",
+            zIndex: 1,
+          }}
+        >
+          {!isWinningSquare && cellContent}
+        </Box>
       </Box>
-    </Box>
-  )
-})
+    )
+  },
+)
 
 export default GridCell

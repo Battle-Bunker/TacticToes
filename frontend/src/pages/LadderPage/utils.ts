@@ -1,7 +1,6 @@
 // src/pages/LadderPage/utils.ts
 
-import { GameType, Player } from '@shared/types/Game'
-import { PlayerRankings, GameTypeStats } from './types'
+import { Centaur } from '@shared/types/Game'
 
 export const ordinalSuffix = (n: number): string => {
     const s = ['th', 'st', 'nd', 'rd']
@@ -14,18 +13,11 @@ export const calculateWinRate = (wins: number, total: number): number => {
     return (wins / total) * 100
 }
 
-export const getGameTypeStats = (
-    rankings: PlayerRankings
-): GameTypeStats[] => {
-    return Object.entries(rankings).map(([gameType, ranking]) => ({
-        gameType: gameType as GameType,
-        currentMMR: ranking.currentMMR,
-        gamesPlayed: ranking.gamesPlayed,
-        winRate: calculateWinRate(ranking.wins, ranking.gamesPlayed)
-    }))
-}
+// Ranking history opponents are centaur ids, but tolerate snake ids
+// (`centaurId#k`) by stripping the suffix before lookup.
+export const baseCentaurId = (id: string): string => id.split('#')[0]
 
-export const formatPlayerName = (player: Player | null, fallbackID: string): string => {
-    if (!player) return fallbackID
-    return `${player.emoji || ''} ${player.name || fallbackID}`.trim()
-}
+export const formatCentaurName = (
+    centaur: Centaur | undefined,
+    fallbackID: string
+): string => centaur?.name || fallbackID

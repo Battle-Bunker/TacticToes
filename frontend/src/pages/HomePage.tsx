@@ -1,15 +1,12 @@
 import { Box, Button, Stack, Typography } from "@mui/material"
 import React, { ChangeEvent, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { RotatingEmoji } from "../components/EmojiCycler"
 import TypingEffectInput from "../components/TypingEffectInput"
-import { useUser } from "../context/UserContext"
 
 const HomePage: React.FC = () => {
   const navigate = useNavigate()
   const [sessionName, setSessionName] = useState("")
   const [error, setError] = useState("")
-  const { colour } = useUser()
 
   const handleSessionNameChange = (e: ChangeEvent<HTMLInputElement>) => {
     const lowercaseValue = e.target.value.toLowerCase().replace(/[^a-z0-9]/g, "")
@@ -38,10 +35,10 @@ const HomePage: React.FC = () => {
     >
       <Box>
         <Typography pt={10} variant="h4" align="left" gutterBottom>
-          Games entirely unrelated to toes*
+          Team Snek: a game entirely unrelated to toes*
         </Typography>
         <Typography pt={2} variant="body2" align="left" gutterBottom>
-          Pick a word for your session. If you want to play with someone, use
+          Pick a word for your session. If you want to watch with someone, use
           the same word.
         </Typography>
         <form onSubmit={handleNewGame} style={{ width: "100%" }}>
@@ -49,25 +46,15 @@ const HomePage: React.FC = () => {
             <TypingEffectInput
               value={sessionName}
               onChange={handleSessionNameChange}
-              colour={colour}
             />
           </Box>
           <Button
             type="submit"
             fullWidth
-            sx={{
-              mt: 2,
-              fontSize: "32px",
-              backgroundColor: colour,
-              color: "black",
-              "&:hover": {
-                backgroundColor: colour,
-                opacity: 0.8,
-              },
-            }}
+            variant="contained"
+            sx={{ mt: 2, fontSize: "32px" }}
           >
-            Play{"\u00A0"}
-            <RotatingEmoji />
+            Play
           </Button>
         </form>
         <Typography sx={{ pt: 2 }} color="error">
@@ -76,39 +63,12 @@ const HomePage: React.FC = () => {
       </Box>
 
       <Box sx={{ mt: "auto", mb: 5 }}>
-        <Box
-          sx={{
-            border: "2px solid",
-            borderImage:
-              "linear-gradient(to right, red, orange, yellow, green, blue, indigo, violet) 1",
-            borderRadius: 0,
-            py: 1,
-            my: 2,
-            display: "flex",
-            alignItems: "center",
-          }}
-        >
-          <Box
-            component="span"
-            role="img"
-            aria-label="dancing emoji"
-            sx={{ mr: 2, fontSize: "30px" }}
-          >
-            🕺
-          </Box>
-          <Typography variant="body2">
-            Ugly colour? Uninspired emoji? Edit it in the top right.
-          </Typography>
-        </Box>
-
-        <Box>
-          <Typography variant="body1" align="left">
-            * Toes may be involved
-          </Typography>
-          <Typography variant="body1" align="left">
-            A game by Brendo
-          </Typography>
-        </Box>
+        <Typography variant="body1" align="left">
+          * Toes may be involved
+        </Typography>
+        <Typography variant="body1" align="left">
+          A game by Brendo
+        </Typography>
       </Box>
     </Stack>
   )

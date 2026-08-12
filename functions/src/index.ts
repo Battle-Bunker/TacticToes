@@ -3,9 +3,7 @@ import { onMoveCreated } from "./onMoveCreated"
 import { onSessionCreated } from "./onSessionCreated"
 import { processTurnExpirationTask } from "./processTurnExpirationTask"
 import { processScheduledGameStart } from "./processScheduledGameStart"
-import { wakeBot } from "./wakeBot"
-import { createBotApiKey, exchangeBotApiKey, getBotApiKeyStatus } from "./botAuth"
-import { getPlayerPublicInfo } from "./getPlayerPublicInfo"
+import { createCentaurApiKey, exchangeCentaurApiKey, getCentaurApiKeyStatus } from "./centaurAuth"
 import { generatePreviewBoard } from "./generatePreviewBoard"
 import * as admin from "firebase-admin"
 
@@ -19,17 +17,14 @@ if (process.env.FIRESTORE_EMULATOR_HOST) {
   })
 }
 
-// Export your functions
 export {
   onMoveCreated,
   onGameStarted,
   onSessionCreated,
   processTurnExpirationTask,
   processScheduledGameStart,
-  wakeBot,
-  getPlayerPublicInfo,
   generatePreviewBoard,
-  createBotApiKey,
-  exchangeBotApiKey,
-  getBotApiKeyStatus,
+  createCentaurApiKey,
+  exchangeCentaurApiKey,
+  getCentaurApiKeyStatus,
 }

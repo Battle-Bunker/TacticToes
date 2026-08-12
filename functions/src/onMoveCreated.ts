@@ -3,9 +3,8 @@ import * as functions from "firebase-functions/v1"
 import * as logger from "firebase-functions/logger"
 import { getFunctions } from "firebase-admin/functions"
 import { processTurn } from "./gameprocessors/processTurn"
-import { notifyBotsGameEnd } from "./utils/notifyBots"
 import { announceTurn } from "./utils/announceTurn"
-import { MoveStatus } from "./types/Game" // Adjust the import path as necessary
+import { MoveStatus } from "./types/Game"
 
 export const onMoveCreated = functions.firestore
   .document("sessions/{sessionID}/games/{gameID}/moveStatuses/{moveNumber}")
@@ -13,7 +12,7 @@ export const onMoveCreated = functions.firestore
     const moveData = snap.after.data() as MoveStatus
     const { gameID, sessionID, moveNumber } = context.params
 
-    logger.info(`[onMoveCreated] Processing move for gameID: ${gameID}`, { 
+    logger.info(`[onMoveCreated] Processing move for gameID: ${gameID}`, {
       moveData,
       aliveCount: moveData.alivePlayerIDs.length,
       movedCount: moveData.movedPlayerIDs.length
@@ -45,32 +44,30 @@ export const onMoveCreated = functions.firestore
       return turnResult
     })
 
-    logger.info(`[onMoveCreated] Transaction completed`, { 
-      gameID, 
+    logger.info(`[onMoveCreated] Transaction completed`, {
+      gameID,
       moveNumber,
       result,
       hasResult: !!result,
       newTurnCreated: result?.newTurnCreated
     })
 
-    // After transaction commits, schedule turn expiration and notify bots —
-    // the same announceTurn() path turn 0 goes through.
+    // After transaction commits, schedule turn expiration — the same
+    // announceTurn() path turn 0 goes through.
     if (
       result?.newTurnCreated &&
       result.newTurnNumber !== undefined &&
-      result.turnDurationSeconds !== undefined &&
-      result.turnExpiryTime !== undefined
+      result.turnDurationSeconds !== undefined
     ) {
       await announceTurn({
         sessionID,
         gameID,
         turnNumber: result.newTurnNumber,
         turnDurationSeconds: result.turnDurationSeconds,
-        turnExpiryTime: result.turnExpiryTime,
         source: "onMoveCreated",
       })
     } else {
-      logger.info(`[onMoveCreated] Skipping post-transaction work`, { 
+      logger.info(`[onMoveCreated] Skipping post-transaction work`, {
         gameID,
         moveNumber,
         reason: !result ? 'no result' : !result.newTurnCreated ? 'no new turn' : 'missing metadata'
@@ -91,14 +88,6 @@ export const onMoveCreated = functions.firestore
         )
       } catch (error) {
         logger.error(`[onMoveCreated] Error scheduling tournament game start`, { schedGameID, error })
-      }
-    }
-
-    if (result?.gameEnded && result.gameState && result.winners && result.finalTurnNumber !== undefined && result.finalScores) {
-      try {
-        await notifyBotsGameEnd(sessionID, gameID, result.gameState, result.winners, result.finalTurnNumber, result.finalScores)
-      } catch (error) {
-        logger.error(`[onMoveCreated] Error sending /end to bots for game ${gameID}`, error)
       }
     }
 

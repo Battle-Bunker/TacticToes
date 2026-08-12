@@ -1,6 +1,6 @@
 // functions/src/utils/createNewGame.ts
 
-import { GameSetup } from "@shared/types/Game"
+import { GameSetup, StartedGameSetup } from "@shared/types/Game"
 import * as admin from "firebase-admin"
 import { Timestamp, Transaction } from "firebase-admin/firestore"
 import { logger } from "../logger"
@@ -16,9 +16,8 @@ export interface CreateNewGameResult {
 }
 
 /**
- * Creates a new game after determining the winner(s).
- * @param transaction Firestore transaction object.
-//  * @param gameID The ID of the current game.
+ * Creates the next game's setup for a session, copying the previous setup
+ * (teams, colours, snakesPerTeam, board and timing config) when one exists.
  */
 export async function createNewGame(
   transaction: Transaction,
@@ -26,31 +25,31 @@ export async function createNewGame(
   previousSetup: GameSetup | null,
 ): Promise<CreateNewGameResult> {
   try {
-    // Copy all fields from previous setup (if exists) and override only what must be reset
     const newGameSetup: GameSetup = previousSetup
       ? {
-          ...previousSetup, // Copy all fields including gamePlayers (preserves bots, kings, team assignments)
+          ...previousSetup,
           hazardPercentage: previousSetup.hazardPercentage ?? 0,
-          playersReady: [], // Reset ready state - players must re-ready
-          startRequested: false, // Reset start flag
-          started: false, // Reset started flag
-          timeCreated: Timestamp.now(), // New timestamp
+          startRequested: false,
+          started: false,
+          timeCreated: Timestamp.now(),
         }
       : {
           // Default setup when no previous game exists
-          gameType: "snek",
-          gamePlayers: [],
-          boardWidth: 11,
-          boardHeight: 11,
+          teams: [],
+          snakesPerTeam: 3,
+          boardWidth: 13,
+          boardHeight: 13,
           maxTurnTime: 10,
           firstTurnTime: 60,
-          playersReady: [],
           startRequested: false,
           started: false,
           hazardPercentage: 0,
           teamClustersEnabled: false,
           timeCreated: Timestamp.now(),
         }
+    // A finished game's embedded setup carries the expanded snakes; the lobby
+    // setup must not — snakes are regenerated at the next start.
+    delete (newGameSetup as Partial<StartedGameSetup>).gamePlayers
 
     if (previousSetup?.tournamentMode && newGameSetup.remainingRounds !== undefined) {
       const decremented = newGameSetup.remainingRounds - 1

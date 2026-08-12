@@ -1,17 +1,17 @@
-import { GamePlayer, GameSetup } from "@shared/types/Game"
+import { GameSetup, Team } from "@shared/types/Game"
 import { Timestamp } from "firebase-admin/firestore"
 import { firstTurnDurationSeconds, reasonNotToStart } from "./startGame"
-import { withResolvedIdentities } from "./playerIdentity"
+
+const teams: Team[] = [
+  { id: "centaur1", name: "Centaur One", color: "#ff0000" },
+  { id: "centaur2", name: "Centaur Two", color: "#0000ff" },
+]
 
 const baseSetup = (overrides: Partial<GameSetup> = {}): GameSetup => ({
-  gameType: "snek",
-  gamePlayers: [
-    { id: "human1", type: "human" },
-    { id: "bot1", type: "bot" },
-  ],
+  teams,
+  snakesPerTeam: 3,
   boardWidth: 11,
   boardHeight: 11,
-  playersReady: ["human1"],
   maxTurnTime: 10,
   firstTurnTime: 30,
   startRequested: true,
@@ -20,10 +20,10 @@ const baseSetup = (overrides: Partial<GameSetup> = {}): GameSetup => ({
   ...overrides,
 })
 
-describe("reasonNotToStart (playersReady)", () => {
-  const trigger = { kind: "playersReady" } as const
+describe("reasonNotToStart (startRequested)", () => {
+  const trigger = { kind: "startRequested" } as const
 
-  it("allows a ready, start-requested game", () => {
+  it("allows a start-requested game with two teams", () => {
     expect(reasonNotToStart(baseSetup(), trigger)).toBeNull()
   })
 
@@ -37,20 +37,27 @@ describe("reasonNotToStart (playersReady)", () => {
     )
   })
 
-  it("refuses when a human is not ready", () => {
-    expect(reasonNotToStart(baseSetup({ playersReady: [] }), trigger)).toMatch(/not all/)
+  it("refuses fewer than two teams", () => {
+    expect(reasonNotToStart(baseSetup({ teams: [teams[0]] }), trigger)).toMatch(
+      /fewer than 2 teams/
+    )
+    expect(reasonNotToStart(baseSetup({ teams: [] }), trigger)).toMatch(/fewer than 2 teams/)
   })
 
-  it("ignores bot readiness", () => {
-    const setup = baseSetup({
-      gamePlayers: [{ id: "bot1", type: "bot" }],
-      playersReady: [],
-    })
-    expect(reasonNotToStart(setup, trigger)).toBeNull()
-  })
-
-  it("refuses an empty game", () => {
-    expect(reasonNotToStart(baseSetup({ gamePlayers: [] }), trigger)).toMatch(/no players/)
+  it("rejects boards too small for teams × snakesPerTeam", () => {
+    // 5×5 board has a 3×3 interior = 9 spawn cells; 2 teams × 5 snakes = 10.
+    expect(
+      reasonNotToStart(
+        baseSetup({ boardWidth: 5, boardHeight: 5, snakesPerTeam: 5 }),
+        trigger
+      )
+    ).toMatch(/board too small/)
+    expect(
+      reasonNotToStart(
+        baseSetup({ boardWidth: 5, boardHeight: 5, snakesPerTeam: 4 }),
+        trigger
+      )
+    ).toBeNull()
   })
 
   it("leaves tournament games to the scheduler", () => {
@@ -66,7 +73,6 @@ describe("reasonNotToStart (scheduled)", () => {
     baseSetup({
       tournamentMode: true,
       startRequested: false,
-      playersReady: [],
       scheduledStartTime: Timestamp.fromMillis(scheduledMillis),
       ...overrides,
     })
@@ -107,56 +113,9 @@ describe("firstTurnDurationSeconds", () => {
     expect(firstTurnDurationSeconds(baseSetup({ firstTurnTime: 45 }))).toBe(45)
   })
 
-  it("falls back for setups predating firstTurnTime", () => {
+  it("falls back when no first turn time is set", () => {
     const setup = baseSetup()
     delete setup.firstTurnTime
     expect(firstTurnDurationSeconds(setup)).toBe(60)
-  })
-})
-
-describe("withResolvedIdentities", () => {
-  const directory = {
-    bots: new Map([
-      ["bot1", { id: "bot1", name: "Chris Centaur Dev", emoji: "🐍" } as any],
-    ]),
-    humans: new Map([["human1", { id: "human1", name: "Chris", emoji: "🙂" } as any]]),
-  }
-
-  it("names the original bot instance instead of leaving its ID exposed", () => {
-    const players: GamePlayer[] = [{ id: "bot1", type: "bot" }]
-    expect(withResolvedIdentities(players, directory)[0]).toEqual({
-      id: "bot1",
-      type: "bot",
-      displayName: "Chris Centaur Dev",
-      displayEmoji: "🐍",
-    })
-  })
-
-  it("keeps a clone's per-game overrides", () => {
-    const players: GamePlayer[] = [
-      {
-        id: "bot1#ab12",
-        type: "bot",
-        botRef: "bot1",
-        displayName: "Chris Centaur Dev 2",
-        displayEmoji: "🐲",
-      },
-    ]
-    const [clone] = withResolvedIdentities(players, directory)
-    expect(clone.displayName).toBe("Chris Centaur Dev 2")
-    expect(clone.displayEmoji).toBe("🐲")
-  })
-
-  it("names humans too", () => {
-    const players: GamePlayer[] = [{ id: "human1", type: "human" }]
-    expect(withResolvedIdentities(players, directory)[0].displayName).toBe("Chris")
-  })
-
-  it("leaves players with no record untouched", () => {
-    const players: GamePlayer[] = [{ id: "ghost", type: "bot" }]
-    expect(withResolvedIdentities(players, directory)[0]).toEqual({
-      id: "ghost",
-      type: "bot",
-    })
   })
 })

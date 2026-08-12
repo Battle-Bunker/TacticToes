@@ -1,316 +1,99 @@
 # Overview
 
-Tactic Toes is a multiplayer game platform built with React/TypeScript frontend and Firebase Functions backend. The platform supports multiple game types including Snake (snek), Team Snake (teamsnek), King Snake (kingsnek), Connect 4, Longboi, Tic-tac-toes (tactictoes), Color Clash, and Reversi. Games can be played in real-time with both human players and AI bots, featuring simultaneous turn-based gameplay where conflicts are resolved through "clashes." The system includes MMR-based rankings, session management, and comprehensive game state synchronization.
+Team Snek is a single-game platform: a simultaneous-turn team snake game
+played exclusively by **centaurs** (Firebase-connected snake controllers)
+over a direct Firestore interface. Humans sign in with Google to configure
+games, own centaurs, and spectate/replay — they never play. The stack is a
+React/TypeScript frontend (Vite + MUI) on Firebase Hosting and a Firebase
+Functions backend on Firestore.
 
-# Recent Changes
+# Architecture
 
-## First Turn Cleanup (August 10, 2026)
-- **Bug**: Turn 0's deadline was rewritten several times a second after a game started, and Firebase-connected bots never saw their staged move confirmed on turn 0 (the solid arrow never aligned with the requested one)
-- **Root Cause**: `onGameStarted` fires on *every* setup document update and Firestore triggers are at-least-once, but `started` only becomes visible once the start transaction commits. Concurrent invocations (a ready/start click landing next to a debounced preview regeneration, or a duplicate delivery) each ran `transaction.set()` over the game document — re-randomising the board, restamping turn 0's `startTime`/`endTime`, and resetting `moveStatuses/0.movedPlayerIDs` to empty. Moves already staged against the previous board no longer matched a snake's head, so no client could confirm them
-- **Fix**: One idempotent `startGame()` (`functions/src/utils/startGame.ts`) behind both entry points. It reads the setup document *inside* the transaction (so concurrent starts serialise and the loser sees `started === true`) and creates the game document with `transaction.create()` (so a duplicate start can never overwrite a live board). Turn 0's window is stamped exactly once, from `firstTurnTime ?? FirstMoveTimeoutSeconds`
-- **Invariant**: a turn is written exactly once and never modified, deadline included; `turns` only ever grows by one. Clients can therefore ignore any game-document snapshot that doesn't advance `turns.length`
-- **Simplification**: `onGameStarted` and `processScheduledGameStart` are now thin triggers over the shared start path (~330 lines of duplicated start logic removed), and turn 0's post-commit orchestration is the same `announceTurn()` (`functions/src/utils/announceTurn.ts`) that turns 1..n use from `onMoveCreated` and `processTurnExpirationTask`. Expiration-scheduling failures are logged rather than thrown, so a Cloud Tasks blip no longer skips the bot notifications as well
-- **Player Names**: The start transaction stamps a resolved `displayName`/`displayEmoji` onto every player in the game document's setup snapshot — bot originals and humans included, not just Team Snek clones. The first bot in a team collection was showing its raw document ID to Firebase-connected bots, which read the game doc and nothing else. The lobby `setups/` document is untouched, so "no displayName" still means "original instance" there
-- **Core Files**: `functions/src/utils/startGame.ts`, `functions/src/utils/announceTurn.ts`, `functions/src/utils/playerIdentity.ts`, `functions/src/onGameStarted.ts`, `functions/src/processScheduledGameStart.ts`, `functions/src/onMoveCreated.ts`, `functions/src/processTurnExpirationTask.ts`, `functions/src/timings.ts`
-- **Reference Client**: Chris-Centaur now detects a rewritten turn by content signature and reprocesses it from scratch, replacing a first-turn-specific `endTime` refresh hack
+## Frontend (`frontend/`)
+- React 18 + TypeScript + Vite, Material-UI v6, React Router
+- Context providers: `UserContext` (Google auth, `{ userID, name }`),
+  `GameStateContext` (session/setup/game subscriptions, lobby centaur list),
+  `LadderContext` (rankings)
+- All game state arrives via Firestore `onSnapshot` listeners; spectators
+  watch live games and replay finished ones with the turn scrubber
 
-## Firebase Bot Interface (August 5, 2026)
-- **New Feature**: Bots can connect directly through Firebase instead of the Battlesnake HTTP interface. Full protocol and auth design in `docs/firebase-bot-interface.md`
-- **Auth**: Per-bot API key exchanged for a Firebase custom token (uid `bot:<botId>`, claims `{bot, botId, botOwner}`) via two new callables: `createBotApiKey` (owner-only, stores SHA-256 hash in rules-less `botCredentials` collection) and `exchangeBotApiKey` (public, constant-time verify)
-- **Move Staging**: Bots may stage a move (privateMoves create) as many times as they like before the turn deadline; `processTurn` already resolves with the last staged move before `endTime`. Committing via `moveStatuses.movedPlayerIDs` is optional and enables early turn resolution
-- **Multi-Snake Ownership**: One bot identity acts for all its Team Snek snakes (original + clones). The game-start transaction writes `sessions/{s}/games/{g}/meta/botMap` (`{players: {gamePlayerID: underlyingBotID}}`); rules `get()` it to authorize per-snake writes
-- **Game Discovery**: Game start also writes invite docs at `bots/{botId}/games/{gameId}` so Firebase bots discover games via a single collection listener
-- **Firestore Rules**: New `isBot()`/`botControlsPlayer()` helpers; bot branches added to privateMoves create and moveStatuses update (one snake per commit write); human paths unchanged. privateMoves also allows reading one's OWN moves (playerID-filtered queries only — moves stay hidden from opponents) so bots can confirm what is actually staged. Rules covered by emulator tests during development
-- **Infrastructure**: `bootstrap-gcp-project.sh` grants Service Account Token Creator to the App Engine SA (custom token minting needs `iam.serviceAccounts.signBlob`) and allUsers invoker to the new callables
-- **Core Files**: `functions/src/botAuth.ts`, `functions/src/utils/botGameMeta.ts`, `functions/src/onGameStarted.ts`, `functions/src/processScheduledGameStart.ts`, `functions/src/index.ts`, `firestore.rules`, `scripts/bootstrap-gcp-project.sh`, `docs/firebase-bot-interface.md`
-- **Reference Client**: Chris-Centaur `src/firebase/` implements the bot side (sign-in, invite listener, board translation, staged writes, buffered commit)
+## Backend (`functions/`)
+- Firebase Functions (Node), Firestore triggers + Cloud Tasks
+- `onSessionCreated` writes the default setup; `onGameStarted` /
+  `processScheduledGameStart` funnel into one idempotent `startGame`
+  transaction; `onMoveCreated` resolves turns early;
+  `processTurnExpirationTask` resolves them at the deadline
+- Game engine: `SnekProcessor` (board mechanics) extended by
+  `TeamSnekProcessor` (team scoring/win conditions)
+- Centaur auth callables: `createCentaurApiKey`, `exchangeCentaurApiKey`,
+  `getCentaurApiKeyStatus`; preview generation via `generatePreviewBoard`
 
-## Move Submission Race Condition Fix (March 10, 2026)
-- **Bug**: Intermittent Firebase permission errors when submitting moves in snek games, caused by race conditions between independent Firestore snapshot listeners
-- **Root Causes**: (1) Double-submit from fast clicks/keyboard repeats before React state update propagates, (2) Turn-transition race where game document updates before moveStatuses document exists
-- **Fix**: Three defensive guards added to `handleSquareClick` in `GameGrid.tsx`:
-  1. **Ref-based in-flight lock** (`isSubmittingRef`): Synchronous guard preventing concurrent async submission sequences
-  2. **Per-turn idempotency** (`lastSubmittedMoveNumberRef`): Tracks last submitted moveNumber to block duplicate submissions for the same turn, reset on error to allow retry
-  3. **Consistency gate**: Verifies `latestMoveStatus.moveNumber` matches computed `moveNumber` before submission, preventing writes during turn-transition windows when moveStatuses doc may not exist yet
-- **Scope**: Client-side only, no changes to Firebase rules or Cloud Functions
-- **Core Files Modified**: `frontend/src/pages/GamePage/GameGrid.tsx`
+## Data model (Firestore)
+- `users/{uid}` — `{ name }`
+- `centaurs/{id}` — `{ id, name, owner, public, createdAt }`;
+  `centaurs/{id}/games/{gameId}` — server-written game invites
+- `centaurCredentials/{id}` — API-key hashes (no rules; server-only)
+- `sessions/{id}` — `{ latestGameID, owner, timeCreated }`; owner can
+  abdicate (owner → null, irrevocable)
+- `sessions/{s}/setups/{g}` — lobby config: `teams` (≤10, one per centaur;
+  team id == centaur id), `snakesPerTeam` (1–26), board size, timing,
+  hazards/food/fertile/potions/preview, tournament fields,
+  `startRequested`/`started`
+- `sessions/{s}/games/{g}` — immutable `turns` array plus the setup snapshot
+  with server-expanded `gamePlayers` (`{ id, teamID, letter }`)
+- `.../games/{g}/meta/centaurMap` — `{ players: { [snakeID]: centaurId } }`,
+  the rules' per-snake authorization map
+- `.../games/{g}/moveStatuses/{n}` — commit signals (`movedPlayerIDs`)
+- `.../games/{g}/privateMoves/{id}` — staged moves (own-snake read/create)
+- `rankings/{centaurId}` — `{ currentMMR, gamesPlayed, wins, losses,
+  gameHistory, lastUpdated }`
 
-## Skip Confirmation & Timezone Display (March 4, 2026)
+## Game lifecycle
+1. A session is created (creator becomes owner); the server writes a default
+   setup.
+2. The owner adds teams by adding centaurs (team name/id snapshot the
+   centaur; colour from the palette, editable), tunes config, and presses
+   Start (`startRequested: true`). Tournament mode instead schedules the
+   start and chains rounds.
+3. `startGame` expands teams × `snakesPerTeam` into snakes (ids `centaurId`,
+   `centaurId#2`, …; letters A, B, C…), creates turn 0, `moveStatuses/0`,
+   `meta/centaurMap`, and centaur game invites, then arms the expiration
+   task.
+4. Turn loop: centaurs stage moves (`privateMoves`, last write before
+   `endTime` wins) and optionally commit (`movedPlayerIDs`, binding); turns
+   resolve early when all alive snakes committed, otherwise at the deadline.
+   Unstaged snakes continue in their previous direction.
+5. Game end: team winners are scored, MMR (Elo by team score placement)
+   updates `rankings/{centaurId}`, and the next game's setup is created with
+   teams preserved.
 
-### Skip Confirmation Checkbox
-- **New Feature**: Checkbox in the Rules section to skip the confirmation dialog at game start
-- **Owner-Only Control**: When an owner is set, only the owner can toggle this setting (enforced via `isConfigDisabled` in UI and Firestore security rules)
-- **Behavior**: When enabled, the rules dialog is not shown when the game starts — players go straight to gameplay
-- **Type Changes**: Added `skipConfirmation?: boolean` to `GameSetup`
-- **Firestore Rules**: Added validation (`skipConfirmation` must be bool) and non-owner immutability guard
-- **Core Files Modified**: `shared/types/Game.ts`, `frontend/src/pages/GamePage/GameSetup.tsx`, `frontend/src/pages/GamePage/GameActive.tsx`, `firestore.rules`
+## Centaur interface
+The full wire protocol — API-key exchange, custom-token sign-in
+(`centaur:<id>` uid, `{ centaur: true, centaurId }` claims), invite
+discovery, staging/commit semantics, and the coordinate convention — is
+documented in `docs/firebase-centaur-interface.md`. Chris-Centaur is the
+reference client.
 
-### Scheduled Start Time Timezone Display
-- **New Feature**: The scheduled start time in tournament mode now displays the actual date/time formatted in each client's local timezone
-- **Implementation**: Uses `toLocaleString()` with `dateStyle: 'medium'` and `timeStyle: 'long'` to show a human-readable time with timezone indicator
-- **Display Location**: Shown below the countdown timer in the tournament mode box on the setup page
-- **Core Files Modified**: `frontend/src/pages/GamePage/GameSetup.tsx`
-
-## Room Owner & Tournament Mode (March 4, 2026)
-
-### Room Owner Feature
-- **Owner Assignment**: The player who first creates a session becomes the room owner (stored as `owner` field on the `Session` document)
-- **Access Control**: When an owner is set, only the owner can: change game config (game type, board size, turn time, snek config, team config), remove players, start the game, or modify tournament settings
-- **Non-Owner Capabilities**: Non-owners can still: declare ready, assign themselves to a team, add bots, assign unassigned bots to their own team, remove bots from their own team
-- **Abdicate Ownership**: Owner sees an "Abdicate Ownership" button at the top of setup that sets `owner: null`, reverting to open-access rules
-- **Firestore Security Rules**: Full server-side enforcement — non-owners are blocked from changing restricted fields at the database level
-- **Backward Compatibility**: When `owner` is null/missing, all existing open-access behavior is preserved
-- **Type Changes**: Added `owner?: string | null` to `Session` interface
-- **Core Files Modified**: `shared/types/Game.ts`, `frontend/src/pages/SessionPage.tsx`, `frontend/src/context/GameStateContext.tsx`, `frontend/src/pages/GamePage/GameSetup.tsx`, `frontend/src/components/PlayerConfiguration.tsx`, `firestore.rules`
-
-### Tournament Mode Feature
-- **Tournament Mode Checkbox**: Owner-only control that enables tournament scheduling and disables the normal ready/start workflow
-- **Scheduled Start Time**: Datetime picker with second precision. Sets a Cloud Task that fires `processScheduledGameStart` at the scheduled time
-- **Idempotency Guard**: Scheduled tasks validate that `scheduledStartTime` still matches (within 30s) when they fire — stale tasks from rescheduling are safely ignored
-- **Remaining Rounds**: Configurable number of tournament rounds (default 1). Decremented automatically when each game ends
-- **Interlude Duration**: Seconds between tournament games. When a game ends with `remainingRounds > 0`, the next game's `scheduledStartTime` is set to `now + interludeDuration`
-- **Auto-Stop**: When `remainingRounds` reaches 0, no new scheduled start is set — the tournament stops until the owner intervenes
-- **Backend Flow**: `processScheduledGameStart` bypasses ready checks, starts the game with whatever players are in the room
-- **Game End Chaining**: `createNewGame` returns tournament scheduling metadata; callers (`processTurnExpirationTask`, `onMoveCreated`) enqueue the next game's scheduled start task after transaction commits
-- **Normal Flow Guard**: `onGameStarted` returns early for tournament mode setups, preventing the normal ready/start workflow from interfering
-- **Type Changes**: Added `tournamentMode?: boolean`, `scheduledStartTime?: Timestamp | null`, `remainingRounds?: number`, `interludeDuration?: number` to `GameSetup`
-- **New Cloud Function**: `processScheduledGameStart` — task queue function for starting tournament games
-- **Core Files Modified**: `shared/types/Game.ts`, `functions/src/processScheduledGameStart.ts`, `functions/src/index.ts`, `functions/src/onGameStarted.ts`, `functions/src/utils/createNewGame.ts`, `functions/src/gameprocessors/processTurn.ts`, `functions/src/processTurnExpirationTask.ts`, `functions/src/onMoveCreated.ts`, `frontend/src/pages/GamePage/GameSetup.tsx`, `firestore.rules`
-
-### Infrastructure Note
-- The `processScheduledGameStart` Cloud Task queue must be created in GCP. Update `scripts/bootstrap-gcp-project.sh` if deploying to a new environment to ensure the queue exists and has proper IAM permissions.
-
-## Invulnerability Potions Feature (March 3, 2026)
-- **New Feature**: Added "Potion of (In)vulnerability" item system to Team Snek and King Snek game modes
-- **Mechanic**: Potions randomly spawn on the board. When collected, the collector becomes vulnerable (invulnerability level -1) and all alive allies become invulnerable (invulnerability level +1) for 3 turns
-- **Invulnerability Tiers**: Collision resolution is tiered by `playerInvulnerabilityLevel`. Higher-level snakes categorically win all collision types over lower-level snakes. Same-level snakes use normal battlesnake rules
-- **Body Severing**: When a higher-invulnerability snake's head hits a lower-invulnerability snake's body, the body is severed at the struck segment (struck segment + everything after destroyed)
-- **Vulnerable Collision Trigger**: If any snake with invulnerability < 0 is hit in any way (wall, hazard, self, snake collision), all allies' invulnerability buffs are scheduled to expire at the start of the next turn
-- **Effect Duration**: Effects last 3 full turns of collision resolution (expiryTurn = collectionTurn + 3, expiry runs at end of turn with `<= currentTurn` check)
-- **Configuration**: Game setup includes checkbox to enable and slider for spawn rate (0.05 to 1, step 0.05)
-- **Visual**: Potions rendered with custom icon image. Invulnerable snakes get bright blue outlines, vulnerable snakes get bright red outlines
-- **Type Changes**: Added `ActiveEffect` interface, `invulnerabilityPotions`, `playerInvulnerabilityLevel`, `activeEffects` to `Turn`, `invulnerabilityPotionEnabled` and `invulnerabilityPotionSpawnRate` to `GameSetup`
-- **Backward Compatibility**: All new fields are optional with sensible defaults. Games without potions enabled have zero-cost path through collision detection (fast-paths to normal collision logic when all levels are 0)
-- **Core Files Modified**: `shared/types/Game.ts`, `functions/src/gameprocessors/SnekProcessor.ts`, `frontend/src/pages/GamePage/GameSetup.tsx`, `frontend/src/pages/GamePage/SnakeGameLogic.tsx`
-
-## Fertile Ground Bug Fix (February 24, 2026)
-- **Bug**: Games would hang at "Game starting" when fertile ground was unchecked
-- **Root Cause**: When `fertileTiles` was empty, the Turn object set `fertileTiles: undefined`. Firestore rejects `undefined` values in document writes, causing the `onGameStarted` transaction to crash silently. Toggling fertile ground ON would re-trigger `onGameStarted` with a non-empty `fertileTiles` array, allowing it to succeed.
-- **Fix**: Changed both Turn construction sites in `SnekProcessor.ts` (lines 124 and 585) from `fertileTiles: this.fertileTiles.length > 0 ? this.fertileTiles : undefined` to conditional spread `...(this.fertileTiles.length > 0 ? { fertileTiles: this.fertileTiles } : {})`, which omits the field entirely instead of setting it to `undefined`.
-- **Lesson**: Never assign `undefined` to a field in an object destined for Firestore — either omit the key entirely (conditional spread) or use `null` (if the field should exist but be empty).
-
-## Fertile Ground Clustering Control (March 3, 2026)
-- **New Feature**: Added "Clustering" slider (1-20) to fertile ground configuration
-- **Parameter**: Controls the base frequency of the fractal Perlin noise algorithm. Low clustering (1) = high frequency = scattered tiles. High clustering (20) = low frequency = large blob. Default (10) preserves existing medium-cluster behavior
-- **Frequency Mapping**: Linear interpolation from 0.7553 (clustering=1) to 0.0662 (clustering=20), focused on the useful mid-range of the spectrum
-- **Preview Board**: Generated server-side via `generatePreviewBoard` Firebase callable function. All clients see the same preview via Firestore `onSnapshot`. No client-side generation code — the server reuses `SnekProcessor`'s existing generation methods (player placement, hazard generation, fertile tile Perlin noise, food placement)
-- **Hazard Slider**: Hazard percentage changed from TextField to Slider (0-100%)
-- **Server-Side Preview Architecture**: Only the client that makes a UI change calls `generatePreviewBoard({ sessionID, gameID })` cloud function (debounced 500ms for sliders). The function reads the current `GameSetup` from Firestore, creates a temporary `SnekProcessor`, calls `generatePreviewBoard()`, and writes the result (`presetFertileTiles`, `presetHazards`, `presetPlayerPositions`, `presetFood`) back to Firestore. All clients render from Firestore data via `onSnapshot` without triggering their own regeneration. The triggering client shows a spinning loading overlay while waiting for the server response
-- **`usePreviewBoard` flag**: Boolean on `GameSetup` controlling whether the backend uses the synced preview data at game start. Checked/unchecked via "Use this board" checkbox (synced across clients)
-- **Active Player Filtering**: The cloud function uses `ProcessorClass.filterActivePlayers()` to exclude spectators (unassigned players in team games) from the preview, matching the real game start behavior
-- **Player Placement Preview**: Shows player positions as X marks (colored by team or unique hue). Food shown as orange dots. Generation uses the same `SnekProcessor` methods used at game start (edge placement, team clustering, etc.)
-- **Type Changes**: Added `fertileGroundClustering`, `presetFertileTiles`, `presetHazards`, `presetPlayerPositions`, `presetFood`, `usePreviewBoard` to `GameSetup`
-- **Backward Compatibility**: All fields optional, defaults to 10 clustering (equivalent to previous hardcoded frequency of ~0.3), `usePreviewBoard` false/missing = normal generation
-- **Auto-uncheck**: "Use this board" unchecks on any setting change that triggers preview regeneration
-- **Core Files Modified**: `shared/types/Game.ts`, `functions/src/gameprocessors/SnekProcessor.ts`, `functions/src/generatePreviewBoard.ts`, `functions/src/index.ts`, `frontend/src/components/SnekConfiguration.tsx`, `frontend/src/pages/GamePage/GameSetup.tsx`
-
-## Fertile Ground & Food Spawn Rate (February 18, 2026)
-- **New Feature**: Added "Fertile Ground" option to all snek game variants (snek, teamsnek, kingsnek)
-- **Fertile Ground**: When enabled, procedurally generates clustered green tiles using a fuzzy seed-and-spread algorithm that creates organic, grass-like patterns
-- **Density Control**: Configurable density percentage (5-80%) controls how much of the board becomes fertile
-- **Food Constraint**: When fertile ground is enabled, food only spawns on fertile tiles
-- **Food Spawn Rate**: New independent control (0-5, step 0.25) for expected food spawned per turn, replacing the hardcoded single-food-at-50% default
-- **Type Changes**: Added `fertileGroundEnabled`, `fertileGroundDensity`, `foodSpawnRate` to `GameSetup`; added `fertileTiles` to `Turn`
-- **Backward Compatibility**: All new fields are optional with sensible defaults; existing games unaffected
-- **Core Files Modified**: `shared/types/Game.ts`, `functions/src/gameprocessors/SnekProcessor.ts`, `frontend/src/components/SnekConfiguration.tsx`, `frontend/src/pages/GamePage/GameSetup.tsx`, `frontend/src/pages/GamePage/SnakeGameLogic.tsx`
-
-## First Turn Time Configuration & Setup Cloning (November 12, 2025)
-- **Problem Solved**: Fixed timing mismatch where turn 0 had a hardcoded 60-second endTime but expired after 10 seconds (using maxTurnTime)
-- **New Field**: Added optional `firstTurnTime` field to GameSetup (defaults to 60 seconds)
-- **Backward Compatibility**: Field is optional with nullish coalescing (?? 60) in all read paths to handle legacy setups
-- **General Setup Cloning**: Refactored `createNewGame` to use object spreading - automatically copies ALL setup fields (including future custom fields) from previous game, only resetting per-game state (playersReady, startRequested, started, timeCreated)
-- **Rematch Flow**: `gamePlayers` array is preserved between games, maintaining bots, king designations, and team assignments; players must re-ready to start new game
-- **Core Changes**:
-  - `onGameStarted` now uses `firstTurnTime` for both turn 0 endTime and task scheduling
-  - `createNewGame` uses spread operator (`...previousSetup`) to preserve all configuration including player roster across game iterations
-  - Firestore rules validate `firstTurnTime` as optional positive integer
-- **Deployment Safety**: Legacy GameSetup documents without firstTurnTime automatically default to 60 seconds
-- **Enhanced Logging**: Added comprehensive [onGameStarted], [onMoveCreated], [processTurnExpirationTask] log prefixes for debugging turn progression
-- **Future-Proof**: New custom fields added to GameSetup will automatically carry over to subsequent games without code changes
-
-## Turn Processing Architecture Refactor (November 5, 2025)
-- **Problem Solved**: Eliminated race condition where task scheduling inside Firestore transactions could create duplicate tasks on retry, and where post-transaction operations could fire before commits
-- **Architecture Pattern**: Moved from trigger-based task scheduling to caller-orchestrated post-transaction operations
-- **New Components**:
-  - `processTurnExpirationTask`: Firebase task queue function (v2/tasks) that processes turn expirations
-  - `notifyBots`: Standalone utility function for sending bot move requests via Battlesnake API
-  - `ProcessTurnResult`: Interface returned by processTurn with metadata for post-transaction orchestration
-- **Core Changes**:
-  - `processTurn` now returns metadata (newTurnCreated, turnNumber, duration) instead of scheduling tasks directly
-  - Callers (`onMoveCreated`, `processTurnExpirationTask`) schedule tasks and call bot notifications AFTER transactions commit
-  - Eliminated all Cloud Task queue utilities and their Firestore trigger wrappers
-- **Reliability Improvements**: Transaction retries no longer create duplicate scheduled tasks; bot notifications always see committed state
-- **Removed**: `scheduleTurnExpiration`, `scheduleBotNotifications`, `onTurnExpirationRequest`, `onBotNotificationRequest` triggers
-
-## King Snake Game Mode (October 7, 2025)
-- **New Game Type**: Added "King Snake" (kingsnek) - a team-based battlesnake variant where each team has one designated King
-- **Game Rules**: When a King dies, their entire team is eliminated and team score is set to zero; team score is based solely on the King's snake length
-- **Visual Indicators**: King snakes display a crown emoji (👑) instead of their regular emoji during gameplay
-- **Bot Integration**: Bots receive King information via API to implement King-focused strategies
-- **UI Features**: Added crown checkbox for King selection during game setup; Kings automatically move to first position in team list
-
-# User Preferences
-
-Preferred communication style: Simple, everyday language.
-
-# System Architecture
-
-## Frontend Architecture
-- **Framework**: React 18 with TypeScript and Vite for fast development and building
-- **State Management**: Context API with custom providers for user authentication, game state, and ladder rankings
-- **UI Framework**: Material-UI (MUI) v6 with custom theming and Roboto Mono font
-- **Routing**: React Router DOM for client-side navigation
-- **Real-time Updates**: Firebase SDK with Firestore listeners for live game state synchronization
-- **Styling**: Emotion-based styling with custom components and animations
-
-## Backend Architecture
-- **Runtime**: Firebase Functions with Node.js 18
-- **Database**: Firestore for real-time document storage with offline support via emulators
-- **Authentication**: Firebase Auth with anonymous sign-in and Google OAuth integration
-- **Background Jobs**: Google Cloud Tasks for scheduled turn expirations and bot move processing
-- **Game Logic**: Modular processor pattern with abstract base class and game-specific implementations
-- **API Integration**: Battlesnake API support for external bot integration
-
-## Game Engine Design
-- **Turn-based System**: Simultaneous moves with conflict resolution through "clashes"
-- **State Management**: Immutable game states stored as Firestore documents with turn-by-turn progression
-- **Real-time Synchronization**: Client-side listeners maintain live game state without polling
-- **Bot Integration**: Supports both internal bots and external Battlesnake API bots
-- **MMR System**: Elo-based rating system with placement-based calculations and K-factor adjustments for new players
-
-## Data Architecture
-- **Sessions**: Top-level containers for games with automatic game creation
-- **Games**: Individual game instances with setup, state, and turn history
-- **Rankings**: Per-player MMR tracking across different game types
-- **Move Tracking**: Atomic move submissions with validation and expiration handling
-- **Team Support**: Configurable team-based gameplay with shared objectives
-
-# External Dependencies
-
-## Firebase & Google Cloud
-- **Firebase Firestore**: Primary database for real-time game state, user data, and rankings
-- **Firebase Functions**: Serverless backend for game logic, turn processing, and bot integration
-- **Firebase Auth**: User authentication with anonymous and Google sign-in
-- **Firebase Hosting**: Static site hosting with SPA routing support
-- **Google Cloud Tasks**: Scheduled job processing for turn timeouts and bot moves
-- **Google Cloud Logging**: Centralized logging and monitoring
-
-## Frontend Libraries
-- **@mui/material**: Comprehensive React component library with theming
-- **react-router-dom**: Client-side routing and navigation
-- **react-color**: Color picker components for user customization
-- **lucide-react**: Icon library for UI elements
-- **tinycolor2**: Color manipulation utilities
-
-## Development Tools
-- **TypeScript**: Static typing across frontend and backend
-- **ESLint**: Code quality and consistency enforcement
-- **Jest**: Unit testing framework with Firebase Functions test utilities
-- **Vite**: Fast frontend build tool with HMR support
-- **Firebase CLI**: Local development with emulator suite
-
-## External APIs
-- **Battlesnake API**: Integration for external bot players with standard move/game endpoints
-- **Google OAuth**: Social authentication for user accounts
-
-# Infrastructure & Deployment
-
-## GCP Project Bootstrap Script
-
-**Location**: `scripts/bootstrap-gcp-project.sh`
-
-When setting up a new Firebase/GCP project (e.g., a new staging environment), run this script to configure all required APIs and IAM permissions in one step:
+# Development
 
 ```bash
-./scripts/bootstrap-gcp-project.sh <PROJECT_ID>
+firebase emulators:start          # Firestore/Functions/Auth/Hosting emulators
+cd frontend && npm install && npm run dev
+cd functions && npm install && npm run build   # emulator does NOT auto-rebuild TS
+cd functions && npm test
 ```
 
-**IMPORTANT: Maintaining This Script**
+Deployment, per-project GCP bootstrap (`scripts/bootstrap-gcp-project.sh`),
+callable IAM grants (`scripts/grant-callable-invokers.sh`), and the
+`turn-expirations` Cloud Tasks queue are covered in `README.md`.
 
-The Firebase CLI does NOT automatically grant IAM permissions when deploying. If you add new GCP/Firebase features to this project, you MUST update the bootstrap script to include any new required permissions. Otherwise, future deployments to new environments will fail with permission errors that require time-consuming troubleshooting.
+Firebase project aliases (`.firebaserc`): `production` = tactic-toes-tuke,
+`staging` = tactic-toes-cyphid-dev.
 
-**When to update the script:**
-- Adding a new Firebase service (e.g., Storage, Realtime Database)
-- Using a new Google Cloud API (e.g., Vision API, Translate API)
-- Adding new Cloud Functions that require additional permissions
-- Changing from Gen1 to Gen2 Functions (different service accounts)
-- Adding Secret Manager secrets
-- Adding new Cloud Tasks queues or Pub/Sub topics
-
-**Current GCP resources requiring permissions:**
-- Firebase Functions (Gen1 and Gen2)
-- Firestore
-- Firebase Hosting
-- Firebase Auth
-- Google Cloud Tasks (turn-expiration-queue)
-- Artifact Registry (for function container images)
-- Cloud Build (for function deployment)
-- Cloud Logging
-- Pub/Sub (for Eventarc triggers)
-- Cloud Run (for Gen2 functions)
-
-## Organization vs Standalone Project IAM Differences
-
-**Key Insight (February 24, 2026):** Projects under a GCP Organization enforce stricter IAM than standalone ("No organisation") projects. Specifically:
-
-1. **Service account self-impersonation**: The Compute SA (used by Gen2 functions) must be explicitly granted `roles/iam.serviceAccountUser` on itself to schedule Cloud Tasks. Standalone projects allow this implicitly.
-2. **Cloud Run service-level invoker**: Project-level `roles/run.invoker` may not be sufficient for organization projects. Service-level `run.invoker` grants on specific Cloud Run services (e.g., `processturnexpirationtask`) may be required.
-3. **Domain Restricted Sharing**: Organization policies may block `allUsers` grants needed for callable functions.
-
-The bootstrap script (`scripts/bootstrap-gcp-project.sh`) now handles all three scenarios. For first-time setups, run the script twice — once before deploy and once after (Step 11 requires the Cloud Run services to exist).
-
-## Organization Policy: Domain Restricted Sharing
-
-**Problem:** If your GCP project is under an organization with Domain Restricted Sharing enabled (`iam.allowedPolicyMemberDomains`), Firebase callable functions will fail with CORS errors. This is because:
-
-1. Firebase callable functions (like `wakeBot`) need `allUsers` to have the Cloud Functions Invoker role
-2. The organization policy blocks granting permissions to `allUsers` (anyone on the internet)
-3. GCP IAM and Firebase Auth are separate systems - even though users authenticate with Firebase, the browser request must first be allowed at the GCP IAM layer
-
-**Symptoms:**
-- CORS errors when calling callable functions from the browser
-- Error message: "User allUsers is not in permitted organization"
-- Bot health checks fail immediately
-
-**Solution:** Remove the domain restriction at the organization level:
-
-```bash
-# Find your organization ID
-gcloud organizations list
-
-# Remove the restriction (replace ORG_ID with your org number)
-gcloud org-policies delete iam.allowedPolicyMemberDomains --organization=ORG_ID
-
-# Wait up to 15 minutes for propagation, then grant public access
-gcloud functions add-iam-policy-binding wakeBot \
-  --region=us-central1 \
-  --member=allUsers \
-  --role=roles/cloudfunctions.invoker \
-  --project=PROJECT_ID
-```
-
-**Security Note:** This allows the HTTP request to reach the function, but the function code still validates Firebase Auth tokens via `context.auth`. The `allUsers` permission is at the network layer, not the application layer.
-
-**Firebase Project Aliases** (defined in `.firebaserc`):
-- `production`: tactic-toes-tuke (live production environment)
-- `staging`: tactic-toes-cyphid-dev (development/testing environment)
-
-## Environment-Specific Configuration
-
-Frontend Firebase config is determined by environment variables. See `frontend/src/firebaseConfig.ts` for the configuration loading logic. Set the following environment variables in Replit for staging development:
-- `VITE_FIREBASE_API_KEY`
-- `VITE_FIREBASE_AUTH_DOMAIN`
-- `VITE_FIREBASE_PROJECT_ID`
-- `VITE_FIREBASE_STORAGE_BUCKET`
-- `VITE_FIREBASE_MESSAGING_SENDER_ID`
-- `VITE_FIREBASE_APP_ID`
+# Conventions
+- Never assign `undefined` to a field bound for Firestore — omit the key
+  (conditional spread) or use `null`.
+- Turns are append-only and immutable, deadline included; clients ignore any
+  game snapshot that doesn't advance `turns.length`.
+- Firebase deploys do not repair IAM: new callables need the `allUsers`
+  invoker grant added to both scripts.

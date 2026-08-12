@@ -1,9 +1,8 @@
 import * as functions from "firebase-functions/v1"
 import * as logger from "firebase-functions/logger"
 import * as admin from "firebase-admin"
-import { GameSetup, Session } from "./types/Game" // Adjust the import path as necessary
+import { Session } from "./types/Game"
 import { createNewGame } from "./utils/createNewGame"
-import { FieldValue } from "firebase-admin/firestore"
 
 export const onSessionCreated = functions.firestore
   .document("sessions/{sessionID}")
@@ -14,21 +13,7 @@ export const onSessionCreated = functions.firestore
     logger.info(`making new session: ${sessionID}`, { sessionData })
 
     await admin.firestore().runTransaction(async (transaction) => {
-      const defaultSetup: GameSetup = {
-        gameType: "snek",
-        gamePlayers: [],
-        boardWidth: 13,
-        boardHeight: 13,
-        playersReady: [],
-        maxTurnTime: 10,
-        firstTurnTime: 60,
-        startRequested: false,
-        started: false,
-        hazardPercentage: 0,
-        teamClustersEnabled: false,
-        timeCreated: FieldValue.serverTimestamp(),
-      }
-      await createNewGame(transaction, sessionID, defaultSetup)
+      await createNewGame(transaction, sessionID, null)
     })
 
     logger.info(`Finished creating session ${sessionID}.`)

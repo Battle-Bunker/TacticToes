@@ -1,20 +1,9 @@
 import { Box, IconButton, Typography, Slider } from "@mui/material"
-import { GamePlayer, GameState, Player } from "@shared/types/Game"
-import {
-  addDoc,
-  arrayUnion,
-  collection,
-  doc,
-  serverTimestamp,
-  updateDoc,
-} from "firebase/firestore"
+import { GamePlayer, GameState } from "@shared/types/Game"
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { useGameStateContext } from "../../context/GameStateContext"
-import { useUser } from "../../context/UserContext"
-import { db } from "../../firebaseConfig"
 import ClashDialog from "./ClashDialog"
 import GridCell from "./GridCell"
-import OtherGameLogic from "./OtherGameLogic"
 import SnakeGameLogic from "./SnakeGameLogic"
 import {
   ArrowBack,
@@ -22,12 +11,9 @@ import {
   FirstPage,
   LastPage,
 } from "@mui/icons-material"
-import { debugWarn, debugError } from "../../utils/debugLogger"
 
 export interface GameLogicProps {
-  gameState: GameState | null
-  players: Player[]
-  gridWidth: number
+  gameState: GameState
   cellSize: number
   selectedTurnIndex: number
 }
@@ -40,25 +26,12 @@ export interface ClashInfo {
 export interface GameLogicReturn {
   cellContentMap: { [index: number]: JSX.Element }
   cellBackgroundMap: { [index: number]: string }
-  cellAllowedMoveMap: { [index: number]: boolean }
   clashesAtPosition: { [index: number]: ClashInfo }
 }
 
 const GameGrid: React.FC = () => {
-  const {
-    gameState,
-    gameSetup,
-    players,
-    hasSubmittedMove,
-    selectedSquare,
-    setSelectedSquare,
-    sessionName,
-    gameID,
-    latestTurn,
-    latestMoveStatus,
-  } = useGameStateContext()
+  const { gameState, latestTurn } = useGameStateContext()
 
-  const user = useUser()
   const winners = latestTurn?.winners || []
   const gridWidth = gameState?.setup.boardWidth || 8
   const gridHeight = gameState?.setup.boardHeight || 8
@@ -77,8 +50,6 @@ const GameGrid: React.FC = () => {
     GameLogicReturn | undefined
   >()
   const gridRef = useRef<HTMLDivElement>(null)
-  const isSubmittingRef = useRef<boolean>(false)
-  const lastSubmittedMoveNumberRef = useRef<number>(-1)
   const [containerWidth, setContainerWidth] = useState<number>(0)
 
   const cellSize = containerWidth ? containerWidth / gridWidth : 0
@@ -96,172 +67,43 @@ const GameGrid: React.FC = () => {
     }
   }, [gridWidth, selectedTurnIndex])
 
-  const handleSquareClick = async (index: number) => {
-    if (isSubmittingRef.current) {
-      debugWarn('GameGrid', 'move blocked: submission already in flight', { index })
-      return
-    }
+  const handleSquareClick = (index: number) => {
+    if (!gameState) return
 
-    if (!latestTurn || !gameState) return
-    if (!gameSetup?.started) return
-
-    const allowedMoves = latestTurn.allowedMoves[user.userID] || []
-    if (!allowedMoves.includes(index)) return
-
-    setSelectedSquare(index)
-
-    // Handle clash
     const clash = gameLogicReturn?.clashesAtPosition[index]
-    if (clash) {
-      const playersInvolved = gameSetup.gamePlayers.filter((player) =>
-        clash.playerIDs.includes(player.id),
-      )
-      setClashReason(clash.reason)
-      setClashPlayersList(playersInvolved)
-      setOpenClashDialog(true)
-    }
+    if (!clash) return
 
-    // Submit move
-    if (!gameID || !sessionName) return
-
-    const moveNumber = gameState.turns.length - 1
-
-    if (latestMoveStatus?.moveNumber !== moveNumber) {
-      debugWarn('GameGrid', 'move blocked: moveStatus/gameState out of sync', {
-        moveStatusNumber: latestMoveStatus?.moveNumber,
-        gameStateMoveNumber: moveNumber,
-      })
-      return
-    }
-
-    if (lastSubmittedMoveNumberRef.current === moveNumber) {
-      debugWarn('GameGrid', 'move blocked: duplicate submission for turn', { moveNumber })
-      return
-    }
-
-    isSubmittingRef.current = true
-    lastSubmittedMoveNumberRef.current = moveNumber
-    try {
-      const moveRef = collection(
-        db,
-        `sessions/${sessionName}/games/${gameID}/privateMoves`,
-      )
-
-      await addDoc(moveRef, {
-        gameID,
-        moveNumber,
-        playerID: user.userID,
-        move: index,
-        timestamp: serverTimestamp(),
-      })
-
-      const moveStatusDocRef = doc(
-        db,
-        `sessions/${sessionName}/games/${gameID}/moveStatuses/${moveNumber}`,
-      )
-
-      await updateDoc(moveStatusDocRef, {
-        movedPlayerIDs: arrayUnion(user.userID),
-      })
-    } catch (error) {
-      lastSubmittedMoveNumberRef.current = -1
-      debugError('GameGrid', 'move submission failed', {
-        errorMessage: error instanceof Error ? error.message : 'Unknown error',
-        moveNumber,
-        move: index,
-      })
-    } finally {
-      isSubmittingRef.current = false
-    }
+    const playersInvolved = gameState.setup.gamePlayers.filter((player) =>
+      clash.playerIDs.includes(player.id),
+    )
+    setClashReason(clash.reason)
+    setClashPlayersList(playersInvolved)
+    setOpenClashDialog(true)
   }
 
-  const disabled = hasSubmittedMove
-
-  // Update selectedTurnIndex and turnCount when gameState.turns.length changes
+  // Follow the latest turn as new turns arrive
   useEffect(() => {
     if (gameState?.turns) {
       const newTurnCount = gameState.turns.length
       if (newTurnCount !== turnCount) {
         setTurnCount(newTurnCount)
-        setSelectedTurnIndex(newTurnCount - 1) // Automatically go to the latest turn
+        setSelectedTurnIndex(newTurnCount - 1)
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gameState?.turns?.length])
 
-  // Update gameLogicReturn when relevant variables change
   useEffect(() => {
-    if (gameState && players) {
-      const gameLogicProps = {
-        gameState,
-        players,
-        gridWidth,
-        cellSize,
-        selectedTurnIndex: selectedTurnIndex >= 0 ? selectedTurnIndex : 0,
-      }
-
+    if (gameState) {
       setGameLogicReturn(
-        gameState.setup.gameType === "snek" || gameState.setup.gameType === "teamsnek" || gameState.setup.gameType === "kingsnek"
-          ? SnakeGameLogic(gameLogicProps)
-          : OtherGameLogic(gameLogicProps),
+        SnakeGameLogic({
+          gameState,
+          cellSize,
+          selectedTurnIndex: selectedTurnIndex >= 0 ? selectedTurnIndex : 0,
+        }),
       )
     }
-  }, [gameState, players, gridWidth, cellSize, selectedTurnIndex])
-
-  // Filter allowed moves for the current user
-  const currentUserAllowedMoveMap: { [index: number]: boolean } = {}
-  if (latestTurn && user.userID) {
-    const userAllowedMoves = latestTurn.allowedMoves[user.userID] || []
-    userAllowedMoves.forEach((move) => {
-      currentUserAllowedMoveMap[move] = true
-    })
-  }
-
-  // Check if this is a snek game mode
-  const isSnekGame = gameState?.setup.gameType === "snek" ||
-    gameState?.setup.gameType === "teamsnek" ||
-    gameState?.setup.gameType === "kingsnek"
-
-  // Arrow key controls for snek game modes
-  useEffect(() => {
-    if (!isSnekGame || !latestTurn || !gameState || disabled) return
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      const arrowKeys = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"]
-      if (!arrowKeys.includes(event.key)) return
-
-      event.preventDefault()
-
-      const headPosition = latestTurn.playerPieces[user.userID]?.[0]
-      if (headPosition === undefined) return
-
-      const allowedMoves = latestTurn.allowedMoves[user.userID] || []
-      let targetIndex: number | null = null
-
-      switch (event.key) {
-        case "ArrowUp":
-          targetIndex = headPosition - gridWidth
-          break
-        case "ArrowDown":
-          targetIndex = headPosition + gridWidth
-          break
-        case "ArrowLeft":
-          targetIndex = headPosition - 1
-          break
-        case "ArrowRight":
-          targetIndex = headPosition + 1
-          break
-      }
-
-      if (targetIndex !== null && allowedMoves.includes(targetIndex)) {
-        handleSquareClick(targetIndex)
-      }
-    }
-
-    window.addEventListener("keydown", handleKeyDown)
-    return () => window.removeEventListener("keydown", handleKeyDown)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isSnekGame, latestTurn, gameState, disabled, user.userID, gridWidth])
+  }, [gameState, cellSize, selectedTurnIndex])
 
   // Navigation handlers
   const handlePrevTurn = () => {
@@ -288,7 +130,6 @@ const GameGrid: React.FC = () => {
     }
   }
 
-  // Handle slider change
   const handleSliderChange = (_event: Event, newValue: number | number[]) => {
     setSelectedTurnIndex(newValue as number)
   }
@@ -306,8 +147,6 @@ const GameGrid: React.FC = () => {
           maxWidth: 600,
           margin: "0 auto",
           border: "2px solid black",
-          opacity: disabled ? 0.5 : 1,
-          pointerEvents: disabled ? "none" : "auto",
           boxSizing: "border-box",
         }}
       >
@@ -322,11 +161,8 @@ const GameGrid: React.FC = () => {
               selectedTurnIndex === turnCount - 1 &&
               winningSquaresSet.has(index)
             }
-            isLatestMove={latestTurn?.moves[user.userID] === index}
-            isAllowedMove={currentUserAllowedMoveMap[index]}
-            isSelected={selectedSquare === index}
+            hasClash={Boolean(gameLogicReturn.clashesAtPosition[index])}
             onClick={handleSquareClick}
-            disabled={disabled}
           />
         ))}
       </Box>
@@ -334,16 +170,16 @@ const GameGrid: React.FC = () => {
       {/* Turn navigation controls with slider */}
       <Box
         sx={{
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          width: '100%',
-          margin: '0 auto',
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          width: "100%",
+          margin: "0 auto",
           mt: 2,
         }}
       >
         {/* Slider */}
-        <Box sx={{ width: '100%', px: 2 }}>
+        <Box sx={{ width: "100%", px: 2 }}>
           <Slider
             value={selectedTurnIndex}
             onChange={handleSliderChange}
@@ -391,7 +227,7 @@ const GameGrid: React.FC = () => {
         onClose={() => setOpenClashDialog(false)}
         clashReason={clashReason}
         clashPlayersList={clashPlayersList}
-        players={players}
+        teams={gameState?.setup.teams || []}
       />
     </>
   )

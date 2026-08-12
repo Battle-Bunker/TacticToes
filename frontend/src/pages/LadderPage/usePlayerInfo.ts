@@ -3,68 +3,54 @@
 import { useState, useEffect, useRef } from 'react'
 import { collection, query, where, onSnapshot } from 'firebase/firestore'
 import { db } from '../../firebaseConfig'
-import { Player } from '@shared/types/Game'
+import { Centaur } from '@shared/types/Game'
+import { baseCentaurId } from './utils'
 
-export const usePlayerInfo = (playerIDs: string[]) => {
-    const [players, setPlayers] = useState<{ [id: string]: Player }>({})
-    const [loadingPlayers, setLoadingPlayers] = useState(true)
-    const previousPlayers = useRef(players)
+// Resolves centaur docs for a set of ids. Snake-id suffixes (`#k`) are
+// stripped, and the returned map is keyed by centaur id.
+export const usePlayerInfo = (centaurIDs: string[]) => {
+    const [centaurs, setCentaurs] = useState<{ [id: string]: Centaur }>({})
+    const [loadingCentaurs, setLoadingCentaurs] = useState(true)
+    const previousCentaurs = useRef(centaurs)
+
+    const uniqueIDs = Array.from(
+        new Set(centaurIDs.map(baseCentaurId))
+    ).sort()
+    const idsKey = uniqueIDs.join(',')
 
     useEffect(() => {
-        if (playerIDs.length === 0) {
-            setLoadingPlayers(false)
+        if (uniqueIDs.length === 0) {
+            setLoadingCentaurs(false)
             return
         }
 
-        setLoadingPlayers(true)
-        const uniqueIDs = Array.from(new Set(playerIDs))
+        setLoadingCentaurs(true)
         const unsubscribers: (() => void)[] = []
 
-        // Batch IDs in groups of 10 (Firestore limit)
+        // Batch IDs in groups of 10 (Firestore `in` limit)
         const batchSize = 10
-        const batches = []
         for (let i = 0; i < uniqueIDs.length; i += batchSize) {
-            batches.push(uniqueIDs.slice(i, i + batchSize))
+            const batchIDs = uniqueIDs.slice(i, i + batchSize)
+            const centaursQuery = query(
+                collection(db, 'centaurs'),
+                where('__name__', 'in', batchIDs)
+            )
+            const unsubscribe = onSnapshot(centaursQuery, (snapshot) => {
+                const newCentaurs = { ...previousCentaurs.current }
+                snapshot.forEach((doc) => {
+                    newCentaurs[doc.id] = { ...(doc.data() as Centaur), id: doc.id }
+                })
+                setCentaurs(newCentaurs)
+                previousCentaurs.current = newCentaurs
+                setLoadingCentaurs(false)
+            })
+            unsubscribers.push(unsubscribe)
         }
-
-        batches.forEach(batchIDs => {
-            // Users collection subscription
-            const usersQuery = query(
-                collection(db, 'users'),
-                where('__name__', 'in', batchIDs)
-            )
-            const unsubscribeUsers = onSnapshot(usersQuery, (snapshot) => {
-                const newPlayers: { [id: string]: Player } = { ...previousPlayers.current }
-                snapshot.forEach((doc) => {
-                    newPlayers[doc.id] = { ...(doc.data() as Player), id: doc.id }
-                })
-                setPlayers(newPlayers)
-                previousPlayers.current = newPlayers
-                setLoadingPlayers(false)
-            })
-            unsubscribers.push(unsubscribeUsers)
-
-            // Bots collection subscription
-            const botsQuery = query(
-                collection(db, 'bots'),
-                where('__name__', 'in', batchIDs)
-            )
-            const unsubscribeBots = onSnapshot(botsQuery, (snapshot) => {
-                const newPlayers: { [id: string]: Player } = { ...previousPlayers.current }
-                snapshot.forEach((doc) => {
-                    newPlayers[doc.id] = { ...(doc.data() as Player), id: doc.id }
-                })
-                setPlayers(newPlayers)
-                previousPlayers.current = newPlayers
-                setLoadingPlayers(false)
-            })
-            unsubscribers.push(unsubscribeBots)
-        })
 
         return () => {
             unsubscribers.forEach(unsubscribe => unsubscribe())
         }
-    }, [playerIDs.join(',')]) // Only reset subscription when IDs actually change
+    }, [idsKey]) // Only reset subscriptions when IDs actually change
 
-    return { players, loadingPlayers }
+    return { centaurs, loadingCentaurs }
 }
