@@ -603,18 +603,30 @@ done
 # Gen2 functions run as Cloud Run services. Cloud Tasks must be able to invoke
 # them, and under an Organization the project-level run.invoker grant is not
 # always sufficient.
+# Both runtime identities need this, not just the compute one. Cloud Tasks
+# invokes the service with an OIDC token minted for whichever account enqueued
+# the task, and the enqueues come from the gen1 functions, which run as the App
+# Engine account. Granting only the compute account leaves every dispatch
+# rejected with PERMISSION_DENIED(7): HTTP status code 403 -- visible only in
+# `gcloud tasks list`, since the enqueue itself succeeds and the task then sits
+# in the queue retrying with backoff.
 GEN2_SERVICES=("processturnexpirationtask" "processscheduledgamestart")
+INVOKER_SAS=("$COMPUTE_SA")
+[ "$HAVE_APPENGINE_SA" = true ] && INVOKER_SAS+=("$APPENGINE_SA")
+
 for service in "${GEN2_SERVICES[@]}"; do
-    if gcloud run services add-iam-policy-binding "$service" \
-        --region="$REGION" \
-        --member="serviceAccount:$COMPUTE_SA" \
-        --role="roles/run.invoker" \
-        --project="$PROJECT_ID" \
-        --quiet >/dev/null 2>&1; then
-        echo "  compute run.invoker -> $service"
-    else
-        echo "  skipped $service (not deployed yet)"
-    fi
+    for sa in "${INVOKER_SAS[@]}"; do
+        if gcloud run services add-iam-policy-binding "$service" \
+            --region="$REGION" \
+            --member="serviceAccount:$sa" \
+            --role="roles/run.invoker" \
+            --project="$PROJECT_ID" \
+            --quiet >/dev/null 2>&1; then
+            echo "  run.invoker $sa -> $service"
+        else
+            echo "  skipped $service for $sa (service not deployed yet)"
+        fi
+    done
 done
 
 # Cloud Tasks queues, named after the exported task functions verbatim.
