@@ -1,7 +1,7 @@
 import React, { useMemo } from "react"
 import { Checkbox, FormControl, FormControlLabel, IconButton, Slider, TextField, Typography, Box } from "@mui/material"
 import { RefreshCw } from "lucide-react"
-import { Team } from "../../../shared/types/Game"
+import { Team } from "@shared/types/Game"
 import { expandTeams } from "../utils/expandTeams"
 
 export interface BoardPresetData {
