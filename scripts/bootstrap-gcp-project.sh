@@ -617,12 +617,41 @@ for service in "${GEN2_SERVICES[@]}"; do
     fi
 done
 
-# NOTE: Cloud Tasks queues are NOT pre-created here. Firebase creates a queue
-# per task function on deploy, named after the exported function verbatim
-# (processTurnExpirationTask, processScheduledGameStart) in the function's
-# region, configured from the onTaskDispatched options in source. A manually
-# created queue with a different name is simply unused; one with a MATCHING name
-# is worse, because deploy overwrites its config and purges it if disabled.
+# Cloud Tasks queues, named after the exported task functions verbatim.
+#
+# Firebase does create these on deploy, so pre-creating them looks redundant --
+# and an earlier version of this script left it to the deploy for that reason.
+# That was wrong in one specific and costly way: if the queue-creating step of a
+# deploy fails (for us, a 403 before the deployer held roles/cloudtasks.admin),
+# later deploys skip the task function as unchanged and never retry the creation.
+# The functions then deploy and run perfectly while every enqueue fails with
+#   Queue does not exist.
+# and because announceTurn logs enqueue failures rather than throwing, games
+# simply stop progressing after their first turn with nothing surfaced.
+#
+# Creating them here is idempotent and cheap. Deploy still owns their config --
+# it overwrites rate limits and retries from the onTaskDispatched options in
+# source on every deploy, which is why none are set here.
+TASK_QUEUES=("processTurnExpirationTask" "processScheduledGameStart")
+
+for queue in "${TASK_QUEUES[@]}"; do
+    if gcloud tasks queues describe "$queue" \
+           --location="$REGION" --project="$PROJECT_ID" >/dev/null 2>&1; then
+        QUEUE_STATE="$(gcloud tasks queues describe "$queue" \
+            --location="$REGION" --project="$PROJECT_ID" --format='value(state)')"
+        echo "  queue $queue exists (state: $QUEUE_STATE)"
+        if [ "$QUEUE_STATE" = "PAUSED" ] || [ "$QUEUE_STATE" = "DISABLED" ]; then
+            echo "    WARNING: queue is $QUEUE_STATE -- tasks will not dispatch." >&2
+            echo "    Resume with: gcloud tasks queues resume $queue --location=$REGION" >&2
+        fi
+    else
+        echo "  creating queue $queue..."
+        gcloud tasks queues create "$queue" \
+            --location="$REGION" --project="$PROJECT_ID" --quiet >/dev/null \
+            && echo "    created (allow ~1 minute before it accepts tasks)" \
+            || echo "    WARNING: could not create $queue" >&2
+    fi
+done
 
 section "Bootstrap Complete"
 
