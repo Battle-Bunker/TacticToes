@@ -25,7 +25,6 @@ interface SnakeGameState {
   vulnerableSnakesCollided: Set<string>
   
   // Computed data
-  newAllowedMoves: { [playerID: string]: number[] }
   newScores: { [playerID: string]: number }
 }
 
@@ -132,13 +131,6 @@ export abstract class SnekProcessor extends GameProcessor {
       ? this.gameSetup.presetFood
       : this.initializeFood(boardWidth, boardHeight, playerPieces, hazards)
 
-    // Initialize allowed moves
-    const allowedMoves = this.calculateAllowedMoves(
-      playerPieces,
-      boardWidth,
-      boardHeight,
-    )
-
     // Initialize player health
     const initialHealth: { [playerID: string]: number } = {}
     gamePlayers.forEach((player) => {
@@ -165,7 +157,6 @@ export abstract class SnekProcessor extends GameProcessor {
       food: food,
       hazards: hazards,
       playerPieces: playerPieces,
-      allowedMoves: allowedMoves,
       walls: walls,
       clashes: [],
       moves: {},
@@ -259,7 +250,6 @@ export abstract class SnekProcessor extends GameProcessor {
       deadPlayers: new Set(),
       clashes: [],
       vulnerableSnakesCollided: new Set(),
-      newAllowedMoves: {},
       newScores: {}
     }
   }
@@ -852,13 +842,6 @@ export abstract class SnekProcessor extends GameProcessor {
   protected abstract calculateWinners(gameState: SnakeGameState): Winner[]
 
   protected createNewTurn(currentTurn: Turn, gameState: SnakeGameState, winners: Winner[]): Turn {
-    // Update allowed moves
-    gameState.newAllowedMoves = this.calculateAllowedMoves(
-      gameState.newSnakes,
-      gameState.boardWidth,
-      gameState.boardHeight,
-    )
-
     // Update scores based on current snake lengths
     Object.keys(gameState.newSnakes).forEach((playerID) => {
       // If player is dead, score should be 0
@@ -885,7 +868,6 @@ export abstract class SnekProcessor extends GameProcessor {
       food: gameState.newFood,
       hazards: gameState.newHazards,
       playerPieces: gameState.newSnakes,
-      allowedMoves: gameState.newAllowedMoves,
       clashes: gameState.clashes,
       moves: gameState.playerMoves,
       winners: winners,
@@ -1101,29 +1083,6 @@ export abstract class SnekProcessor extends GameProcessor {
     }
 
     return Array.from(wallPositions)
-  }
-
-  private calculateAllowedMoves(
-    playerPieces: { [playerID: string]: number[] },
-    boardWidth: number,
-    boardHeight: number,
-  ): { [playerID: string]: number[] } {
-    const allowedMoves: { [playerID: string]: number[] } = {}
-
-    Object.keys(playerPieces).forEach((playerID) => {
-      const snake = playerPieces[playerID]
-      const headIndex = snake[0]
-      const adjacentIndices = this.getAdjacentIndices(
-        headIndex,
-        boardWidth,
-        boardHeight,
-      )
-
-      // Allow all adjacent moves, including potentially unsafe ones
-      allowedMoves[playerID] = adjacentIndices
-    })
-
-    return allowedMoves
   }
 
   private getAdjacentIndices(

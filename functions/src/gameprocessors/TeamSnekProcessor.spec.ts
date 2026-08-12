@@ -46,7 +46,6 @@ const mkTurn = (
     food: [],
     hazards: [],
     playerPieces,
-    allowedMoves: {},
     walls: [],
     clashes: [],
     moves: {},
@@ -180,7 +179,7 @@ describe("TeamSnekProcessor win conditions", () => {
 })
 
 describe("TeamSnekProcessor per-turn scoring", () => {
-  it("writes team scores, individual scores and the team scoring unit", () => {
+  it("writes team scores and individual scores", () => {
     // 9x9 board: index = y * 9 + x.
     const setup = mkSetup({
       snakesPerTeam: 2,
@@ -206,7 +205,6 @@ describe("TeamSnekProcessor per-turn scoring", () => {
     ])
 
     expect(next.winners).toEqual([])
-    expect(next.scoringUnit).toBe("team")
     expect(next.scores).toEqual({ t1: 4, "t1#2": 3, t2: 3, "t2#2": 3 })
     expect(next.teamScores).toEqual({ t1: 7, t2: 6 })
   })

@@ -53,7 +53,6 @@ const mkTurn = (
     food: [],
     hazards: [],
     playerPieces,
-    allowedMoves: {},
     walls: [],
     clashes: [],
     moves: {},

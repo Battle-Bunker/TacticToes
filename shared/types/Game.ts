@@ -114,13 +114,11 @@ export interface Turn {
   food: number[]
   hazards: number[]
   playerPieces: { [playerID: string]: number[] } // Snake body, index 0 = head
-  allowedMoves: { [playerID: string]: number[] }
   walls: number[]
   clashes: Clash[]
   moves: { [playerID: string]: number } // Move actually applied for each player
   winners: Winner[]
   teamScores?: { [teamID: string]: number }
-  scoringUnit?: "individual" | "team"
   teamClusterFallback?: boolean // Team clusters requested but fell back
   fertileTiles?: number[]
   invulnerabilityPotions?: number[]

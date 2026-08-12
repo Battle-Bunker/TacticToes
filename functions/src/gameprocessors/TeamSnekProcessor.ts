@@ -138,10 +138,7 @@ export class TeamSnekProcessor extends SnekProcessor {
     // Update the turn with new scores
     newTurn.scores = playerScores;
     newTurn.teamScores = teamScores;
-    
-    // Set the scoring unit for team-based display
-    newTurn.scoringUnit = 'team';
-    
+
     return newTurn;
   }
 
