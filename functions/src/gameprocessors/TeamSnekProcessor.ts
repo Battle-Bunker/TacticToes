@@ -94,8 +94,7 @@ export class TeamSnekProcessor {
   }
 
   private initializeTurn(): Turn {
-    const { boardWidth, boardHeight, gamePlayers, maxTurnTime } = this.gameSetup
-    const now = Date.now()
+    const { boardWidth, boardHeight, gamePlayers } = this.gameSetup
 
     const usePreview = this.gameSetup.usePreviewBoard === true
 
@@ -155,8 +154,12 @@ export class TeamSnekProcessor {
 
     const firstTurn: Turn = {
       playerHealth: initialHealth,
-      startTime: Timestamp.fromMillis(now),
-      endTime: Timestamp.fromMillis(now + maxTurnTime * 1000),
+      // Placeholder window. The turn deadline has exactly one writer: the
+      // caller that commits the turn (startGame for turn 0, processTurn for
+      // turns 1..n) stamps the real startTime/endTime — that is where the
+      // firstTurnTime-vs-maxTurnTime distinction lives.
+      startTime: Timestamp.fromMillis(0),
+      endTime: Timestamp.fromMillis(0),
       scores: initialScores,
       alivePlayers: gamePlayers.map((player) => player.id),
       food: food,
@@ -987,12 +990,12 @@ export class TeamSnekProcessor {
       return gameState.newSnakes[playerID] && gameState.newSnakes[playerID].length > 0;
     });
 
-    const now = Date.now()
+    // No startTime/endTime here: the spread carries the previous turn's
+    // window through, and the committing caller (processTurn) is the single
+    // writer of the real deadline.
     const newTurn: Turn = {
       ...currentTurn,
       playerHealth: gameState.newPlayerHealth,
-      startTime: Timestamp.fromMillis(now),
-      endTime: Timestamp.fromMillis(now + this.gameSetup.maxTurnTime * 1000),
       scores: gameState.newScores,
       alivePlayers: validAlivePlayers,
       food: gameState.newFood,
