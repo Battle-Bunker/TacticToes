@@ -235,7 +235,8 @@ service cloud.firestore {
 
     // =========== CENTAURS COLLECTION ===========
     match /centaurs/{centaurId} {
-      allow read: if isAuthenticated();
+      // Public: signed-out visitors (e.g. /ladder) resolve centaur names.
+      allow read: if true;
       allow create: if isAuthenticated() &&
                        request.resource.data.owner == request.auth.uid &&
                        isValidCentaurData(request.resource.data, centaurId) &&
