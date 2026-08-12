@@ -13,7 +13,7 @@ import {
 } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { CentaurLink } from "../../components/CentaurLink";
 import { useUser } from "../../context/UserContext";
 import { db, functions } from "../../firebaseConfig";
 import { useFirestoreSubscription } from "../../hooks/useFirestoreSubscription";
@@ -1070,25 +1070,17 @@ const GameSetup: React.FC = () => {
                           borderBottom: "1px solid #eee",
                         }}
                       >
-                        <Link
-                          to={`/ladder/${centaur.id}`}
+                        <CentaurLink
+                          centaurId={centaur.id}
                           style={{
                             fontWeight: 500,
                             flexGrow: 1,
                             wordBreak: "break-word",
-                            color: "inherit",
-                            textDecoration: "none",
-                          }}
-                          onMouseEnter={(e: React.MouseEvent<HTMLAnchorElement>) => {
-                            e.currentTarget.style.textDecoration = "underline";
-                          }}
-                          onMouseLeave={(e: React.MouseEvent<HTMLAnchorElement>) => {
-                            e.currentTarget.style.textDecoration = "none";
                           }}
                         >
                           {centaur.name}
                           {isInGame && " (IN GAME)"}
-                        </Link>
+                        </CentaurLink>
                         <Button
                           size="small"
                           variant="outlined"

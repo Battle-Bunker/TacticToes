@@ -1,4 +1,4 @@
-import { Box, CircularProgress, Stack } from "@mui/material"
+import { Stack } from "@mui/material"
 import { Session } from "@shared/types/Game"
 import {
   doc,
@@ -8,6 +8,7 @@ import {
 } from "firebase/firestore"
 import React, { useEffect, useState, useRef } from "react"
 import { useNavigate, useParams, useLocation } from "react-router-dom"
+import { CenteredLoader } from "../components/CenteredLoader"
 import { db } from "../firebaseConfig"
 import { useUser } from "../context/UserContext"
 
@@ -100,16 +101,7 @@ const Sessionpage: React.FC = () => {
       justifyContent="center"
       sx={{ height: "100vh" }}
     >
-      <Box
-        sx={{
-          display: "flex",
-          justifyContent: "center",
-          alignItems: "center",
-          height: "100vh",
-        }}
-      >
-        <CircularProgress />
-      </Box>
+      <CenteredLoader />
     </Stack>
   )
 }

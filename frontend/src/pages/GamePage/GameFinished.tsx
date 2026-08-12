@@ -12,6 +12,7 @@ import {
 import React from "react"
 import { useNavigate } from "react-router-dom"
 import { useGameStateContext } from "../../context/GameStateContext"
+import { snakeLabel } from "../../utils/snakeLabel"
 
 interface TeamResult {
   teamID: string
@@ -44,7 +45,7 @@ const GameFinished: React.FC = () => {
       teamScore: winner?.teamScore ?? latestTurn.teamScores?.[team.id] ?? 0,
       snakeNames: gamePlayers
         .filter((gp) => gp.teamID === team.id)
-        .map((gp) => `${team.name} ${gp.letter}`),
+        .map((gp) => snakeLabel(team, gp)),
       mmr: winner?.newMMR,
       mmrChange: winner?.mmrChange,
     }

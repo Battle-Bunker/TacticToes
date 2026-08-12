@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from "react"
 import { doc, setDoc } from "firebase/firestore"
 import { onAuthStateChanged, User } from "firebase/auth"
-import { Box, CircularProgress } from "@mui/material"
+import { CenteredLoader } from "../components/CenteredLoader"
 import { auth, db } from "../firebaseConfig"
 import SignupPage from "../pages/SignupPage"
 
@@ -37,18 +37,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({
   )
 
   if (!authLoaded) {
-    return (
-      <Box
-        sx={{
-          display: "flex",
-          justifyContent: "center",
-          alignItems: "center",
-          height: "100vh",
-        }}
-      >
-        <CircularProgress />
-      </Box>
-    )
+    return <CenteredLoader />
   }
 
   if (!user) {

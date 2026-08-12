@@ -13,6 +13,7 @@ import {
 } from '@mui/material'
 import React from 'react'
 import { useNavigate } from 'react-router-dom'
+import { CentaurLink } from '../../components/CentaurLink'
 import { useLadder } from './LadderContext'
 import { usePlayerInfo } from './usePlayerInfo'
 import { formatCentaurName } from './utils'
@@ -71,7 +72,9 @@ export const LadderLeaderboard: React.FC<Props> = ({ centaurId }) => {
               >
                 <TableCell>{index + 1}</TableCell>
                 <TableCell>
-                  {formatCentaurName(centaurs[entry.centaurId], entry.centaurId)}
+                  <CentaurLink centaurId={entry.centaurId}>
+                    {formatCentaurName(centaurs[entry.centaurId], entry.centaurId)}
+                  </CentaurLink>
                 </TableCell>
                 <TableCell>{entry.ranking.currentMMR}</TableCell>
               </TableRow>

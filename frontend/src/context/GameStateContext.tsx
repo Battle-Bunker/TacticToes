@@ -1,4 +1,4 @@
-import { Box, CircularProgress, Typography } from "@mui/material"
+import { Typography } from "@mui/material"
 import {
   Centaur,
   GameSetup,
@@ -24,6 +24,7 @@ import React, {
   useRef,
   useState,
 } from "react"
+import { CenteredLoader } from "../components/CenteredLoader"
 import { db } from "../firebaseConfig"
 import { useFirestoreSubscription } from "../hooks/useFirestoreSubscription"
 import { useUser } from "./UserContext"
@@ -256,17 +257,12 @@ export const GameStateProvider: React.FC<{
     <GameStateContext.Provider value={providerValue}>
       {gameSetup ? (
         children
+      ) : error ? (
+        <CenteredLoader>
+          <Typography color="error">{error}</Typography>
+        </CenteredLoader>
       ) : (
-        <Box
-          sx={{
-            display: "flex",
-            justifyContent: "center",
-            alignItems: "center",
-            height: "100vh",
-          }}
-        >
-          {error ? <Typography color="error">{error}</Typography> : <CircularProgress />}
-        </Box>
+        <CenteredLoader />
       )}
     </GameStateContext.Provider>
   )

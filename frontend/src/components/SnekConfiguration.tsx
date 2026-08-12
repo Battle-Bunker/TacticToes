@@ -2,6 +2,7 @@ import React, { useMemo } from "react"
 import { Checkbox, FormControl, FormControlLabel, IconButton, Slider, TextField, Typography, Box } from "@mui/material"
 import { RefreshCw } from "lucide-react"
 import { Team } from "@shared/types/Game"
+import { useTeamColors } from "../hooks/useTeamColors"
 import { expandTeams } from "../utils/expandTeams"
 import { getFertileTileColor } from "../utils/fertileTileColor"
 
@@ -56,11 +57,7 @@ export const SnekConfiguration: React.FC<SnekConfigurationProps> = ({
     [teams, snakesPerTeam],
   )
 
-  const teamColorByID = useMemo(() => {
-    const map = new Map<string, string>()
-    teams.forEach((team) => map.set(team.id, team.color))
-    return map
-  }, [teams])
+  const teamColorByID = useTeamColors(teams)
 
   const displayData = useMemo(() => {
     if (!syncedPreviewData) return null

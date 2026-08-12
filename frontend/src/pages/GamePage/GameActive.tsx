@@ -14,6 +14,7 @@ import {
 } from "@mui/material"
 
 import { useGameStateContext } from "../../context/GameStateContext"
+import { snakeLabel } from "../../utils/snakeLabel"
 import GameGrid from "./GameGrid"
 
 const GameActive: React.FC = () => {
@@ -118,7 +119,7 @@ const GameActive: React.FC = () => {
                             opacity: alive ? 1 : 0.5,
                           }}
                         >
-                          {team.name} {snake.letter}
+                          {snakeLabel(team, snake)}
                           {alive && ` ♥${health} ×${length}`}
                         </Box>
                       )

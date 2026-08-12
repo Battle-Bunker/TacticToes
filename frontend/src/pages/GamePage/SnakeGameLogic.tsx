@@ -1,6 +1,8 @@
 import { Box, SxProps, Theme } from "@mui/material"
+import { Clash } from "@shared/types/Game"
 import React from "react"
 import { GameLogicProps, GameLogicReturn } from "./GameGrid"
+import { teamColorMap } from "../../hooks/useTeamColors"
 import { getFertileTileColor } from "../../utils/fertileTileColor"
 
 const BORDER_WIDTH = 4 // Width of the outline border and corner size
@@ -67,12 +69,6 @@ const Cell: React.FC<CellProps> = ({ children, sx, onClick, cornerColor = "white
   </Box>
 )
 
-interface ClashInfo {
-  index: number
-  playerIDs: string[]
-  reason: string
-}
-
 interface SnakeSegmentInfo {
   hasHead: boolean
   hasTail: boolean
@@ -92,7 +88,7 @@ const GameLogic = ({
 }: GameLogicProps): GameLogicReturn => {
   const cellContentMap: { [index: number]: JSX.Element } = {}
   const cellBackgroundMap: { [index: number]: string } = {}
-  const clashesAtPosition: { [index: number]: ClashInfo } = {}
+  const clashesAtPosition: { [index: number]: Clash } = {}
   const selectedTurn = gameState.turns[selectedTurnIndex]
 
   if (!selectedTurn) {
@@ -120,10 +116,11 @@ const GameLogic = ({
   const getGamePlayer = (playerID: string) =>
     gameState.setup.gamePlayers.find((gp) => gp.id === playerID)
 
+  const teamColors = teamColorMap(gameState.setup.teams)
+
   const getSnakeColor = (playerID: string): string => {
     const teamID = getGamePlayer(playerID)?.teamID
-    const team = gameState.setup.teams.find((t) => t.id === teamID)
-    return team?.color ?? "white"
+    return (teamID !== undefined ? teamColors.get(teamID) : undefined) ?? "white"
   }
 
   const getOutlineColor = (playerID: string): string => {

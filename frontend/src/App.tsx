@@ -2,7 +2,6 @@ import {
   AppBar,
   Box,
   Button,
-  CircularProgress,
   Container,
   Typography,
 } from "@mui/material"
@@ -13,6 +12,7 @@ import {
   Routes,
   useNavigate,
 } from "react-router-dom"
+import { CenteredLoader } from "./components/CenteredLoader"
 import { UserProvider, useUser } from "./context/UserContext"
 import GamePage from "./pages/GamePage/index"
 import HomePage from "./pages/HomePage"
@@ -54,19 +54,6 @@ class ErrorBoundary extends React.Component<
     return this.props.children
   }
 }
-
-const CenteredLoader: React.FC = () => (
-  <Box
-    sx={{
-      display: "flex",
-      justifyContent: "center",
-      alignItems: "center",
-      height: "100vh",
-    }}
-  >
-    <CircularProgress />
-  </Box>
-)
 
 const App: React.FC = () => {
   return (
