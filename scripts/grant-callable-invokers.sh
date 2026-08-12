@@ -4,13 +4,18 @@ set -euo pipefail
 # Firebase callable endpoints need to be reachable by Google's frontend before
 # Firebase Auth can authorize the request inside the function. This grants
 # network-level reachability; the functions still enforce owner/auth checks.
-PROJECT_ID="${1:-tactic-toes-cyphid-dev}"
-REGION="${2:-us-central1}"
+if [ -z "${1:-}" ]; then
+  echo "Usage: $0 <PROJECT_ID> [REGION]" >&2
+  exit 1
+fi
+PROJECT_ID="$1"
+REGION="${2:-australia-southeast1}"
 
 CALLABLE_FUNCTIONS=(
   "createCentaurApiKey"
   "exchangeCentaurApiKey"
   "getCentaurApiKeyStatus"
+  "generatePreviewBoard"
 )
 
 if ! command -v gcloud >/dev/null 2>&1; then

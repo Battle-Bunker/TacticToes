@@ -99,7 +99,7 @@ externalPort = 8000
 
 
 [deployment]
-build = ["sh", "-c", "cd frontend && npm run build && cp dist/index.html dist/404.html"]
+build = ["bash", "scripts/replit-deploy.sh"]
 deploymentTarget = "static"
 publicDir = "frontend/dist"
 
@@ -108,6 +108,16 @@ from = "/*"
 to = "/index.html"
 
 [userenv]
+
+# Deliberately empty. Every Firebase value is per-deployment configuration, not
+# a fact about this codebase, so it lives in Replit Secrets rather than in git:
+#
+#   workspace Secrets   -> the dev Firebase project, used by `npm run deploy`
+#                          and the dev server
+#   deployment Secrets  -> the production project, used by the publish build
+#
+# Keeping them out of here is also what stops a production publish inheriting
+# dev values. See frontend/.env.example for the variable names.
 
 [userenv.development]
 

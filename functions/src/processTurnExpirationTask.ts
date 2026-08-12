@@ -1,5 +1,6 @@
 import * as admin from "firebase-admin"
 import { onTaskDispatched } from "firebase-functions/v2/tasks"
+import { FUNCTIONS_REGION, taskQueueName } from "./config/region"
 import { getFunctions } from "firebase-admin/functions"
 import * as logger from "firebase-functions/logger"
 import { processTurn } from "./gameprocessors/processTurn"
@@ -10,6 +11,7 @@ import { announceTurn } from "./utils/announceTurn"
  * This is invoked when a turn's timeout period has elapsed.
  */
 export const processTurnExpirationTask = onTaskDispatched(
+  { region: FUNCTIONS_REGION },
   async (request) => {
     const { sessionID, gameID, turnNumber } = request.data
 
@@ -90,7 +92,7 @@ export const processTurnExpirationTask = onTaskDispatched(
     if (result?.tournamentSchedule) {
       const { sessionID: schedSessionID, gameID: schedGameID, delaySeconds, expectedScheduledStartMillis } = result.tournamentSchedule
       try {
-        const queue = getFunctions().taskQueue("processScheduledGameStart")
+        const queue = getFunctions().taskQueue(taskQueueName("processScheduledGameStart"))
         await queue.enqueue(
           { sessionID: schedSessionID, gameID: schedGameID, expectedScheduledStartMillis },
           { scheduleDelaySeconds: delaySeconds }

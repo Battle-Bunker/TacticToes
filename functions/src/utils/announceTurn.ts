@@ -1,4 +1,5 @@
 import { getFunctions } from "firebase-admin/functions"
+import { taskQueueName } from "../config/region"
 import { logger } from "../logger"
 
 export interface AnnounceTurnParams {
@@ -22,7 +23,7 @@ export async function announceTurn(params: AnnounceTurnParams): Promise<void> {
   const { sessionID, gameID, turnNumber, turnDurationSeconds, source } = params
 
   try {
-    const queue = getFunctions().taskQueue("processTurnExpirationTask")
+    const queue = getFunctions().taskQueue(taskQueueName("processTurnExpirationTask"))
     await queue.enqueue(
       { sessionID, gameID, turnNumber },
       { scheduleDelaySeconds: turnDurationSeconds }

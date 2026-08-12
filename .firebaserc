@@ -1,6 +1,6 @@
 {
   "projects": {
-    "production": "tactic-toes-tuke",
+    "production": "team-snek",
     "dev-chris": "tactic-toes-cyphid-dev",
     "dev-jacob": "tac-tic-toc-toe"
   },

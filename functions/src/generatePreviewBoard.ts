@@ -1,11 +1,12 @@
 import * as functions from "firebase-functions/v1"
+import { FUNCTIONS_REGION } from "./config/region"
 import * as admin from "firebase-admin"
 import { GameSetup, GameState, StartedGameSetup } from "@shared/types/Game"
 import { TeamSnekProcessor } from "./gameprocessors/TeamSnekProcessor"
 import { expandTeams } from "./utils/expandTeams"
 import { Timestamp } from "firebase-admin/firestore"
 
-export const generatePreviewBoard = functions.https.onCall(async (data, context) => {
+export const generatePreviewBoard = functions.region(FUNCTIONS_REGION).https.onCall(async (data, context) => {
   if (!context.auth) {
     throw new functions.https.HttpsError("unauthenticated", "Must be authenticated")
   }

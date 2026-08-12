@@ -1,12 +1,12 @@
 # Team Snek — Development & Deployment Guide
 
 This project runs on **Firebase Functions** and uses **Google Cloud Tasks** for background jobs.  
-It is configured to support both:
+Production runs on the **`team-snek`** project, with Firestore and all Cloud
+Functions in **`australia-southeast1`** (Sydney).
 
-- A **default shared project** (`tactic-toes`)
-- Your **own Firebase/GCP project** (BYO project, e.g., `tactic-toes-tuke`)
-
-> TL;DR: Put your frontend env in `frontend/.env`, your server env in `functions/.env`, add your Firebase project alias via `firebase use --add`, then run the `gcloud` commands below once per project.
+> TL;DR: provision a project with `scripts/bootstrap-gcp-project.sh`, put the
+> frontend env it prints into `frontend/.env` (or Replit Secrets), then deploy
+> with `npm run deploy`.
 
 ---
 
@@ -52,27 +52,28 @@ VITE_FIREBASE_APP_ID=
 VITE_FIREBASE_MEASUREMENT_ID=
 ```
 
-The frontend loads from env first, then falls back to the defaults:
+The frontend is entirely env-driven. There are no fallback values -- a missing
+variable throws at import time rather than silently connecting to the wrong
+project:
 
 ```ts
 // frontend/src/firebaseConfig.ts
 export const firebaseConfig = {
-  apiKey:
-    import.meta.env.VITE_FIREBASE_API_KEY ||
-    "AIzaSyB8_kTX7I3_VlMhfTvhsCvkFKZFQH8wySg",
-  authDomain:
-    import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "tactic-toes.firebaseapp.com",
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "tactic-toes",
-  storageBucket:
-    import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "tactic-toes.appspot.com",
-  messagingSenderId:
-    import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "609730573184",
-  appId:
-    import.meta.env.VITE_FIREBASE_APP_ID ||
-    "1:609730573184:web:93cc2deb12fa0e22a34765",
-  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || "G-WYJM1LMD06",
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
 };
+
+// Region must match functions/src/config/region.ts or callables 404.
+export const functions = getFunctions(app, functionsRegion)
 ```
+
+`scripts/bootstrap-gcp-project.sh` prints all of these for a newly provisioned
+project.
 
 > 🔐 Never commit real `.env` files.
 
@@ -88,7 +89,7 @@ cp functions/.env.example functions/.env
 
 ```env
 # Cloud Tasks / Backend settings
-TASKS_PROJECT_ID=        # e.g. tactic-toes-tuke
+TASKS_PROJECT_ID=        # e.g. team-snek
 TASKS_LOCATION=us-central1
 TASKS_QUEUE=turn-expirations
 ```
@@ -125,8 +126,7 @@ You can load this in scripts and write into both sub-envs if desired. This is **
 ```json
 {
   "projects": {
-    "default": "tactic-toes",
-    "tuke": "tactic-toes-tuke",
+    "production": "team-snek",
     "mine": "yourproject-id"
   }
 }
@@ -143,9 +143,13 @@ firebase use --add
 Switch between projects:
 
 ```bash
-firebase use mine      # your project
-firebase use default   # shared default (tactic-toes)
+firebase use mine         # your project
+firebase use production   # team-snek (australia-southeast1)
 ```
+
+Note there is deliberately no `default` alias, so a bare `firebase deploy` in
+this repo cannot silently reach production. `scripts/deploy.sh` always passes
+`--project` explicitly.
 
 ---
 
@@ -182,7 +186,7 @@ npm run build
 ## ☁️ 4) Google Cloud Setup (per project)
 
 Run these **once** per Firebase/GCP project you plan to use.  
-Replace `<YOUR_PROJECT_ID>` with your project ID (e.g., `tactic-toes-tuke`).
+Replace `<YOUR_PROJECT_ID>` with your project ID (e.g., `team-snek`).
 
 > **Important**: Cloud Tasks requires an App Engine app in the **same region family** as your queue (e.g., AE in `us-central`, queue in `us-central1`).
 
