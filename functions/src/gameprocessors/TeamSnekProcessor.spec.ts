@@ -46,7 +46,6 @@ const mkTurn = (
     food: [],
     hazards: [],
     playerPieces,
-    walls: [],
     clashes: [],
     moves: {},
     winners: [],
@@ -57,6 +56,7 @@ const mkTurn = (
 const mkGameState = (setup: StartedGameSetup, turn: Turn): GameState => ({
   setup,
   turns: [turn],
+  walls: [],
   timeCreated: Timestamp.fromMillis(0),
   timeFinished: null,
 })

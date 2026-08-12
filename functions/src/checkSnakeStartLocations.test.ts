@@ -33,6 +33,7 @@ describe("snake start locations", () => {
     }))
     return {
       turns: [],
+      walls: [],
       setup: {
         teams,
         snakesPerTeam: 1,
@@ -64,6 +65,7 @@ describe("snake start locations", () => {
 
     return {
       turns: [],
+      walls: [],
       setup: {
         teams,
         snakesPerTeam,

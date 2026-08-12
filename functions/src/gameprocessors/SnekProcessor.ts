@@ -51,6 +51,13 @@ export abstract class SnekProcessor extends GameProcessor {
     }
   }
 
+  // Walls never change after game start (they are the board perimeter), so
+  // they are stored once on the game document rather than on every turn.
+  getWalls(): number[] {
+    const { boardWidth, boardHeight } = this.gameSetup
+    return this.getWallPositions(boardWidth, boardHeight)
+  }
+
   initializeGame(): Turn {
     try {
       const initialTurn = this.initializeTurn()
@@ -157,7 +164,6 @@ export abstract class SnekProcessor extends GameProcessor {
       food: food,
       hazards: hazards,
       playerPieces: playerPieces,
-      walls: walls,
       clashes: [],
       moves: {},
       winners: [],

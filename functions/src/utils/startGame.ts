@@ -141,6 +141,7 @@ export async function startGame(
     // while producing the first turn.
     const processor = new TeamSnekProcessor({
       turns: [],
+      walls: [],
       setup: gameSetup,
       timeCreated: Timestamp.fromMillis(0),
       timeFinished: null,
@@ -159,6 +160,9 @@ export async function startGame(
     const newGame: GameState = {
       setup: gameSetup,
       turns: [firstTurn],
+      // Walls are static for the whole game; stored once here instead of on
+      // every turn.
+      walls: processor.getWalls(),
       timeCreated: FieldValue.serverTimestamp(),
       timeFinished: null,
     }

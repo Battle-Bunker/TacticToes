@@ -103,8 +103,10 @@ const GameLogic = ({
     }
   }
 
-  const { playerPieces, clashes, food, hazards, walls, fertileTiles, invulnerabilityPotions, playerInvulnerabilityLevel } =
+  const { playerPieces, clashes, food, hazards, fertileTiles, invulnerabilityPotions, playerInvulnerabilityLevel } =
     selectedTurn
+  // Walls are static for the whole game and live on the game doc, not the turn.
+  const walls = gameState.walls
 
   // Map clashes to positions
   if (clashes) {
@@ -357,7 +359,7 @@ const GameLogic = ({
   })
 
   // Place walls
-  walls?.forEach((position) => {
+  walls.forEach((position) => {
     cellContentMap[position] = (
       <Box key={`wall-${position}`} sx={commonCellStyle}>
         🧱

@@ -53,6 +53,7 @@ export const generatePreviewBoard = functions.region(FUNCTIONS_REGION).https.onC
   const mockGameState: GameState = {
     setup: previewSetup,
     turns: [],
+    walls: [],
     timeCreated: Timestamp.now(),
     timeFinished: null,
   }
