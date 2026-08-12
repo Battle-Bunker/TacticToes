@@ -27,6 +27,13 @@ export interface SnakeGameState {
   newScores: { [playerID: string]: number }
 }
 
+// The board projection the team scoring/win logic works on. Built either from
+// the in-flight SnakeGameState or from a committed Turn.
+interface TeamBoardView {
+  alive: string[]
+  pieces: Record<string, number[]>
+}
+
 export class TeamSnekProcessor {
   protected gameSetup: StartedGameSetup
   protected gameState: GameState
@@ -841,124 +848,49 @@ export class TeamSnekProcessor {
     const currentTurnNumber = this.gameState.turns.length
     const reachedTurnLimit = this.maxTurns !== undefined && currentTurnNumber >= this.maxTurns
 
-    const aliveTeams = this.getAliveTeams(gameState)
+    const board = TeamSnekProcessor.liveBoard(gameState)
+    const aliveTeams = this.getAliveTeams(board)
 
     if (aliveTeams.length === 0) {
       return this.calculatePreviousTurnTeamOutcome()
     }
 
     if (aliveTeams.length === 1) {
-      return this.calculateTeamWinners(aliveTeams[0], gameState)
+      return this.calculateTeamWinners(aliveTeams[0], board)
     }
 
     if (reachedTurnLimit) {
-      const teamScores = this.getTeamScores(gameState)
+      const teamScores = this.getTeamScores(board)
       const maxScore = Math.max(...teamScores.values())
       const topTeams = Array.from(teamScores.entries())
         .filter(([, score]) => score === maxScore)
         .map(([teamID]) => teamID)
 
       if (topTeams.length === 1) {
-        return this.calculateTeamWinners(topTeams[0], gameState)
+        return this.calculateTeamWinners(topTeams[0], board)
       }
 
       // Tie at the turn limit results in a draw between the top teams
-      return this.calculateTeamDrawWinners(topTeams, gameState)
+      return this.calculateTeamDrawWinners(topTeams, board)
     }
 
     return []
   }
 
-  private getAliveTeams(gameState: SnakeGameState): string[] {
+  /** The in-flight state of the turn being resolved. */
+  private static liveBoard(gameState: SnakeGameState): TeamBoardView {
+    return { alive: gameState.newAlivePlayers, pieces: gameState.newSnakes }
+  }
+
+  /** A committed turn, as stored on the game document. */
+  private static turnBoard(turn: Turn): TeamBoardView {
+    return { alive: turn.alivePlayers, pieces: turn.playerPieces }
+  }
+
+  private getAliveTeams(board: TeamBoardView): string[] {
     const aliveTeams = new Set<string>()
 
-    gameState.newAlivePlayers.forEach((playerID) => {
-      const player = this.gameSetup.gamePlayers.find(p => p.id === playerID)
-      if (player && player.teamID) {
-        aliveTeams.add(player.teamID)
-      }
-    })
-
-    return Array.from(aliveTeams)
-  }
-
-  private calculateTeamWinners(teamID: string, gameState: SnakeGameState): Winner[] {
-    const teamPlayers = this.gameSetup.gamePlayers.filter(player => player.teamID === teamID)
-    const teamScore = this.getTeamScore(teamID, gameState)
-
-    return teamPlayers.map(player => ({
-      playerID: player.id,
-      score: gameState.newSnakes[player.id]?.length || 0,
-      winningSquares: gameState.newSnakes[player.id] || [],
-      teamID: teamID,
-      teamScore: teamScore
-    }))
-  }
-
-  private calculateTeamDrawWinners(teamIDs: string[], gameState: SnakeGameState): Winner[] {
-    return teamIDs.flatMap(teamID => this.calculateTeamWinners(teamID, gameState))
-  }
-
-  private calculateTeamDrawWinnersFromTurn(teamIDs: string[], turn: Turn): Winner[] {
-    return teamIDs.flatMap(teamID => this.calculateTeamWinnersFromTurn(teamID, turn))
-  }
-
-  private getTeamScore(teamID: string, gameState: SnakeGameState): number {
-    return this.gameSetup.gamePlayers
-      .filter(player => player.teamID === teamID)
-      .reduce((total, player) => total + (gameState.newSnakes[player.id]?.length || 0), 0)
-  }
-
-  private getTeamScoreFromTurn(teamID: string, turn: Turn): number {
-    return this.gameSetup.gamePlayers
-      .filter(player => player.teamID === teamID)
-      .reduce((total, player) => total + (turn.playerPieces[player.id]?.length || 0), 0)
-  }
-
-  private getTeamScores(gameState: SnakeGameState): Map<string, number> {
-    const teamScores = new Map<string, number>()
-
-    this.gameSetup.gamePlayers.forEach(player => {
-      if (player.teamID) {
-        const currentScore = teamScores.get(player.teamID) || 0
-        teamScores.set(player.teamID, currentScore + (gameState.newSnakes[player.id]?.length || 0))
-      }
-    })
-
-    return teamScores
-  }
-
-  private getTeamScoresFromTurn(turn: Turn): Map<string, number> {
-    const teamScores = new Map<string, number>()
-
-    this.gameSetup.gamePlayers.forEach(player => {
-      if (player.teamID) {
-        const currentScore = teamScores.get(player.teamID) || 0
-        teamScores.set(player.teamID, currentScore + (turn.playerPieces[player.id]?.length || 0))
-      }
-    })
-
-    return teamScores
-  }
-
-  private calculateTeamWinnersFromTurn(teamID: string, turn: Turn): Winner[] {
-    const teamScore = this.getTeamScoreFromTurn(teamID, turn)
-
-    return this.gameSetup.gamePlayers
-      .filter(player => player.teamID === teamID)
-      .map(player => ({
-        playerID: player.id,
-        score: turn.playerPieces[player.id]?.length || 0,
-        winningSquares: turn.playerPieces[player.id] || [],
-        teamID,
-        teamScore,
-      }))
-  }
-
-  private getAliveTeamsFromTurn(turn: Turn): string[] {
-    const aliveTeams = new Set<string>()
-
-    turn.alivePlayers.forEach(playerID => {
+    board.alive.forEach((playerID) => {
       const player = this.gameSetup.gamePlayers.find(p => p.id === playerID)
       if (player?.teamID) {
         aliveTeams.add(player.teamID)
@@ -968,6 +900,45 @@ export class TeamSnekProcessor {
     return Array.from(aliveTeams)
   }
 
+  private calculateTeamWinners(teamID: string, board: TeamBoardView): Winner[] {
+    const teamScore = this.getTeamScore(teamID, board)
+
+    return this.gameSetup.gamePlayers
+      .filter(player => player.teamID === teamID)
+      .map(player => ({
+        playerID: player.id,
+        score: board.pieces[player.id]?.length || 0,
+        winningSquares: board.pieces[player.id] || [],
+        teamID,
+        teamScore,
+      }))
+  }
+
+  private calculateTeamDrawWinners(teamIDs: string[], board: TeamBoardView): Winner[] {
+    return teamIDs.flatMap(teamID => this.calculateTeamWinners(teamID, board))
+  }
+
+  private getTeamScore(teamID: string, board: TeamBoardView): number {
+    return this.gameSetup.gamePlayers
+      .filter(player => player.teamID === teamID)
+      .reduce((total, player) => total + (board.pieces[player.id]?.length || 0), 0)
+  }
+
+  private getTeamScores(board: TeamBoardView): Map<string, number> {
+    const teamScores = new Map<string, number>()
+
+    this.gameSetup.gamePlayers.forEach(player => {
+      if (player.teamID) {
+        const currentScore = teamScores.get(player.teamID) || 0
+        teamScores.set(player.teamID, currentScore + (board.pieces[player.id]?.length || 0))
+      }
+    })
+
+    return teamScores
+  }
+
+  // When every remaining team died at once, the outcome is settled from the
+  // previous committed turn's board.
   private calculatePreviousTurnTeamOutcome(): Winner[] {
     const previousTurn = this.gameState.turns[this.gameState.turns.length - 1]
 
@@ -975,13 +946,14 @@ export class TeamSnekProcessor {
       return []
     }
 
-    const aliveTeams = this.getAliveTeamsFromTurn(previousTurn)
+    const board = TeamSnekProcessor.turnBoard(previousTurn)
+    const aliveTeams = this.getAliveTeams(board)
 
     if (aliveTeams.length === 1) {
-      return this.calculateTeamWinnersFromTurn(aliveTeams[0], previousTurn)
+      return this.calculateTeamWinners(aliveTeams[0], board)
     }
 
-    const teamScores = this.getTeamScoresFromTurn(previousTurn)
+    const teamScores = this.getTeamScores(board)
 
     if (teamScores.size === 0) {
       return []
@@ -993,10 +965,10 @@ export class TeamSnekProcessor {
       .map(([teamID]) => teamID)
 
     if (topTeams.length === 1) {
-      return this.calculateTeamWinnersFromTurn(topTeams[0], previousTurn)
+      return this.calculateTeamWinners(topTeams[0], board)
     }
 
-    return this.calculateTeamDrawWinnersFromTurn(topTeams, previousTurn)
+    return this.calculateTeamDrawWinners(topTeams, board)
   }
 
   protected createNewTurn(currentTurn: Turn, gameState: SnakeGameState, winners: Winner[]): Turn {
