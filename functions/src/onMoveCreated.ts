@@ -1,8 +1,8 @@
 import * as admin from "firebase-admin"
 import * as functions from "firebase-functions/v1"
-import { FUNCTIONS_REGION, taskQueueName } from "./config/region"
+import { FUNCTIONS_REGION } from "./config/region"
+import { enqueueTask } from "./utils/enqueueTask"
 import * as logger from "firebase-functions/logger"
-import { getFunctions } from "firebase-admin/functions"
 import { processTurn } from "./gameprocessors/processTurn"
 import { announceTurn } from "./utils/announceTurn"
 import { MoveStatus } from "./types/Game"
@@ -79,19 +79,14 @@ export const onMoveCreated = functions
 
     if (result?.tournamentSchedule) {
       const { sessionID: schedSessionID, gameID: schedGameID, delaySeconds, expectedScheduledStartMillis } = result.tournamentSchedule
-      try {
-        const queue = getFunctions().taskQueue(taskQueueName("processScheduledGameStart"))
-        await queue.enqueue(
-          { sessionID: schedSessionID, gameID: schedGameID, expectedScheduledStartMillis },
-          { scheduleDelaySeconds: delaySeconds }
-        )
-        logger.info(
-          `[onMoveCreated] Scheduled next tournament game start`,
-          { sessionID: schedSessionID, gameID: schedGameID, delaySeconds }
-        )
-      } catch (error) {
-        logger.error(`[onMoveCreated] Error scheduling tournament game start`, { schedGameID, error })
-      }
+      await enqueueTask({
+        functionName: "processScheduledGameStart",
+        payload: { sessionID: schedSessionID, gameID: schedGameID, expectedScheduledStartMillis },
+        scheduleDelaySeconds: delaySeconds,
+        source: "onMoveCreated",
+        purpose: "Scheduled tournament game start",
+        context: { sessionID: schedSessionID, gameID: schedGameID },
+      })
     }
 
     logger.info(`[onMoveCreated] Completed`, { gameID, moveNumber })

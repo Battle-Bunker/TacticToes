@@ -1,6 +1,4 @@
-import { getFunctions } from "firebase-admin/functions"
-import { taskQueueName } from "../config/region"
-import { logger } from "../logger"
+import { enqueueTask } from "./enqueueTask"
 
 export interface AnnounceTurnParams {
   sessionID: string
@@ -18,27 +16,19 @@ export interface AnnounceTurnParams {
  *
  * Never throws. The turn is already committed, so a function retry would find
  * it resolved or superseded and could not recover anyway.
+ *
+ * Returns whether the expiry was armed. A false return means this turn can only
+ * resolve if every player moves -- it will never time out.
  */
-export async function announceTurn(params: AnnounceTurnParams): Promise<void> {
+export async function announceTurn(params: AnnounceTurnParams): Promise<boolean> {
   const { sessionID, gameID, turnNumber, turnDurationSeconds, source } = params
 
-  try {
-    const queue = getFunctions().taskQueue(taskQueueName("processTurnExpirationTask"))
-    await queue.enqueue(
-      { sessionID, gameID, turnNumber },
-      { scheduleDelaySeconds: turnDurationSeconds }
-    )
-    logger.info(`[${source}] Scheduled turn expiration`, {
-      sessionID,
-      gameID,
-      turnNumber,
-      delaySeconds: turnDurationSeconds,
-    })
-  } catch (error) {
-    logger.error(
-      `[${source}] Turn expiration NOT scheduled for game ${gameID}, turn ${turnNumber} — ` +
-        `the turn will only resolve if every player moves`,
-      { sessionID, gameID, turnNumber, error }
-    )
-  }
+  return enqueueTask({
+    functionName: "processTurnExpirationTask",
+    payload: { sessionID, gameID, turnNumber },
+    scheduleDelaySeconds: turnDurationSeconds,
+    source,
+    purpose: "Turn expiry",
+    context: { sessionID, gameID, turnNumber },
+  })
 }

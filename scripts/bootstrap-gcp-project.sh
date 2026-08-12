@@ -675,4 +675,13 @@ Next:
   6. Re-run THIS script to finish Step 9 -- the callable and Cloud Run IAM
      grants need the functions to exist first.
 
+Recommended alert:
+  A broken task queue stops every game progressing, and the only symptom in the
+  app is that turns stop expiring. The functions log a stable marker for it.
+  Create a log-based alert in Cloud Logging on:
+
+    jsonPayload.alert="TASK_QUEUE_MISCONFIGURED"
+
+  Console -> Logging -> Logs Explorer -> run that query -> Create alert.
+
 EOF
