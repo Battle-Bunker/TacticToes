@@ -1,6 +1,7 @@
 import { Box, SxProps, Theme } from "@mui/material"
 import React from "react"
 import { GameLogicProps, GameLogicReturn } from "./GameGrid"
+import { getFertileTileColor } from "../../utils/fertileTileColor"
 
 const BORDER_WIDTH = 4 // Width of the outline border and corner size
 
@@ -324,23 +325,7 @@ const GameLogic = ({
     const boardWidth = gameState.setup.boardWidth
     fertileTiles.forEach((position) => {
       if (!cellBackgroundMap[position]) {
-        const px = position % boardWidth
-        const py = Math.floor(position / boardWidth)
-        const adjacentCount = [
-          fertileSet.has(position - 1),
-          fertileSet.has(position + 1),
-          fertileSet.has(position - boardWidth),
-          fertileSet.has(position + boardWidth),
-          fertileSet.has(position - boardWidth - 1),
-          fertileSet.has(position - boardWidth + 1),
-          fertileSet.has(position + boardWidth - 1),
-          fertileSet.has(position + boardWidth + 1),
-        ].filter(Boolean).length
-        const noise = ((px * 7 + py * 13) % 5)
-        const lightness = adjacentCount >= 6 ? 78 + noise : adjacentCount >= 3 ? 82 + noise : 86 + noise
-        const saturation = adjacentCount >= 6 ? 60 : adjacentCount >= 3 ? 50 : 40
-        const hue = 42 + (noise - 2)
-        cellBackgroundMap[position] = `hsl(${hue}, ${saturation}%, ${lightness}%)`
+        cellBackgroundMap[position] = getFertileTileColor(position, boardWidth, fertileSet)
       }
     })
   }
