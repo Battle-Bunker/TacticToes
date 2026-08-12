@@ -1,3 +1,8 @@
+// Manually-runnable MMR simulation, NOT a test: it has no assertions and
+// writes mmr_progression.html into the functions/ directory when run.
+// Renamed to .sim.ts so jest's default *.test.ts matcher skips it.
+// To run it manually:
+//   cd functions && npx jest --testMatch "**/simulateMMR.sim.ts"
 import { calculateMMRChanges } from "./processTurn"
 import * as fs from "fs"
 

@@ -536,7 +536,7 @@ export abstract class SnekProcessor extends GameProcessor {
           const bodiesAtPos = bodyPositions[headPos]
           if (!bodiesAtPos) return
 
-          bodiesAtPos.forEach(({ playerID: bodyOwnerID, segmentIndex }) => {
+          bodiesAtPos.forEach(({ playerID: bodyOwnerID }) => {
             if (bodyOwnerID === playerID) return
             if (gameState.deadPlayers.has(bodyOwnerID)) return
             const bodyOwnerLevel = gameState.playerInvulnerabilityLevel[bodyOwnerID] ?? 0
@@ -920,7 +920,7 @@ export abstract class SnekProcessor extends GameProcessor {
     boardHeight: number,
     walls: number[],
     hazards: number[],
-    playerPieces: { [playerID: string]: number[] },
+    _playerPieces: { [playerID: string]: number[] },
   ): number[] {
     if (!this.gameSetup.fertileGroundEnabled) return []
     const density = Math.max(0, Math.min(100, this.gameSetup.fertileGroundDensity ?? 30))
@@ -958,7 +958,7 @@ export abstract class SnekProcessor extends GameProcessor {
     return 0.7553 + t * (0.0662 - 0.7553)
   }
 
-  private fractalNoise(x: number, y: number, octaves: number, baseFrequency: number = 0.3): number {
+  private fractalNoise(x: number, y: number, octaves: number, baseFrequency = 0.3): number {
     let value = 0
     let amplitude = 1
     let frequency = baseFrequency

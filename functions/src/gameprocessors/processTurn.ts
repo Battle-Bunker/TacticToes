@@ -412,7 +412,7 @@ export const calculateMMRChanges = (
     const K = calculateKFactor(player.gamesPlayed)
 
     // MMR change
-    let mmrChange = K * (actualScore - expectedScore)
+    const mmrChange = K * (actualScore - expectedScore)
     mmrChanges.push(mmrChange)
   })
 
