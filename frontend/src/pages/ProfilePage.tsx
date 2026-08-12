@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react"
+import React, { useRef, useState } from "react"
 import {
   Box,
   Button,
@@ -25,7 +25,6 @@ import {
   collection,
   deleteDoc,
   doc,
-  onSnapshot,
   query,
   serverTimestamp,
   setDoc,
@@ -34,6 +33,7 @@ import {
 } from "firebase/firestore"
 import { useUser } from "../context/UserContext"
 import { auth, db, firebaseConfig, functions } from "../firebaseConfig"
+import { useFirestoreSubscription } from "../hooks/useFirestoreSubscription"
 import { Centaur } from "@shared/types/Game"
 
 const ProfilePage: React.FC = () => {
@@ -41,10 +41,15 @@ const ProfilePage: React.FC = () => {
 
   // ── Centaurs subscription ──────────────────────────────────────────────
   const [centaurs, setCentaurs] = useState<Centaur[]>([])
-  useEffect(() => {
-    if (!userID) return
-    const q = query(collection(db, "centaurs"), where("owner", "==", userID))
-    return onSnapshot(q, (snap) => {
+  useFirestoreSubscription({
+    buildTarget: () =>
+      userID
+        ? query(collection(db, "centaurs"), where("owner", "==", userID))
+        : null,
+    deps: [userID],
+    logLabel: "profile centaurs",
+    includeMetadataChanges: false,
+    onSnapshot: (snap) => {
       const mapped = snap.docs.map((d) => ({
         id: d.id,
         ...(d.data() as Omit<Centaur, "id">),
@@ -53,8 +58,8 @@ const ProfilePage: React.FC = () => {
         a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
       )
       setCentaurs(mapped)
-    })
-  }, [userID])
+    },
+  })
 
   // ── Add form state ─────────────────────────────────────────────────────
   const [newName, setNewName] = useState("")

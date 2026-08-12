@@ -6,7 +6,6 @@ import {
   deleteField,
   doc,
   getDocs,
-  onSnapshot,
   query,
   Timestamp,
   updateDoc,
@@ -17,6 +16,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link } from "react-router-dom";
 import { useUser } from "../../context/UserContext";
 import { db, functions } from "../../firebaseConfig";
+import { useFirestoreSubscription } from "../../hooks/useFirestoreSubscription";
 import { SnekConfiguration } from "../../components/SnekConfiguration";
 import { TeamList } from "../../components/TeamList";
 import { TeamSnekRules } from "../../constants/Rules";
@@ -77,36 +77,33 @@ const useCentaurStatuses = (
   );
   const ackedIDsRef = useRef<string[]>([]);
 
+  // Reset the tracked acks whenever the setup being watched changes; the
+  // subscription below re-populates them.
   useEffect(() => {
     if (!gameID) return;
     setStatuses({});
     ackedIDsRef.current = [];
-    const statusesRef = collection(
-      db,
-      "sessions",
-      sessionName,
-      "setups",
-      gameID,
-      "centaurStatus",
-    );
-    const unsubscribe = onSnapshot(
-      statusesRef,
-      (snapshot) => {
-        const next: { [centaurId: string]: boolean } = {};
-        const acked: string[] = [];
-        snapshot.forEach((docSnap) => {
-          next[docSnap.id] = docSnap.data().ready === true;
-          acked.push(docSnap.id);
-        });
-        setStatuses(next);
-        ackedIDsRef.current = acked;
-      },
-      (error) => {
-        console.error("Error in centaurStatus subscription:", error);
-      },
-    );
-    return unsubscribe;
   }, [sessionName, gameID]);
+
+  useFirestoreSubscription({
+    buildTarget: () =>
+      gameID
+        ? collection(db, "sessions", sessionName, "setups", gameID, "centaurStatus")
+        : null,
+    deps: [sessionName, gameID],
+    logLabel: "centaurStatus",
+    includeMetadataChanges: false,
+    onSnapshot: (snapshot) => {
+      const next: { [centaurId: string]: boolean } = {};
+      const acked: string[] = [];
+      snapshot.forEach((docSnap) => {
+        next[docSnap.id] = docSnap.data().ready === true;
+        acked.push(docSnap.id);
+      });
+      setStatuses(next);
+      ackedIDsRef.current = acked;
+    },
+  });
 
   const recheck = useCallback(async () => {
     // Only existing ack docs can go stale; absent docs already read as

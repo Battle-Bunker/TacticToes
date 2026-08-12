@@ -1,10 +1,11 @@
 // src/pages/LadderPage/LadderContext.tsx
 
 import React, { createContext, useContext, useEffect, useState } from 'react'
-import { collection, doc, onSnapshot, orderBy, query } from 'firebase/firestore'
+import { collection, doc, orderBy, query } from 'firebase/firestore'
 import { db } from '../../firebaseConfig'
 import { Ranking } from '@shared/types/Game'
 import { LeaderboardEntry } from './types'
+import { useFirestoreSubscription } from '../../hooks/useFirestoreSubscription'
 
 interface LadderContextType {
     selectedRanking: Ranking | null
@@ -33,7 +34,8 @@ export const LadderProvider: React.FC<Props> = ({ children, centaurId }) => {
     const [loadingSelected, setLoadingSelected] = useState(true)
     const [loadingLeaderboard, setLoadingLeaderboard] = useState(true)
 
-    // Subscribe to the selected centaur's ranking doc
+    // Reset/arm the loading flag when the selected centaur changes; the
+    // subscription below resolves it.
     useEffect(() => {
         if (!centaurId) {
             setSelectedRanking(null)
@@ -41,25 +43,32 @@ export const LadderProvider: React.FC<Props> = ({ children, centaurId }) => {
             return
         }
         setLoadingSelected(true)
-        const rankingRef = doc(db, 'rankings', centaurId)
-        const unsubscribe = onSnapshot(rankingRef, (snapshot) => {
+    }, [centaurId])
+
+    // Subscribe to the selected centaur's ranking doc
+    useFirestoreSubscription({
+        buildTarget: () => (centaurId ? doc(db, 'rankings', centaurId) : null),
+        deps: [centaurId],
+        logLabel: 'selected ranking',
+        includeMetadataChanges: false,
+        onSnapshot: (snapshot) => {
             setSelectedRanking(
                 snapshot.exists() ? (snapshot.data() as Ranking) : null
             )
             setLoadingSelected(false)
-        })
+        },
+    })
 
-        return () => unsubscribe()
-    }, [centaurId])
-
-    // Subscribe to the leaderboard: all rankings ordered by MMR
-    useEffect(() => {
-        setLoadingLeaderboard(true)
-        const rankingsQuery = query(
-            collection(db, 'rankings'),
-            orderBy('currentMMR', 'desc')
-        )
-        const unsubscribe = onSnapshot(rankingsQuery, (snapshot) => {
+    // Subscribe to the leaderboard: all rankings ordered by MMR.
+    // loadingLeaderboard starts true and this once-per-mount subscription
+    // resolves it.
+    useFirestoreSubscription({
+        buildTarget: () =>
+            query(collection(db, 'rankings'), orderBy('currentMMR', 'desc')),
+        deps: [],
+        logLabel: 'leaderboard',
+        includeMetadataChanges: false,
+        onSnapshot: (snapshot) => {
             const entries: LeaderboardEntry[] = []
             snapshot.forEach((docSnapshot) => {
                 entries.push({
@@ -69,10 +78,8 @@ export const LadderProvider: React.FC<Props> = ({ children, centaurId }) => {
             })
             setLeaderboard(entries)
             setLoadingLeaderboard(false)
-        })
-
-        return () => unsubscribe()
-    }, [])
+        },
+    })
 
     return (
         <LadderContext.Provider value={{
