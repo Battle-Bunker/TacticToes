@@ -5,7 +5,7 @@ import { enqueueTask } from "./utils/enqueueTask"
 import * as logger from "firebase-functions/logger"
 import { processTurn } from "./gameprocessors/processTurn"
 import { announceTurn } from "./utils/announceTurn"
-import { MoveStatus } from "./types/Game"
+import { MoveStatus } from "@shared/types/Game"
 
 export const onMoveCreated = functions
   .region(FUNCTIONS_REGION)
