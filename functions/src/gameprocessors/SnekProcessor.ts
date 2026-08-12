@@ -506,23 +506,23 @@ export abstract class SnekProcessor extends GameProcessor {
             !gameState.deadPlayers.has(id) && (gameState.playerInvulnerabilityLevel[id] ?? 0) === maxLevel
           )
           if (survivorsAtMaxLevel.length > 1) {
-            let minLength = Infinity
-            survivorsAtMaxLevel.forEach(id => {
-              minLength = Math.min(minLength, gameState.newSnakes[id]?.length ?? 0)
-            })
+            // At most one snake survives a head-on collision: the unique
+            // longest snake at the top tier. Any tie for longest kills them all.
+            const maxLength = Math.max(...survivorsAtMaxLevel.map(id => gameState.newSnakes[id]?.length ?? 0))
+            const longest = survivorsAtMaxLevel.filter(id => (gameState.newSnakes[id]?.length ?? 0) === maxLength)
+            const survivor = longest.length === 1 ? longest[0] : null
             survivorsAtMaxLevel.forEach(playerID => {
-              if ((gameState.newSnakes[playerID]?.length ?? 0) === minLength) {
-                gameState.deadPlayers.add(playerID)
-                const playerLevel = gameState.playerInvulnerabilityLevel[playerID] ?? 0
-                if (playerLevel < 0) gameState.vulnerableSnakesCollided.add(playerID)
-                gameState.newSnakes[playerID]?.forEach(pos => {
-                  gameState.clashes.push({
-                    index: pos,
-                    playerIDs: survivorsAtMaxLevel,
-                    reason: "Head-on collision (shortest snake(s) died)",
-                  })
+              if (playerID === survivor) return
+              gameState.deadPlayers.add(playerID)
+              const playerLevel = gameState.playerInvulnerabilityLevel[playerID] ?? 0
+              if (playerLevel < 0) gameState.vulnerableSnakesCollided.add(playerID)
+              gameState.newSnakes[playerID]?.forEach(pos => {
+                gameState.clashes.push({
+                  index: pos,
+                  playerIDs: survivorsAtMaxLevel,
+                  reason: "Head-on collision (shortest snake(s) died)",
                 })
-              }
+              })
             })
           }
         }
@@ -614,22 +614,22 @@ export abstract class SnekProcessor extends GameProcessor {
       const playersAtHead = headPositions[position]
 
       if (playersAtHead.length > 1) {
-        let minLength = Infinity
-        playersAtHead.forEach((playerID) => {
-          minLength = Math.min(minLength, gameState.newSnakes[playerID].length)
-        })
+        // At most one snake survives a head-on collision: the unique longest
+        // snake. Any tie for longest kills every colliding snake.
+        const maxLength = Math.max(...playersAtHead.map((id) => gameState.newSnakes[id].length))
+        const longest = playersAtHead.filter((id) => gameState.newSnakes[id].length === maxLength)
+        const survivor = longest.length === 1 ? longest[0] : null
 
         playersAtHead.forEach((playerID) => {
-          if (gameState.newSnakes[playerID].length === minLength) {
-            gameState.deadPlayers.add(playerID)
-            gameState.newSnakes[playerID].forEach((pos) => {
-              gameState.clashes.push({
-                index: pos,
-                playerIDs: playersAtHead,
-                reason: "Head-on collision (shortest snake(s) died)",
-              })
+          if (playerID === survivor) return
+          gameState.deadPlayers.add(playerID)
+          gameState.newSnakes[playerID].forEach((pos) => {
+            gameState.clashes.push({
+              index: pos,
+              playerIDs: playersAtHead,
+              reason: "Head-on collision (shortest snake(s) died)",
             })
-          }
+          })
         })
       } else {
         const playerID = playersAtHead[0]
