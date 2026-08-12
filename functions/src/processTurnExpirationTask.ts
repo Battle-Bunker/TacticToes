@@ -9,7 +9,12 @@ import { resolveTurnAndAnnounce } from "./utils/resolveTurnAndAnnounce"
  * This is invoked when a turn's timeout period has elapsed.
  */
 export const processTurnExpirationTask = onTaskDispatched(
-  { region: FUNCTIONS_REGION },
+  {
+    region: FUNCTIONS_REGION,
+    // The early-dispatch guard below can sleep up to 120s before doing any
+    // work; the v2 default timeout of 60s would kill the task mid-sleep.
+    timeoutSeconds: 180,
+  },
   async (request) => {
     const { sessionID, gameID, turnNumber } = request.data
 

@@ -11,6 +11,7 @@ import { TeamSnekProcessor } from "../gameprocessors/TeamSnekProcessor"
 import { logger } from "../logger"
 import { FirstMoveTimeoutSeconds } from "../timings"
 import { announceTurn } from "./announceTurn"
+import { TASK_QUEUE_ALERT } from "./enqueueTask"
 import { writeCentaurGameInvites, writeCentaurMap } from "./centaurGameMeta"
 import { expandTeams } from "./expandTeams"
 
@@ -197,13 +198,21 @@ export async function startGame(
     logger.error(`[${source}] Error writing centaur game invites`, { gameID, error })
   }
 
-  await announceTurn({
+  const expiryArmed = await announceTurn({
     sessionID,
     gameID,
     turnNumber: 0,
     turnDurationSeconds: started.turnDurationSeconds,
     source,
   })
+  if (!expiryArmed) {
+    logger.error(
+      `${TASK_QUEUE_ALERT}: [${source}] failed to arm expiry for turn 0 of game ` +
+        `${gameID}. The turn will never time out; the game stalls unless every ` +
+        `player moves.`,
+      { alert: TASK_QUEUE_ALERT, sessionID, gameID, turnNumber: 0 }
+    )
+  }
 
   logger.info(`[${source}] Game ${gameID} initialization complete`, { sessionID, gameID })
   return true

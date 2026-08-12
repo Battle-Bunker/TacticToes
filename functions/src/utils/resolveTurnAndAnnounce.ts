@@ -2,7 +2,7 @@ import * as admin from "firebase-admin"
 import * as logger from "firebase-functions/logger"
 import { processTurn } from "../gameprocessors/processTurn"
 import { announceTurn } from "./announceTurn"
-import { enqueueTask } from "./enqueueTask"
+import { enqueueTask, TASK_QUEUE_ALERT } from "./enqueueTask"
 
 /**
  * Resolves a turn and arms the follow-up work. Shared by the two triggers
@@ -38,13 +38,21 @@ export async function resolveTurnAndAnnounce(
     result.newTurnNumber !== undefined &&
     result.turnDurationSeconds !== undefined
   ) {
-    await announceTurn({
+    const expiryArmed = await announceTurn({
       sessionID,
       gameID,
       turnNumber: result.newTurnNumber,
       turnDurationSeconds: result.turnDurationSeconds,
       source,
     })
+    if (!expiryArmed) {
+      logger.error(
+        `${TASK_QUEUE_ALERT}: [${source}] failed to arm expiry for turn ` +
+          `${result.newTurnNumber} of game ${gameID}. The turn will never time ` +
+          `out; the game stalls unless every player moves.`,
+        { alert: TASK_QUEUE_ALERT, sessionID, gameID, turnNumber: result.newTurnNumber }
+      )
+    }
   } else {
     logger.info(`[${source}] Skipping post-transaction work`, {
       gameID,
