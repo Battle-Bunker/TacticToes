@@ -12,6 +12,13 @@ const { getFunctions, httpsCallable } = require("firebase/functions")
 const PROJECT_ID = "tactic-toes-cyphid-dev"
 const WEB_API_KEY = "AIzaSyAa5zfOcG-0sQKvHDZLWMxEhNGO87wYQhQ"
 
+// Must match the deployed functions region -- required, no default by design.
+const REGION = process.env.E2E_REGION ?? process.env.VITE_FIREBASE_FUNCTIONS_REGION
+if (!REGION) {
+  console.error("E2E: set E2E_REGION or VITE_FIREBASE_FUNCTIONS_REGION (no default; must match the deployed functions region)")
+  process.exit(1)
+}
+
 admin.initializeApp({
   credential: admin.credential.cert(process.env.GOOGLE_APPLICATION_CREDENTIALS),
   projectId: PROJECT_ID,
@@ -42,7 +49,7 @@ async function main() {
 
   // Centaur client: sign in and run the real re-ack loop (mirrors Chris-Centaur).
   const cApp = clientApp("centaur")
-  const exchange = httpsCallable(getFunctions(cApp, "us-central1"), "exchangeCentaurApiKey")
+  const exchange = httpsCallable(getFunctions(cApp, REGION), "exchangeCentaurApiKey")
   const { data } = await exchange({ centaurId, apiKey })
   await signInWithCustomToken(getAuth(cApp), data.customToken)
   const cdb = getFirestore(cApp)

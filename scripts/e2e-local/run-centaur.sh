@@ -9,7 +9,9 @@
 #                     dist/ build output is produced.
 #   PROJECT_ID        demo project id (must start with "demo-", default
 #                     demo-teamsnek — must match the emulator suite)
-#   FUNCTIONS_REGION  default australia-southeast1 (the repo's region)
+#   FUNCTIONS_REGION  required -- no default by design. Must match the region
+#                     the emulated functions were loaded with (a dummy value
+#                     works as long as both sides agree).
 #   EMULATOR_FIRESTORE / EMULATOR_AUTH / EMULATOR_FUNCTIONS
 #                     override emulator endpoints (defaults match firebase.json)
 #
@@ -34,7 +36,7 @@ export TACTICTOES_CENTAUR_ID="$CENTAUR_ID"
 export TACTICTOES_CENTAUR_API_KEY="$API_KEY"
 export TACTICTOES_FIREBASE_PROJECT_ID="$PROJECT_ID"
 export TACTICTOES_FIREBASE_API_KEY=fake-api-key
-export TACTICTOES_FUNCTIONS_REGION="${FUNCTIONS_REGION:-australia-southeast1}"
+export TACTICTOES_FUNCTIONS_REGION="${FUNCTIONS_REGION:?set FUNCTIONS_REGION -- no default; must match the region the emulated functions run in}"
 export TACTICTOES_EMULATOR_FIRESTORE="${EMULATOR_FIRESTORE:-127.0.0.1:8080}"
 export TACTICTOES_EMULATOR_AUTH="${EMULATOR_AUTH:-http://127.0.0.1:9099}"
 export TACTICTOES_EMULATOR_FUNCTIONS="${EMULATOR_FUNCTIONS:-127.0.0.1:5001}"

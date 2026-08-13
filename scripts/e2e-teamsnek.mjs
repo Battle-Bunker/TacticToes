@@ -41,8 +41,9 @@ const req = (name, ...candidates) => {
 const PROJECT_ID = req("E2E_PROJECT_ID", process.env.E2E_PROJECT_ID, process.env.VITE_FIREBASE_PROJECT_ID)
 const WEB_API_KEY = req("E2E_WEB_API_KEY", process.env.E2E_WEB_API_KEY, process.env.VITE_FIREBASE_API_KEY)
 const APP_ID = req("E2E_APP_ID", process.env.E2E_APP_ID, process.env.VITE_FIREBASE_APP_ID)
-// Must match functions/src/config/region.ts, or every callable below 404s.
-const REGION = process.env.E2E_REGION ?? process.env.VITE_FIREBASE_FUNCTIONS_REGION ?? "australia-southeast1"
+// Must match the deployed functions region (see functions/src/config/region.ts),
+// or every callable below 404s. Required -- no default by design.
+const REGION = req("E2E_REGION", process.env.E2E_REGION, process.env.VITE_FIREBASE_FUNCTIONS_REGION)
 
 admin.initializeApp({ projectId: PROJECT_ID })
 const adb = admin.firestore()

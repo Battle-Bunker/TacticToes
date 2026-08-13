@@ -28,8 +28,17 @@ if (missingVars.length > 0) {
 
 // Must match the region the functions are deployed to (see
 // functions/src/config/region.ts). A mismatch makes every callable 404.
-export const functionsRegion =
-  import.meta.env.VITE_FIREBASE_FUNCTIONS_REGION || "australia-southeast1";
+// No default by design: region is required, per-deployment config.
+const regionFromEnv = import.meta.env.VITE_FIREBASE_FUNCTIONS_REGION;
+if (!regionFromEnv) {
+  throw new Error(
+    "VITE_FIREBASE_FUNCTIONS_REGION is required: set it in your Replit " +
+    "Secrets or .env file. It must match the region the Cloud Functions are " +
+    "deployed to (which in turn must match the project's Firestore region -- " +
+    "see functions/src/config/region.ts). There is deliberately no default."
+  );
+}
+export const functionsRegion: string = regionFromEnv;
 
 export const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,

@@ -4,12 +4,14 @@ set -euo pipefail
 # Firebase callable endpoints need to be reachable by Google's frontend before
 # Firebase Auth can authorize the request inside the function. This grants
 # network-level reachability; the functions still enforce owner/auth checks.
-if [ -z "${1:-}" ]; then
-  echo "Usage: $0 <PROJECT_ID> [REGION]" >&2
+if [ -z "${1:-}" ] || [ -z "${2:-}" ]; then
+  echo "Usage: $0 <PROJECT_ID> <REGION>" >&2
+  echo "REGION is required (no default). Use the region the functions are" >&2
+  echo "deployed to, which must match the project's Firestore region." >&2
   exit 1
 fi
 PROJECT_ID="$1"
-REGION="${2:-australia-southeast1}"
+REGION="$2"
 
 CALLABLE_FUNCTIONS=(
   "createCentaurApiKey"

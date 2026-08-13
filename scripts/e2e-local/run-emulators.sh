@@ -8,6 +8,11 @@
 # Usage: run-emulators.sh [timeout-seconds]
 #   PROJECT_ID  override the demo project id (must start with "demo-",
 #               default demo-teamsnek)
+#   FUNCTIONS_REGION (or VITE_FIREBASE_FUNCTIONS_REGION)
+#               required -- no default by design (functions/src/config/region.ts
+#               throws without it). Any value works for the emulators (e.g.
+#               local-region-1), but every client hitting the emulated
+#               callables must use the same value.
 #
 # Ports (from firebase.json): firestore 8080, functions 5001, auth 9099,
 # tasks 9499, emulator UI 4000, hub 4400.
@@ -20,6 +25,12 @@ case "$PROJECT_ID" in
   *) echo "refusing to start: PROJECT_ID must start with 'demo-' (got '$PROJECT_ID')" >&2; exit 1 ;;
 esac
 TIMEOUT_SECS="${1:-${EMULATOR_TIMEOUT_SECS:-1800}}"
+
+# Region is required, no default: functions/src/config/region.ts throws at
+# load without it, which would kill the functions emulator at discovery time.
+# A dummy value is fine locally as long as clients use the same one.
+export VITE_FIREBASE_FUNCTIONS_REGION="${VITE_FIREBASE_FUNCTIONS_REGION:-${FUNCTIONS_REGION:-}}"
+: "${VITE_FIREBASE_FUNCTIONS_REGION:?set FUNCTIONS_REGION (or VITE_FIREBASE_FUNCTIONS_REGION) -- no default; any value works for the emulators, e.g. local-region-1}"
 
 cd "$ROOT"
 

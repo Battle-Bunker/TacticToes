@@ -19,22 +19,25 @@ set -euo pipefail
 # additive (add-iam-policy-binding, never set-iam-policy).
 #
 # Usage:
-#   bash scripts/bootstrap-gcp-project.sh <PROJECT_ID> [REGION]
+#   bash scripts/bootstrap-gcp-project.sh <PROJECT_ID> <REGION>
 #
-# REGION defaults to australia-southeast1 and must match BOTH the Firestore
-# location and functions/src/config/region.ts.
+# REGION is REQUIRED -- there is no default by design. It must match BOTH the
+# Firestore location and the VITE_FIREBASE_FUNCTIONS_REGION every deploy sets
+# (see functions/src/config/region.ts and functions/.env.<projectId>).
 # =============================================================================
 
-if [ -z "${1:-}" ]; then
-    echo "Usage: $0 <PROJECT_ID> [REGION]"
+if [ -z "${1:-}" ] || [ -z "${2:-}" ]; then
+    echo "Usage: $0 <PROJECT_ID> <REGION>"
     echo ""
-    echo "Example: $0 tactic-toes-au"
-    echo "Example: $0 tactic-toes-au australia-southeast1"
+    echo "REGION is required (no default). It must match the project's Firestore"
+    echo "location and the VITE_FIREBASE_FUNCTIONS_REGION used at deploy time."
+    echo ""
+    echo "Example: $0 my-project-id us-central1"
     exit 1
 fi
 
 PROJECT_ID="$1"
-REGION="${2:-australia-southeast1}"
+REGION="$2"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 section() {
@@ -236,7 +239,9 @@ section "Step 2: Create Firestore Database"
 #      database itself if it is missing, defaulting to the nam5 US multi-region,
 #      with no prompt in either interactive or non-interactive mode. Location is
 #      permanent, so that mistake costs you the project.
-# firebase.json also pins "location" as a second line of defence.
+# firebase.json deliberately pins no "location" (region hardcodes are banned in
+# source), so scripts/deploy.sh guards against this by refusing to deploy when
+# the (default) database does not exist yet.
 
 if gcloud firestore databases describe --database='(default)' \
        --project="$PROJECT_ID" >/dev/null 2>&1; then

@@ -6,3 +6,9 @@ typings/
 
 # Node.js dependency directory
 node_modules/
+
+# Per-deployment config is NEVER committed -- the repo is deployment agnostic.
+# Each deploy target needs a local .env.<projectId>; see .env.example.
+.env
+.env.*
+!.env.example

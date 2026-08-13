@@ -37,8 +37,12 @@ Playwright install (`/opt/node22/lib/node_modules/playwright` with browsers in
 ## Full two-centaur run
 
 ```bash
-CENTAUR_DIR=/path/to/Chris-Centaur scripts/e2e-local/run-all.sh
+CENTAUR_DIR=/path/to/Chris-Centaur FUNCTIONS_REGION=local-region-1 scripts/e2e-local/run-all.sh
 ```
+
+`FUNCTIONS_REGION` is required — there is no default region anywhere in this
+repo by design. Any value works locally (the emulators and the centaur
+clients just have to agree); `run-all.sh` threads one value to both sides.
 
 Order (run-all does all of this, with a cleanup trap):
 
@@ -75,6 +79,7 @@ Validates emulator boot, seeding, and the Cloud-Tasks-driven turn-expiry
 cadence without any centaur processes:
 
 ```bash
+FUNCTIONS_REGION=local-region-1 \
 bash scripts/e2e-local/run-emulators.sh &            # window 1 (or background)
 node scripts/e2e-local/seed.mjs                      # window 2, after "All emulators ready"
 node scripts/e2e-local/watch.mjs --turns 3 --min-turns 3 --expect-alive 10
