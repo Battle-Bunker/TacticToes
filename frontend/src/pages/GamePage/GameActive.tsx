@@ -14,7 +14,7 @@ import {
 } from "@mui/material"
 
 import { useGameStateContext } from "../../context/GameStateContext"
-import { snakeLabel } from "../../utils/snakeLabel"
+import { unitLabel } from "../../utils/snakeLabel"
 import GameGrid from "./GameGrid"
 
 const GameActive: React.FC = () => {
@@ -73,7 +73,7 @@ const GameActive: React.FC = () => {
 
       {!gameOver && (
         <Typography variant="body2" color="text.secondary">
-          {movedCount} of {aliveCount} snakes have moved.
+          {movedCount} of {aliveCount} units have moved.
         </Typography>
       )}
 
@@ -87,7 +87,7 @@ const GameActive: React.FC = () => {
             <TableRow>
               <TableCell>Team</TableCell>
               <TableCell align="right">Score</TableCell>
-              <TableCell align="left">Snakes</TableCell>
+              <TableCell align="left">Units</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -107,6 +107,22 @@ const GameActive: React.FC = () => {
                       const health = currentTurn.playerHealth[snake.id] ?? 0
                       const length =
                         currentTurn.playerPieces[snake.id]?.length ?? 0
+                      const unitType =
+                        currentTurn.unitTypes?.[snake.id] ??
+                        snake.unitType ??
+                        "snake"
+                      const maxHealth =
+                        gameState.setup.maxHealthPerUnit?.[unitType] ?? 100
+                      const fraction = Math.max(
+                        0,
+                        Math.min(1, health / maxHealth),
+                      )
+                      const fillColor =
+                        fraction < 0.1
+                          ? "#e53935"
+                          : fraction < 0.25
+                            ? "#fb8c00"
+                            : "#43a047"
 
                       return (
                         <Box
@@ -119,8 +135,36 @@ const GameActive: React.FC = () => {
                             opacity: alive ? 1 : 0.5,
                           }}
                         >
-                          {snakeLabel(team, snake)}
-                          {alive && ` ♥${health} ×${length}`}
+                          {unitLabel(team, snake, currentTurn.unitTypes?.[snake.id])}
+                          {alive && (
+                            <>
+                              {" "}
+                              <Box
+                                component="span"
+                                sx={{
+                                  display: "inline-block",
+                                  verticalAlign: "middle",
+                                  width: 48,
+                                  height: 8,
+                                  backgroundColor: "rgba(0, 0, 0, 0.5)",
+                                  borderRadius: "2px",
+                                  overflow: "hidden",
+                                  mr: 0.5,
+                                }}
+                              >
+                                <Box
+                                  component="span"
+                                  sx={{
+                                    display: "block",
+                                    width: `${fraction * 100}%`,
+                                    height: "100%",
+                                    backgroundColor: fillColor,
+                                  }}
+                                />
+                              </Box>
+                              {`${health} ×${length}`}
+                            </>
+                          )}
                         </Box>
                       )
                     })}

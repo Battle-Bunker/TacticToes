@@ -12,14 +12,14 @@ import {
 import React from "react"
 import { useNavigate } from "react-router-dom"
 import { useGameStateContext } from "../../context/GameStateContext"
-import { snakeLabel } from "../../utils/snakeLabel"
+import { unitLabel } from "../../utils/snakeLabel"
 
 interface TeamResult {
   teamID: string
   teamName: string
   teamColor: string
   teamScore: number
-  snakeNames: string[]
+  unitNames: string[]
   mmr?: number
   mmrChange?: number
 }
@@ -43,9 +43,9 @@ const GameFinished: React.FC = () => {
       teamName: team.name,
       teamColor: team.color,
       teamScore: winner?.teamScore ?? latestTurn.teamScores?.[team.id] ?? 0,
-      snakeNames: gamePlayers
+      unitNames: gamePlayers
         .filter((gp) => gp.teamID === team.id)
-        .map((gp) => snakeLabel(team, gp)),
+        .map((gp) => unitLabel(team, gp, latestTurn.unitTypes?.[gp.id])),
       mmr: winner?.newMMR,
       mmrChange: winner?.mmrChange,
     }
@@ -96,7 +96,7 @@ const GameFinished: React.FC = () => {
                 <strong>MMR</strong>
               </TableCell>
               <TableCell align="left">
-                <strong>Snakes</strong>
+                <strong>Units</strong>
               </TableCell>
             </TableRow>
           </TableHead>
@@ -115,7 +115,7 @@ const GameFinished: React.FC = () => {
                     ? `${team.mmr} (${team.mmrChange ?? 0})`
                     : "-"}
                 </TableCell>
-                <TableCell align="left">{team.snakeNames.join(", ")}</TableCell>
+                <TableCell align="left">{team.unitNames.join(", ")}</TableCell>
               </TableRow>
             ))}
           </TableBody>

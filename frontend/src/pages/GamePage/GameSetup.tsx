@@ -41,7 +41,8 @@ import {
   Theme,
   Typography,
 } from "@mui/material";
-import { Centaur, Team } from "@shared/types/Game";
+import { Centaur, Team, UnitCounts, UnitMaxHealth, UnitType } from "@shared/types/Game";
+import { PIECE_GLYPHS } from "../../utils/unitGlyphs";
 import { useGameStateContext } from "../../context/GameStateContext";
 
 // Define the board size mapping
@@ -61,7 +62,21 @@ const MAX_TEAMS = 10;
 
 type BoardSize = keyof typeof BOARD_SIZE_MAPPING | "custom";
 
-const SNAKES_PER_TEAM_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8];
+const UNIT_COUNT_OPTIONS = [0, 1, 2, 3, 4, 5, 6, 7, 8];
+const MAX_UNITS_PER_TEAM = 26;
+
+const UNIT_TYPES: { type: UnitType; label: string }[] = [
+  { type: "snake", label: "🐍 Snakes" },
+  { type: "pawn", label: `${PIECE_GLYPHS.pawn} Pawns` },
+  { type: "knight", label: `${PIECE_GLYPHS.knight} Knights` },
+  { type: "bishop", label: `${PIECE_GLYPHS.bishop} Bishops` },
+  { type: "rook", label: `${PIECE_GLYPHS.rook} Rooks` },
+  { type: "queen", label: `${PIECE_GLYPHS.queen} Queens` },
+  { type: "king", label: `${PIECE_GLYPHS.king} Kings` },
+];
+
+const totalUnitCount = (counts: UnitCounts): number =>
+  Object.values(counts).reduce((a, b) => a + (b ?? 0), 0);
 
 // Live centaur presence for the current setup: a centaur acks its pending
 // invite by writing setups/{gameID}/centaurStatus/{centaurId} with
@@ -320,6 +335,9 @@ const GameSetup: React.FC = () => {
   const [hazardPercentage, setHazardPercentage] = useState<number>(
     gameSetup?.hazardPercentage ?? 0,
   );
+  const [hazardDamage, setHazardDamage] = useState<number>(
+    gameSetup?.hazardDamage ?? 100,
+  );
   const [teamClustersEnabled, setTeamClustersEnabled] = useState<boolean>(
     gameSetup?.teamClustersEnabled ?? false,
   );
@@ -341,6 +359,13 @@ const GameSetup: React.FC = () => {
   );
   const [invulnerabilityPotionSpawnRate, setInvulnerabilityPotionSpawnRate] = useState<number>(
     gameSetup?.invulnerabilityPotionSpawnRate ?? 0.15,
+  );
+
+  const [pawnPromotionWeight, setPawnPromotionWeight] = useState<number>(
+    gameSetup?.pawnPromotionWeight ?? 10,
+  );
+  const [maxHealthPerUnit, setMaxHealthPerUnit] = useState<UnitMaxHealth>(
+    gameSetup?.maxHealthPerUnit ?? {},
   );
 
   const [tournamentMode, setTournamentMode] = useState<boolean>(
@@ -502,6 +527,7 @@ const GameSetup: React.FC = () => {
       if (gameSetup.hazardPercentage !== undefined) {
         setHazardPercentage(gameSetup.hazardPercentage);
       }
+      setHazardDamage(gameSetup.hazardDamage ?? 100);
 
       setTeamClustersEnabled(gameSetup.teamClustersEnabled ?? false);
       setFertileGroundEnabled(gameSetup.fertileGroundEnabled ?? false);
@@ -510,6 +536,8 @@ const GameSetup: React.FC = () => {
       setFoodSpawnRate(gameSetup.foodSpawnRate ?? 0.5);
       setInvulnerabilityPotionEnabled(gameSetup.invulnerabilityPotionEnabled ?? false);
       setInvulnerabilityPotionSpawnRate(gameSetup.invulnerabilityPotionSpawnRate ?? 0.15);
+      setPawnPromotionWeight(gameSetup.pawnPromotionWeight ?? 10);
+      setMaxHealthPerUnit(gameSetup.maxHealthPerUnit ?? {});
 
       setTournamentMode(gameSetup.tournamentMode ?? false);
       setRemainingRounds(gameSetup.remainingRounds ?? 1);
@@ -593,10 +621,26 @@ const GameSetup: React.FC = () => {
     });
   };
 
-  const handleSnakesPerTeamChange = async (event: SelectChangeEvent<number>) => {
-    const value = Number(event.target.value);
+  // Current per-team unit counts. Absent unitsPerTeam mirrors the legacy
+  // setup: snakesPerTeam snakes and zero of every chess piece.
+  const unitCounts: UnitCounts = gameSetup.unitsPerTeam ?? {
+    snake: gameSetup.snakesPerTeam,
+  };
+  const unitCount = (type: UnitType): number => unitCounts[type] ?? 0;
+  const totalUnits = totalUnitCount(unitCounts);
+
+  const handleUnitCountChange = async (unitType: UnitType, value: number) => {
+    const next: UnitCounts = {};
+    UNIT_TYPES.forEach(({ type }) => {
+      next[type] = type === unitType ? value : unitCount(type);
+    });
+    const total = totalUnitCount(next);
+    if (total < 1 || total > MAX_UNITS_PER_TEAM) return;
     await updateDoc(gameDocRef, {
-      snakesPerTeam: value,
+      unitsPerTeam: next,
+      // Kept in sync with the snake count (minimum 1 for rules-compat); the
+      // engine ignores snakesPerTeam when unitsPerTeam is present.
+      snakesPerTeam: Math.max(1, next.snake ?? 0),
     });
     debouncedRegeneratePreview();
   };
@@ -646,6 +690,23 @@ const GameSetup: React.FC = () => {
     };
   };
 
+  const handlePawnPromotionWeightChange = setupNumberField("pawnPromotionWeight", {
+    min: 2,
+    max: 100,
+    round: Math.round,
+    setLocal: setPawnPromotionWeight,
+  });
+
+  // Per-unit-type max health. Same sanitize/mirror/write shape as
+  // setupNumberField, but the setting is one key of the maxHealthPerUnit map
+  // rather than a whole scalar field.
+  const handleMaxHealthChange = async (unitType: UnitType, raw: number) => {
+    const sanitizedValue = Math.max(1, Math.min(1000, Math.round(raw)));
+    const next: UnitMaxHealth = { ...maxHealthPerUnit, [unitType]: sanitizedValue };
+    setMaxHealthPerUnit(next);
+    await updateDoc(gameDocRef, { maxHealthPerUnit: next });
+  };
+
   // Handle max turns configuration (writes only while the limit is enabled,
   // so it stays hand-written)
   const handleMaxTurnsChange = async (newMaxTurns: number) => {
@@ -680,6 +741,14 @@ const GameSetup: React.FC = () => {
     max: 100,
     regeneratesPreview: true,
     setLocal: setHazardPercentage,
+  });
+
+  // Damage only changes health accounting, not board layout: no preview regen.
+  const handleHazardDamageChange = setupNumberField("hazardDamage", {
+    min: 1,
+    max: 1000,
+    round: Math.round,
+    setLocal: setHazardDamage,
   });
 
   const handleFertileGroundToggle = setupToggleField("fertileGroundEnabled", {
@@ -844,8 +913,7 @@ const GameSetup: React.FC = () => {
   const enoughTeams = gameSetup.teams.length >= 2;
   const interiorCells =
     (gameSetup.boardWidth - 2) * (gameSetup.boardHeight - 2);
-  const boardFits =
-    gameSetup.teams.length * gameSetup.snakesPerTeam <= interiorCells;
+  const boardFits = gameSetup.teams.length * totalUnits <= interiorCells;
   const canStartGame = enoughTeams && boardValid && turnTimeValid && boardFits;
 
   const teamValidationMessage = !enoughTeams
@@ -853,7 +921,7 @@ const GameSetup: React.FC = () => {
       ? "Add centaurs to create teams before starting the game"
       : "At least 2 teams are needed before starting the game"
     : !boardFits
-      ? "Board is too small for this many snakes — shrink the teams, lower snakes per team, or grow the board"
+      ? "Board is too small for this many units — shrink the teams, lower units per team, or grow the board"
       : "";
 
   return (
@@ -1003,24 +1071,6 @@ const GameSetup: React.FC = () => {
           sx={{ flex: 1 }}
           inputProps={{ min: 0.5, max: 300, step: 0.1 }}
         />
-
-        {/* Snakes per Team */}
-        <FormControl variant="outlined" sx={{ flex: 1 }}>
-          <InputLabel id="snakes-per-team-label">Snakes/Team</InputLabel>
-          <Select
-            labelId="snakes-per-team-label"
-            value={gameSetup.snakesPerTeam}
-            onChange={handleSnakesPerTeamChange}
-            disabled={started || isConfigDisabled}
-            label="Snakes/Team"
-          >
-            {SNAKES_PER_TEAM_OPTIONS.map((n) => (
-              <MenuItem key={n} value={n}>
-                {n}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
       </Box>
 
       {/* Game rules */}
@@ -1191,6 +1241,81 @@ const GameSetup: React.FC = () => {
       {/* Snek Configuration */}
       <SettingsPanel label="Snek Configuration" contentSx={{ padding: 2 }}>
           <Box sx={isConfigDisabled ? { pointerEvents: 'none', opacity: 0.6 } : {}}>
+            {/* Units per team */}
+            <Box sx={{ mb: 1 }}>
+              <Typography variant="body2" gutterBottom>
+                Units per team ({totalUnits}/{MAX_UNITS_PER_TEAM})
+              </Typography>
+              <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
+                {UNIT_TYPES.map(({ type, label }) => (
+                  <FormControl key={type} variant="outlined" size="small" sx={{ minWidth: 96 }}>
+                    <InputLabel id={`units-per-team-${type}-label`}>{label}</InputLabel>
+                    <Select
+                      labelId={`units-per-team-${type}-label`}
+                      value={unitCount(type)}
+                      onChange={(event: SelectChangeEvent<number>) =>
+                        handleUnitCountChange(type, Number(event.target.value))
+                      }
+                      disabled={started || isConfigDisabled}
+                      label={label}
+                    >
+                      {UNIT_COUNT_OPTIONS.map((n) => {
+                        const total = totalUnits - unitCount(type) + n;
+                        return (
+                          <MenuItem
+                            key={n}
+                            value={n}
+                            disabled={total < 1 || total > MAX_UNITS_PER_TEAM}
+                          >
+                            {n}
+                          </MenuItem>
+                        );
+                      })}
+                    </Select>
+                  </FormControl>
+                ))}
+              </Box>
+              {unitCount("pawn") > 0 && (
+                <TextField
+                  label="Pawn promotion weight"
+                  type="number"
+                  size="small"
+                  value={pawnPromotionWeight}
+                  onChange={(e) => {
+                    const value = parseInt(e.target.value);
+                    if (!isNaN(value)) handlePawnPromotionWeightChange(value);
+                  }}
+                  disabled={started || isConfigDisabled}
+                  sx={{ mt: 1.5, width: 200 }}
+                  inputProps={{ min: 2, max: 100, step: 1 }}
+                />
+              )}
+              {/* Max health, one small input per unit type in play */}
+              <Typography variant="body2" sx={{ mt: 1.5 }} gutterBottom>
+                Max health (default 100)
+              </Typography>
+              <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
+                {UNIT_TYPES.filter(({ type }) => unitCount(type) > 0).map(
+                  ({ type, label }) => (
+                    <TextField
+                      key={type}
+                      label={label}
+                      type="number"
+                      size="small"
+                      value={maxHealthPerUnit[type] ?? ""}
+                      placeholder="100"
+                      onChange={(e) => {
+                        const value = parseInt(e.target.value);
+                        if (!isNaN(value)) handleMaxHealthChange(type, value);
+                      }}
+                      disabled={started || isConfigDisabled}
+                      sx={{ width: 110 }}
+                      inputProps={{ min: 1, max: 1000, step: 1 }}
+                    />
+                  ),
+                )}
+              </Box>
+            </Box>
             <SnekConfiguration
               maxTurns={maxTurns}
               maxTurnsEnabled={maxTurnsEnabled}
@@ -1198,6 +1323,8 @@ const GameSetup: React.FC = () => {
               onMaxTurnsChange={handleMaxTurnsChange}
               hazardPercentage={hazardPercentage}
               onHazardPercentageChange={handleHazardPercentageChange}
+              hazardDamage={hazardDamage}
+              onHazardDamageChange={handleHazardDamageChange}
               fertileGroundEnabled={fertileGroundEnabled}
               onFertileGroundToggle={handleFertileGroundToggle}
               fertileGroundDensity={fertileGroundDensity}
@@ -1224,6 +1351,7 @@ const GameSetup: React.FC = () => {
               onRefreshPreview={immediateRegeneratePreview}
               teams={gameSetup.teams}
               snakesPerTeam={gameSetup.snakesPerTeam}
+              unitsPerTeam={gameSetup.unitsPerTeam}
             />
           </Box>
       </SettingsPanel>

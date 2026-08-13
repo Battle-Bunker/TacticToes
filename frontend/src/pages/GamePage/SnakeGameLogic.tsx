@@ -1,9 +1,11 @@
 import { Box, SxProps, Theme } from "@mui/material"
 import { Clash } from "@shared/types/Game"
 import React from "react"
+import { UnitType } from "@shared/types/Game"
 import { GameLogicProps, GameLogicReturn } from "./GameGrid"
 import { teamColorMap } from "../../hooks/useTeamColors"
 import { getFertileTileColor } from "../../utils/fertileTileColor"
+import { pieceGlyph } from "../../utils/unitGlyphs"
 
 const BORDER_WIDTH = 4 // Width of the outline border and corner size
 
@@ -116,7 +118,56 @@ const GameLogic = ({
   const getGamePlayer = (playerID: string) =>
     gameState.setup.gamePlayers.find((gp) => gp.id === playerID)
 
+  // A unit's current type: the turn's live type map wins (pawns promote),
+  // then the initial type from setup; absent everywhere means "snake".
+  const getUnitType = (playerID: string): UnitType =>
+    selectedTurn.unitTypes?.[playerID] ??
+    getGamePlayer(playerID)?.unitType ??
+    "snake"
+
   const teamColors = teamColorMap(gameState.setup.teams)
+
+  // Per-type max health (configurable in setup, default 100).
+  const maxHealthFor = (type: UnitType): number =>
+    gameState.setup.maxHealthPerUnit?.[type] ?? 100
+
+  // A prominent health bar anchored at the bottom of a unit's key cell
+  // (snake head / piece square). Dead units render no bar.
+  const healthBar = (playerID: string): JSX.Element | null => {
+    if (!selectedTurn.alivePlayers.includes(playerID)) return null
+    const health = selectedTurn.playerHealth[playerID]
+    if (health === undefined) return null
+    const fraction = Math.max(
+      0,
+      Math.min(1, health / maxHealthFor(getUnitType(playerID))),
+    )
+    const fillColor =
+      fraction < 0.1 ? "#e53935" : fraction < 0.25 ? "#fb8c00" : "#43a047"
+    return (
+      <Box
+        sx={{
+          position: "absolute",
+          bottom: "4%",
+          left: "5%",
+          width: "90%",
+          height: "15%",
+          backgroundColor: "rgba(0, 0, 0, 0.5)",
+          borderRadius: "2px",
+          overflow: "hidden",
+          zIndex: 3,
+          pointerEvents: "none",
+        }}
+      >
+        <Box
+          sx={{
+            width: `${fraction * 100}%`,
+            height: "100%",
+            backgroundColor: fillColor,
+          }}
+        />
+      </Box>
+    )
+  }
 
   const getSnakeColor = (playerID: string): string => {
     const teamID = getGamePlayer(playerID)?.teamID
@@ -164,8 +215,14 @@ const GameLogic = ({
     return borders
   }
 
+  // Cells occupied by living chess pieces (rendered separately below); the
+  // snake border-joining / length-label / stacked-tail logic must not run
+  // for them.
+  const pieceCells = new Set<number>()
+
   // Collect snake segments
   Object.entries(playerPieces).forEach(([playerID, positions]) => {
+    if (getUnitType(playerID) !== "snake") return
     const snakeColor = getSnakeColor(playerID)
 
     // Iterate through positions in reverse order
@@ -245,10 +302,14 @@ const GameLogic = ({
                 fontFamily: "sans-serif",
                 textShadow:
                   "0 0 3px rgba(0, 0, 0, 0.9), 0 1px 2px rgba(0, 0, 0, 0.7)",
+                // Sit slightly higher so the bottom-anchored health bar
+                // never collides with the letter.
+                transform: "translateY(-10%)",
               }}
             >
               {letter}
             </span>
+            {healthBar(playerID)}
           </Cell>
         )
       } else if (positions[1] === position) {
@@ -305,6 +366,107 @@ const GameLogic = ({
         cellContentMap[position] = content
       }
     })
+  })
+
+  // Render chess pieces: a piece is a weight-stack (N copies of one square),
+  // drawn as a single cell with the piece glyph, a letter badge, a weight
+  // badge when the stack is taller than 1, and a facing marker for pawns.
+  Object.entries(playerPieces).forEach(([playerID, positions]) => {
+    const unitType = getUnitType(playerID)
+    if (unitType === "snake" || positions.length === 0) return
+
+    const position = positions[0]
+    const weight = positions.length
+    const glyph = pieceGlyph(unitType) ?? "?"
+    const teamColor = getSnakeColor(playerID)
+    const outlineColor = getOutlineColor(playerID)
+    const letter = getGamePlayer(playerID)?.letter ?? "?"
+
+    pieceCells.add(position)
+    cellBackgroundMap[position] = teamColor
+
+    const badgeStyle: SxProps<Theme> = {
+      position: "absolute",
+      fontSize: Math.max(7, cellSize * 0.25),
+      lineHeight: 1,
+      color: "black",
+      fontWeight: "bold",
+      zIndex: 3,
+    }
+
+    let facingMarker: JSX.Element | null = null
+    const facing =
+      unitType === "pawn" ? selectedTurn.unitFacing?.[playerID] : undefined
+    if (facing) {
+      const { dx, dy } = facing
+      const arrow = dy < 0 ? "▲" : dy > 0 ? "▼" : dx < 0 ? "◀" : dx > 0 ? "▶" : null
+      const placement: SxProps<Theme> =
+        dy < 0
+          ? { top: 0, left: "50%", transform: "translateX(-50%)" }
+          : dy > 0
+            // Above the bottom-anchored health bar
+            ? { bottom: "18%", left: "50%", transform: "translateX(-50%)" }
+            : dx < 0
+              ? { left: 0, top: "50%", transform: "translateY(-50%)" }
+              : { right: 0, top: "50%", transform: "translateY(-50%)" }
+      if (arrow) {
+        facingMarker = (
+          <Box
+            sx={{
+              position: "absolute",
+              fontSize: Math.max(7, cellSize * 0.25),
+              lineHeight: 1,
+              color: "white",
+              textShadow: "0 0 2px rgba(0, 0, 0, 0.9)",
+              zIndex: 3,
+              ...placement,
+            }}
+          >
+            {arrow}
+          </Box>
+        )
+      }
+    }
+
+    cellContentMap[position] = (
+      <Cell
+        key={`piece-${playerID}-${position}-${selectedTurnIndex}`}
+        sx={{
+          border: `${BORDER_WIDTH}px solid ${outlineColor}`,
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          backgroundColor: teamColor,
+          padding: 0,
+          margin: 0,
+        }}
+        cornerColor={outlineColor}
+      >
+        <span
+          style={{
+            fontSize: cellSize * 0.7,
+            lineHeight: 1,
+            zIndex: 2,
+            color: "white",
+            fontWeight: 900,
+            fontFamily: "sans-serif",
+            textShadow:
+              "0 0 3px rgba(0, 0, 0, 0.9), 0 1px 2px rgba(0, 0, 0, 0.7)",
+            // Sit slightly higher so the bottom-anchored health bar never
+            // collides with the glyph.
+            transform: "translateY(-10%)",
+          }}
+        >
+          {glyph}
+        </span>
+        <Box sx={{ ...badgeStyle, top: 1, left: 2 }}>{letter}</Box>
+        {weight > 1 && (
+          <Box sx={{ ...badgeStyle, bottom: "18%", right: 2 }}>{weight}</Box>
+        )}
+        {facingMarker}
+        {healthBar(playerID)}
+      </Cell>
+    )
   })
 
   // Common style for non-snake cells
@@ -385,10 +547,10 @@ const GameLogic = ({
     }
   })
 
-  // Place clashes (only where no living snake segment exists)
+  // Place clashes (only where no living unit exists)
   clashes?.forEach((clash) => {
     const position = clash.index
-    if (!cellSnakeSegments[position]) {
+    if (!cellSnakeSegments[position] && !pieceCells.has(position)) {
       cellContentMap[position] = (
         <Box key={`clash-${position}`} sx={commonCellStyle}>
           💀
