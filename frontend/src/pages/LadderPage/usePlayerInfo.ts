@@ -1,13 +1,19 @@
 // src/pages/LadderPage/usePlayerInfo.ts
 
 import { useState, useEffect, useRef } from 'react'
-import { collection, query, where, onSnapshot } from 'firebase/firestore'
+import { doc, onSnapshot } from 'firebase/firestore'
 import { db } from '../../firebaseConfig'
 import { Centaur } from '@shared/types/Game'
 import { baseCentaurId } from './utils'
 
 // Resolves centaur docs for a set of ids. Snake-id suffixes (`#k`) are
 // stripped, and the returned map is keyed by centaur id.
+//
+// One document listener per id rather than batched
+// where('__name__', 'in', ...) queries: under the Firestore rules, queries
+// are `list` operations (auth-only, to block anonymous enumeration of
+// /centaurs), while document reads are `get`s, which stay open so
+// signed-out /ladder visitors can resolve names by id.
 export const usePlayerInfo = (centaurIDs: string[]) => {
     const [centaurs, setCentaurs] = useState<{ [id: string]: Centaur }>({})
     const [loadingCentaurs, setLoadingCentaurs] = useState(true)
@@ -25,27 +31,29 @@ export const usePlayerInfo = (centaurIDs: string[]) => {
         }
 
         setLoadingCentaurs(true)
-        const unsubscribers: (() => void)[] = []
+        // Loading resolves once every id has reported at least once
+        // (deleted centaurs report as non-existent docs).
+        let pendingInitial = uniqueIDs.length
 
-        // Batch IDs in groups of 10 (Firestore `in` limit)
-        const batchSize = 10
-        for (let i = 0; i < uniqueIDs.length; i += batchSize) {
-            const batchIDs = uniqueIDs.slice(i, i + batchSize)
-            const centaursQuery = query(
-                collection(db, 'centaurs'),
-                where('__name__', 'in', batchIDs)
-            )
-            const unsubscribe = onSnapshot(centaursQuery, (snapshot) => {
-                const newCentaurs = { ...previousCentaurs.current }
-                snapshot.forEach((doc) => {
-                    newCentaurs[doc.id] = { ...(doc.data() as Centaur), id: doc.id }
-                })
-                setCentaurs(newCentaurs)
-                previousCentaurs.current = newCentaurs
-                setLoadingCentaurs(false)
+        const unsubscribers = uniqueIDs.map((id) =>
+            onSnapshot(doc(db, 'centaurs', id), (snapshot) => {
+                if (snapshot.exists()) {
+                    const newCentaurs = {
+                        ...previousCentaurs.current,
+                        [snapshot.id]: {
+                            ...(snapshot.data() as Centaur),
+                            id: snapshot.id,
+                        },
+                    }
+                    setCentaurs(newCentaurs)
+                    previousCentaurs.current = newCentaurs
+                }
+                pendingInitial -= 1
+                if (pendingInitial <= 0) {
+                    setLoadingCentaurs(false)
+                }
             })
-            unsubscribers.push(unsubscribe)
-        }
+        )
 
         return () => {
             unsubscribers.forEach(unsubscribe => unsubscribe())
