@@ -43,6 +43,39 @@ describe("expandTeams backend/frontend parity", () => {
     }
   }
 
+  const unitMixes = [
+    { label: "pure chess", units: { king: 1, queen: 1, rook: 2, bishop: 2, knight: 2, pawn: 4 } },
+    { label: "mixed snakes+pieces", units: { snake: 2, knight: 1, pawn: 3 } },
+    { label: "kings only", units: { king: 3 } },
+    { label: "explicit zeroes", units: { snake: 0, pawn: 2, rook: 0 } },
+  ]
+
+  for (const { label, units } of unitMixes) {
+    it(`produces identical output for two teams with ${label}`, () => {
+      const teams = [team("alpha"), team("beta")]
+      const backend = backendExpandTeams(teams, 3, units)
+      const frontend = frontendExpandTeams(teams, 3, units)
+      expect(frontend).toStrictEqual(backend)
+      expect(JSON.stringify(frontend)).toBe(JSON.stringify(backend))
+    })
+  }
+
+  it("expands unit mixes in fixed type order with sequential letters and typed players", () => {
+    for (const fn of [backendExpandTeams, frontendExpandTeams]) {
+      const result = fn([team("a")], 3, { snake: 1, king: 1, pawn: 2 })
+      expect(result.map((p) => p.id)).toEqual(["a", "a#2", "a#3", "a#4"])
+      expect(result.map((p) => p.letter)).toEqual(["A", "B", "C", "D"])
+      expect(result.map((p) => p.unitType)).toEqual(["snake", "king", "pawn", "pawn"])
+    }
+  })
+
+  it("omits unitType entirely in legacy snakesPerTeam mode", () => {
+    for (const fn of [backendExpandTeams, frontendExpandTeams]) {
+      const result = fn([team("a")], 2)
+      result.forEach((p) => expect("unitType" in p).toBe(false))
+    }
+  })
+
   it("is order-stable: output follows input team order", () => {
     const teams = [team("z"), team("a"), team("m")]
     for (const fn of [backendExpandTeams, frontendExpandTeams]) {

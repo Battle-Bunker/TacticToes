@@ -42,7 +42,7 @@ export const generatePreviewBoard = functions.region(FUNCTIONS_REGION).https.onC
 
   const previewSetup: StartedGameSetup = {
     ...setup,
-    gamePlayers: expandTeams(setup.teams, setup.snakesPerTeam),
+    gamePlayers: expandTeams(setup.teams, setup.snakesPerTeam, setup.unitsPerTeam),
     usePreviewBoard: false,
     presetFertileTiles: [],
     presetHazards: [],
