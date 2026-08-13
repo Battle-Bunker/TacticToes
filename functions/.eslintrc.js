@@ -1,4 +1,8 @@
 module.exports = {
+  // lib/ is compiled output (tsc). Without this, `npm run lint` re-lints the
+  // generated JS and reports hundreds of phantom errors whenever lib/ exists
+  // (e.g. after building for the emulator suite).
+  ignorePatterns: ["lib/**"],
   env: {
     browser: true,
     es2021: true,
