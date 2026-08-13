@@ -15,11 +15,10 @@
 //   --start-delay-ms N    gap between settings write and startRequested
 //                         (env START_DELAY_MS, default 4000 — lets running
 //                          centaurs pick up the pending invite first)
-//   --engine-only         after start, stage one legal turn-0 move per snake
-//                         (env ENGINE_ONLY=1). See README: without this, the
-//                         spawn-stacked snakes' default move is their own
-//                         square, so every snake self-collides at the first
-//                         expiry and the game ends after one resolution.
+//
+// No turn-0 pre-staging is needed for engine-only (centaur-less) runs: a
+// spawn-stacked snake ([p,p,p]) with nothing staged gets the engine's legal
+// adjacent-cell fallback on turn 0 and marches straight from turn 1 on.
 //
 // Keep maxTurnTime >= ~3s: the expiry task chain needs headroom to re-enqueue.
 import { createRequire } from "module"
@@ -61,7 +60,6 @@ const maxTurnTime = num("max-turn-time", "MAX_TURN_TIME", 6)
 const maxTurns = num("max-turns", "MAX_TURNS", 40)
 const snakesPerTeam = num("snakes-per-team", "SNAKES_PER_TEAM", 5)
 const startDelayMs = num("start-delay-ms", "START_DELAY_MS", 4000)
-const engineOnly = flag("engine-only") !== undefined || process.env.ENGINE_ONLY === "1"
 const sessionID = (typeof flag("session") === "string" ? flag("session") : null) || `e2e-${Date.now()}`
 
 const PALETTE = ["#ff5555", "#5555ff", "#55aa55", "#ddaa33", "#aa55dd", "#33bbbb"]
@@ -127,41 +125,5 @@ for (let i = 0; i < 50 && !game; i++) {
 }
 if (!game) throw new Error("onGameStarted never created the game doc")
 console.log(`STARTED session=${sessionID} game=${gameID} alive=${game.turns[0].alivePlayers.length}`)
-
-// --- 5. engine-only: nudge every snake off its spawn for turn 0 ---
-// Snakes spawn stacked ([p,p,p]); with no staged move the engine derives a
-// {dx:0,dy:0} "direction" and the snake steps onto itself, wiping the whole
-// board at the first expiry. One legal staged move for turn 0 gives every
-// snake a real direction; turns 1+ then resolve purely on engine defaults
-// (march straight until wall/collision) — which is what this mode exercises.
-// Writes go to privateMoves only; moveStatuses is left alone so resolution
-// happens on the expiry cadence, not the all-players-moved fast path.
-if (engineOnly) {
-  const { boardWidth, boardHeight } = game.setup
-  const turn0 = game.turns[0]
-  const walls = new Set(game.walls)
-  const occupied = new Set(Object.values(turn0.playerPieces).flat())
-  let nudged = 0
-  for (const pid of turn0.alivePlayers) {
-    const head = turn0.playerPieces[pid][0]
-    const x = head % boardWidth
-    const y = Math.floor(head / boardWidth)
-    const candidates = [
-      { dx: 0, dy: -1, run: y - 1 },
-      { dx: 0, dy: 1, run: boardHeight - 2 - y },
-      { dx: -1, dy: 0, run: x - 1 },
-      { dx: 1, dy: 0, run: boardWidth - 2 - x },
-    ]
-      .map((d) => ({ ...d, target: (y + d.dy) * boardWidth + (x + d.dx) }))
-      .filter((d) => d.run > 0 && !walls.has(d.target) && !occupied.has(d.target))
-      .sort((a, b) => b.run - a.run) // longest straight run before the wall
-    if (!candidates.length) continue
-    await gameRef.collection("privateMoves").add({
-      gameID, moveNumber: 0, playerID: pid, move: candidates[0].target, timestamp: Timestamp.now(),
-    })
-    nudged++
-  }
-  console.log(`NUDGED ${nudged}/${turn0.alivePlayers.length} snakes for turn 0 (engine defaults take over from turn 1)`)
-}
 
 process.exit(0)

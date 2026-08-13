@@ -16,7 +16,7 @@ ever touched.
 | file | purpose |
 | --- | --- |
 | `run-emulators.sh` | rebuild functions, then boot `firestore,auth,functions,tasks` emulators |
-| `seed.mjs` | seed centaur identities + credentials, create a session, configure and start one game (parameterized; `--engine-only` mode for centaur-less runs) |
+| `seed.mjs` | seed centaur identities + credentials, create a session, configure and start one game (parameterized) |
 | `run-centaur.sh` | run one Chris-Centaur against the emulators via ts-node (no dist writes) |
 | `watch.mjs` | assert turns keep resolving on the game document; nonzero exit on stall |
 | `pw-smoke.mjs` | Playwright: open a centaur's `/play` page (presence!), assert its turn counter advances, check `/game/:id` renders |
@@ -71,21 +71,24 @@ cadence without any centaur processes:
 
 ```bash
 bash scripts/e2e-local/run-emulators.sh &            # window 1 (or background)
-node scripts/e2e-local/seed.mjs --engine-only        # window 2, after "All emulators ready"
+node scripts/e2e-local/seed.mjs                      # window 2, after "All emulators ready"
 node scripts/e2e-local/watch.mjs --turns 3 --min-turns 3 --expect-alive 10
 pkill -f "emulators[:]start"                         # teardown (self-safe pattern)
 ```
 
-`--engine-only` stages one legal move per snake **for turn 0 only**; turns 1+
-resolve purely via engine defaults (each snake marches straight until it hits
-something). Why the nudge exists: snakes spawn stacked (`[p,p,p]`), so with no
-staged move the engine derives a `{dx:0,dy:0}` "last direction" and the default
-move is the snake's own square — every snake self-collides and the game ends at
-the very first expiry. The nudge writes `privateMoves` only (never
-`moveStatuses`), so resolution still happens on the expiry cadence rather than
-the all-players-moved fast path. With the default 2×5 board the snakes
-head-to-head collide mid-board around turn 4 — dying quickly is expected and
-fine; ≥3 resolutions come first.
+No pre-staged moves are needed: every turn resolves purely via engine
+defaults on the expiry cadence. Snakes spawn stacked (`[p,p,p]`) with no
+movement history, so on turn 0 the engine's default move is its legal
+adjacent-cell fallback (first open non-wall, non-occupied neighbor); from
+turn 1 each snake has a real direction and marches straight until it hits
+something. (An earlier engine bug derived a `{dx:0,dy:0}` "last direction"
+for stacked snakes, making the default move the snake's own square — every
+snake self-collided at the first expiry, and this mode needed a turn-0
+pre-staging workaround. Fixed in `TeamSnekProcessor`; the regression tests
+live in `TeamSnekProcessor.spec.ts`.) Straight-marching snakes reach walls
+quickly — with the default 2×5 setup on the 13×13 board, expect wall deaths
+from around turn 2 and a finished game near turn 10; dying quickly is
+expected and fine, ≥3 resolutions come first.
 
 ## Gotchas
 
@@ -121,35 +124,40 @@ fine; ≥3 resolutions come first.
 ## Validated
 
 Engine-only path, validated live on 2026-08-13 (branch
-`claude/codebase-refactor-opportunities-qin5z9`; the two-centaur `run-all.sh`
-flow is a straight productionization of the proven prototype and gets its live
-run once the Chris-Centaur keepalive work lands):
+`claude/codebase-refactor-opportunities-qin5z9`, after the stacked-spawn
+default-move fix, with **no** turn-0 pre-staging; the two-centaur
+`run-all.sh` flow is a straight productionization of the proven prototype
+and gets its live run once the Chris-Centaur keepalive work lands):
 
 ```
 $ bash scripts/e2e-local/run-emulators.sh 480 &     # → "All emulators ready" ~20s
-$ node scripts/e2e-local/seed.mjs --engine-only
+$ node scripts/e2e-local/seed.mjs --first-turn-time 8 --max-turn-time 4
 centaurs seeded: chris (key ttc_local-key-chris), dave (key ttc_local-key-dave)
-SEEDED session=e2e-1786580258718 game=ITHEOqfARpDo8yl9SgQ7 (start not yet requested)
-STARTED session=e2e-1786580258718 game=ITHEOqfARpDo8yl9SgQ7 alive=10
-NUDGED 10/10 snakes for turn 0 (engine defaults take over from turn 1)
-$ node scripts/e2e-local/watch.mjs --session e2e-1786580258718 --game ITHEOqfARpDo8yl9SgQ7 \
+SEEDED session=e2e-1786582267809 game=zEIPsx5rrjNfdNaWNzzb (start not yet requested)
+STARTED session=e2e-1786582267809 game=zEIPsx5rrjNfdNaWNzzb alive=10
+$ node scripts/e2e-local/watch.mjs --session e2e-1786582267809 --game zEIPsx5rrjNfdNaWNzzb \
     --turns 3 --min-turns 3 --expect-alive 10
-watching sessions/e2e-1786580258718/games/ITHEOqfARpDo8yl9SgQ7 (want 3 resolved turns, min 3 on finish)
-turn 0: alive=10 movesApplied=0  winners=0 docBytes=2135
-turn 1: alive=10 movesApplied=10 winners=0 docBytes=3328
-turn 2: alive=10 movesApplied=10 winners=0 docBytes=4521
-turn 3: alive=10 movesApplied=10 winners=0 docBytes=5710
+watching sessions/e2e-1786582267809/games/zEIPsx5rrjNfdNaWNzzb (want 3 resolved turns, min 3 on finish)
+turn 0: alive=10 movesApplied=0 winners=0 docBytes=3321
+turn 1: alive=10 movesApplied=10 winners=0 docBytes=3321
+turn 2: alive=5 movesApplied=10 winners=0 docBytes=5232
+turn 3: alive=5 movesApplied=5 winners=0 docBytes=6098
 PROGRESSED 3 resolved turns — SUCCESS            # exit 0
 ```
 
-Expiry cadence from the emulator log (early-dispatch guard sleeping to each
-turn's real endTime): `waiting 12507ms` (turn 0, firstTurnTime 15s), then
-`5853ms / 5950ms / 5957ms` (maxTurnTime 6s). Left to run, the game finished at
-turn 4 (all 10 snakes head-to-head mid-board, winners=10 draw) and `watch.mjs
---turns 30` exited 0 via `GAME FINISHED after 4 resolved turns — SUCCESS (>= 3)`.
+`turn 1: alive=10` is the fix's proof: all 10 spawn-stacked snakes survived
+the turn-0 expiry on engine defaults alone (pre-fix this read `alive=0` and
+the game ended at the first resolution). The emulator log shows zero
+`Collided with own body` deaths — every death was `collided with a wall`
+from straight-marching. Expiry cadence held (early-dispatch guard sleeping
+to each turn's real endTime: `waiting 5586ms` for the 8s first turn net of
+dispatch lag, then `~3950ms` steadily for the 4s turns). Left to run, the
+game finished naturally: `GAME FINISHED after 10 resolved turns — SUCCESS
+(>= 3)` (alive 10 → 5 → 3 → 0, winners=5).
 
-A second `seed.mjs --engine-only --first-turn-time 8 --max-turn-time 4` on the
-same boot (no reseed/reboot) produced session `e2e-1786580384721`, discovered
-by `watch.mjs --prefix e2e-1786580384721` through the fixed collectionGroup
-filter (invite docs present and correctly excluded), and passed identically.
+A second `seed.mjs --first-turn-time 6 --max-turn-time 4 --start-delay-ms
+1000` on the same boot (no reseed/reboot) produced session
+`e2e-1786582335819`, discovered by `watch.mjs --prefix e2e-1786582335819`
+through the fixed collectionGroup filter (invite docs present and correctly
+excluded), and passed identically (alive=10 at turn 1, 3 resolutions).
 Teardown via `pkill -f "emulators[:]start"` left no processes running.

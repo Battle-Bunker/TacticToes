@@ -89,7 +89,7 @@ PW_B=$!
 PIDS+=("$PW_A" "$PW_B")
 sleep 3 # let both pages land on /play
 
-# 4. seed + start the game (centaur mode: no turn-0 nudge)
+# 4. seed + start the game
 E2E_CENTAURS="$CENTAUR_A::$CENTAUR_A_KEY,$CENTAUR_B::$CENTAUR_B_KEY" \
   node "$HERE/seed.mjs" | tee "$LOG_DIR/seed.log"
 SESSION=$(sed -n 's/.*STARTED session=\([^ ]*\) .*/\1/p' "$LOG_DIR/seed.log" | tail -1)
