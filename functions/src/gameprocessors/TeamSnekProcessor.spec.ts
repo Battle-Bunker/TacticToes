@@ -178,6 +178,89 @@ describe("TeamSnekProcessor win conditions", () => {
   })
 })
 
+describe("TeamSnekProcessor default moves (nothing staged at resolution)", () => {
+  // 7x7 board: index = y * 7 + x, perimeter (x=0|6, y=0|6) is wall.
+  const W = 7
+  const walls = new Set<number>()
+  for (let y = 0; y < 7; y++) {
+    for (let x = 0; x < 7; x++) {
+      if (x === 0 || x === 6 || y === 0 || y === 6) walls.add(y * W + x)
+    }
+  }
+  const adjacent = (i: number) =>
+    [i - W, i + W, i - 1, i + 1].filter((n) => n >= 0 && n < 49)
+
+  it("moves a stacked-spawn snake to a legal adjacent cell instead of its own square", () => {
+    // Both snakes are freshly spawned ([p, p, p]) with no movement history.
+    // The engine default must NOT derive a {dx:0, dy:0} "direction" (which
+    // targets the snake's own square and self-collides); it must pick an
+    // adjacent non-wall, unoccupied cell so both survive turn 0.
+    const spawns = { t1: 24, t2: 10 }
+    const turn = mkTurn({
+      t1: [24, 24, 24],
+      t2: [10, 10, 10],
+    })
+    const processor = new TeamSnekProcessor(mkGameState(mkSetup(), turn))
+
+    const next = processor.applyMoves(turn, [])
+
+    expect(next.alivePlayers.sort()).toEqual(["t1", "t2"])
+    expect(next.clashes).toEqual([])
+    for (const [id, spawn] of Object.entries(spawns)) {
+      const head = next.playerPieces[id][0]
+      expect(head).not.toBe(spawn) // not its own square
+      expect(adjacent(spawn)).toContain(head) // a single legal step
+      expect(walls.has(head)).toBe(false) // not into a wall
+      expect(next.playerPieces[id]).toEqual([head, spawn, spawn])
+      expect(next.moves[id]).toBe(head)
+    }
+  })
+
+  it("keeps continuing straight for snakes with movement history", () => {
+    // Both snakes are travelling +x; with nothing staged they must keep doing
+    // exactly that (pre-existing default-move behavior, unchanged).
+    const turn = mkTurn({
+      t1: [24, 23, 22],
+      t2: [10, 9, 8],
+    })
+    const processor = new TeamSnekProcessor(mkGameState(mkSetup(), turn))
+
+    const next = processor.applyMoves(turn, [])
+
+    expect(next.playerPieces.t1).toEqual([25, 24, 23])
+    expect(next.playerPieces.t2).toEqual([11, 10, 9])
+    expect(next.moves).toEqual({ t1: 25, t2: 11 })
+    expect(next.alivePlayers.sort()).toEqual(["t1", "t2"])
+    expect(next.clashes).toEqual([])
+  })
+
+  it("resolves a fully-boxed stacked snake by stepping into a neighbor, not itself", () => {
+    // t2 spawns stacked in the corner pocket at 8 (x=1, y=1): up (1) and left
+    // (7) are walls, and t1's body covers down (15) and right (9) before AND
+    // after t1's own move. With no open cell the fallback takes the first
+    // non-wall neighbor (15), so t2 dies to t1's body there — a real
+    // collision, never a self-collision on its own square.
+    const turn = mkTurn({
+      t1: [11, 10, 9, 16, 15, 22],
+      t2: [8, 8, 8],
+    })
+    const processor = new TeamSnekProcessor(mkGameState(mkSetup(), turn))
+
+    const next = processor.applyMoves(turn, [])
+
+    expect(next.moves.t2).toBe(15) // first non-wall neighbor, not 8 (own square)
+    expect(next.playerPieces.t1).toEqual([12, 11, 10, 9, 16, 15]) // continued straight
+    expect(next.alivePlayers).toEqual(["t1"])
+    const t2Reasons = next.clashes
+      .filter((c) => c.playerIDs.includes("t2"))
+      .map((c) => c.reason)
+    expect(t2Reasons.length).toBeGreaterThan(0)
+    t2Reasons.forEach((reason) =>
+      expect(reason).toBe("Collided with another snake's body")
+    )
+  })
+})
+
 describe("TeamSnekProcessor per-turn scoring", () => {
   it("writes team scores and individual scores", () => {
     // 9x9 board: index = y * 9 + x.

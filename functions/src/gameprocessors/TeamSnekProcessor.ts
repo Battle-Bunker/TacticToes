@@ -285,7 +285,7 @@ export class TeamSnekProcessor {
 
         // Player didn't submit a valid move or move is invalid
         if (!moveIndex || !allowedMoves.includes(moveIndex)) {
-      moveIndex = this.getDefaultMove(snake, allowedMoves, gameState.boardWidth, playerID)
+      moveIndex = this.getDefaultMove(gameState, snake, allowedMoves, playerID)
     }
 
     // Record the move actually applied (submitted or default) so the turn's
@@ -298,26 +298,47 @@ export class TeamSnekProcessor {
     this.moveSnake(snake, moveIndex)
   }
 
-  private getDefaultMove(snake: number[], allowedMoves: number[], boardWidth: number, playerID: string): number {
-          const direction = this.getLastDirection(snake, boardWidth)
+  private getDefaultMove(gameState: SnakeGameState, snake: number[], allowedMoves: number[], playerID: string): number {
+    const { boardWidth, boardHeight } = gameState
+    const direction = this.getLastDirection(snake, boardWidth)
 
-          if (direction) {
+    if (direction) {
+      // Snake has real movement history: continue straight.
       const headIndex = snake[0]
-            const newX = (headIndex % boardWidth) + direction.dx
-            const newY = Math.floor(headIndex / boardWidth) + direction.dy
+      const newX = (headIndex % boardWidth) + direction.dx
+      const newY = Math.floor(headIndex / boardWidth) + direction.dy
       return newY * boardWidth + newX
-          } else {
-            // No previous direction, choose a default move
-            if (allowedMoves.length > 0) {
-        return allowedMoves[0]
-            } else {
-              // No valid moves, eliminate the player
-            logger.warn(
-              `Snek: Player ${playerID} did not submit a move and has no previous direction.`,
-            )
-        return snake[0] + 1
-      }
     }
+
+    // No direction yet (stacked spawn / single cell): fall back to a legal
+    // adjacent cell. Prefer a cell that is neither wall nor snake body; if
+    // every neighbor is occupied, any non-wall neighbor; only then anything
+    // in-bounds. Centaurs rely on this contract (Chris-Centaur's
+    // continuationDirection returns null here and expects the engine's
+    // adjacent-cell pick).
+    const walls = new Set(this.getWallPositions(boardWidth, boardHeight))
+    const occupied = new Set<number>()
+    Object.values(gameState.newSnakes).forEach((body) => {
+      body.forEach((pos) => occupied.add(pos))
+    })
+
+    const openMove = allowedMoves.find(
+      (cell) => !walls.has(cell) && !occupied.has(cell),
+    )
+    if (openMove !== undefined) return openMove
+
+    const nonWallMove = allowedMoves.find((cell) => !walls.has(cell))
+    if (nonWallMove !== undefined) return nonWallMove
+
+    if (allowedMoves.length > 0) {
+      return allowedMoves[0]
+    }
+
+    // No adjacent cells at all (degenerate board), eliminate the player
+    logger.warn(
+      `Snek: Player ${playerID} did not submit a move and has no previous direction.`,
+    )
+    return snake[0] + 1
   }
 
   private moveSnake(snake: number[], moveIndex: number): void {
@@ -1288,6 +1309,12 @@ export class TeamSnekProcessor {
 
     const dx = headX - neckX
     const dy = headY - neckY
+
+    // Zero displacement means the snake has not actually moved yet (stacked
+    // spawns are [p, p, p]) — that is "no direction", not a direction. A
+    // truthy {dx: 0, dy: 0} would make the default move target the snake's
+    // own square and kill it by self-collision.
+    if (dx === 0 && dy === 0) return null
 
     return { dx, dy }
   }
