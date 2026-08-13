@@ -14,8 +14,12 @@
 #
 # Order matters:
 #   emulators -> centaurs -> centaur /play pages open -> seed/start -> assert.
-# The pages MUST be open before the game starts: an idle centaur suspends its
-# Firebase connection after ~60s and would never receive the invite/start.
+# The pages MUST be open before the game starts. Under the ActivityController
+# idle rule a merely-open tab counts as nothing: pw-smoke reloads /play every
+# ~40s while waiting (each reload is a verifiable human action) so the centaur
+# does not suspend Firebase (60s idle grace) before the invite/start arrives;
+# once the game is progressing, the game-progress rule holds it awake (up to
+# 10 min past the last human action) with no further reloads.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -81,7 +85,8 @@ PIDS+=($!)
 wait_for "centaur $CENTAUR_A" "http://127.0.0.1:$CENTAUR_A_PORT/play" || exit 1
 wait_for "centaur $CENTAUR_B" "http://127.0.0.1:$CENTAUR_B_PORT/play" || exit 1
 
-# 3. presence pages BEFORE the game starts (they double as UI assertions)
+# 3. dashboard pages BEFORE the game starts (their reload keepalive stands in
+#    for a human; they double as UI assertions)
 node "$HERE/pw-smoke.mjs" "http://127.0.0.1:$CENTAUR_A_PORT" "$PW_ADVANCES" >"$LOG_DIR/pw-$CENTAUR_A.log" 2>&1 &
 PW_A=$!
 node "$HERE/pw-smoke.mjs" "http://127.0.0.1:$CENTAUR_B_PORT" "$PW_ADVANCES" >"$LOG_DIR/pw-$CENTAUR_B.log" 2>&1 &

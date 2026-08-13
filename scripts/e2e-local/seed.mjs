@@ -15,6 +15,10 @@
 //   --start-delay-ms N    gap between settings write and startRequested
 //                         (env START_DELAY_MS, default 4000 — lets running
 //                          centaurs pick up the pending invite first)
+//   --credentials-only    seed centaur identities + credentials, then exit
+//                         (no session/game). Lets centaurs sign in cleanly
+//                         before the game seed: their sign-in callable
+//                         verifies the API key against centaurCredentials.
 //
 // No turn-0 pre-staging is needed for engine-only (centaur-less) runs: a
 // spawn-stacked snake ([p,p,p]) with nothing staged gets the engine's legal
@@ -92,6 +96,10 @@ for (const c of CENTAURS) {
   })
 }
 console.log(`centaurs seeded: ${CENTAURS.map((c) => `${c.id} (key ${c.key})`).join(", ")}`)
+if (flag("credentials-only")) {
+  console.log("CREDENTIALS-ONLY: skipping session/game seed")
+  process.exit(0)
+}
 
 // --- 2. session -> onSessionCreated creates the setup doc ---
 const sessRef = db.collection("sessions").doc(sessionID)

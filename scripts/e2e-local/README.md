@@ -48,12 +48,17 @@ Order (run-all does all of this, with a cleanup trap):
    `run-centaur.sh 6002 dave ttc_local-key-dave` — must be up before seeding
    so they can pick up their invites.
 3. `pw-smoke.mjs http://127.0.0.1:6001 3` (and :6002) — **before the game
-   starts**, and the pages stay open for the whole run. An idle centaur
-   suspends its Firebase connection after ~60s (`FIREBASE_SUSPEND_GRACE_MS`);
-   an open `/play` page counts as operator activity and keeps it connected.
-   The in-flight ActivityController work will make a running game hold the
-   connection by itself, after which the pages are only needed as UI
-   assertions, not as presence keep-alives.
+   starts**. Under the centaur's ActivityController idle rule a
+   merely-open tab counts as NOTHING: only verifiable human actions
+   (dashboard page GETs, user-intent WS messages, mutating API calls)
+   reset the 60s idle grace (`IDLE_GRACE_MS`), after which Firebase is
+   suspended. pw-smoke therefore reloads `/play` every ~40s while waiting
+   for a game card — each reload is a real page GET, i.e. a human action.
+   Once the game is progressing, the robustly-progressing-game rule holds
+   the instance awake by itself (up to `GAME_HUMAN_ATTENTION_CAP_MS` =
+   10 min past the last human action) and the reloads stop; after game
+   end, with no further human actions, the centaur suspends within one
+   evaluation sweep (~5s).
 4. `seed.mjs` — seeds and starts the game (two-step: settings update first,
    then `startRequested: true` as a separate update, because `onGameStarted`
    only fires on update events and invites must sync before the start).
@@ -161,3 +166,61 @@ A second `seed.mjs --first-turn-time 6 --max-turn-time 4 --start-delay-ms
 through the fixed collectionGroup filter (invite docs present and correctly
 excluded), and passed identically (alive=10 at turn 1, 3 resolutions).
 Teardown via `pkill -f "emulators[:]start"` left no processes running.
+
+### Two-centaur run (post-refactor), validated live 2026-08-13
+
+Full 2-team × 5-snakes run with BOTH teams driven by real Chris-Centaur
+processes (TacticToes `ce93581` + this run's scaffold fixes; Chris-Centaur
+`f2a4360`, post-ActivityController refactor), steps run individually rather
+than via `run-all.sh` for control. Emulator suite booted (~25s to "All
+emulators ready"), then `seed.mjs --credentials-only` (new flag), then
+`run-centaur.sh 6001 chris …` and `6002 dave …`. Both centaurs booted before
+the credentials landed, failed their first sign-in (`functions/
+permission-denied`), and connected cleanly via `POST /api/firebase-retry`
+("Signed in as centaur:chris"/":dave"). pw-smoke pages opened next (each
+`/play` GET = a verifiable human action), then
+`seed.mjs --first-turn-time 15 --max-turn-time 6 --max-turns 60`.
+
+Results:
+
+- `watch.mjs --turns 10 --min-turns 10`: **PASS** — turns 1–6 all
+  `alive=10 movesApplied=10`, first death turn 7, `PROGRESSED 10 resolved
+  turns — SUCCESS`. (Engine-default marching kills half the snakes by turn
+  2 — 10/10 alive through turn 6 is itself proof the centaurs were
+  steering.) Left running, the game went the full `maxTurns`:
+  60 resolved turns, team dave won (teamScore 28, all 5 dave snakes in
+  the winners list; 5 snakes alive at the final turn).
+- Centaur-staged moves: **PASS** — 207 `privateMoves` docs by turn 13,
+  staged on every turn (12–18 writes/turn), all 10 distinct snake ids
+  staging; ~150 staging log lines per centaur.
+- Both dashboards: **PASS** — pw-smoke on :6001 and :6002 each saw 3 turn
+  advances on the `/play` card and `/game/:id` rendered `#pageTitle`
+  ("Game <id>").
+- Idle rule, mid-game: **PASS** — zero `[tt-firebase] Suspended` lines
+  during the game. Last human action 04:14:49 (pw `/game/:id` GET); the
+  60s grace expired ~04:15:49 and the progressing game alone held both
+  instances connected for the remaining ~4.7 min — the new
+  progressing-game rule doing real work (old presence rule would have
+  needed an open-tab crutch; new rule ignores untouched tabs entirely).
+- Idle rule, post-game: **PASS** — game finished 04:20:33 (turn 60); both
+  logs show `endGame` → "Manager is now fully idle" → `[tt-firebase]
+  Suspended` immediately after (observed suspended ≤11s after
+  `timeFinished`), i.e. game-end pokes the controller and the already-
+  expired grace suspends on the spot rather than waiting out the 10-min
+  cap.
+- SIGTERM: **orderly but SLOW** — both processes ran the full shutdown
+  sequence and exited ("Server closed"), but took ~2.5–3 min because
+  `DecisionLogger.shutdown()` drains its queue (328/309 entries) against
+  an unreachable Postgres with 3 retries + backoff per row (no
+  DATABASE_URL ⇒ pg defaults to 127.0.0.1:5432, ECONNREFUSED). Centaur-
+  side issue, reported upstream: the flush should short-circuit or be
+  deadline-capped when the DB is unreachable/not configured.
+
+Teardown: `pkill -f "emulators[:]start"` — all emulator, centaur and
+Playwright processes gone; ports 8080/9099/5001/4400/6001/6002 all closed.
+
+Scaffold changes from this run: `pw-smoke.mjs` reload-keepalive while
+waiting for the game card (new idle rule), `seed.mjs --credentials-only`
+(seed credentials before centaur boot so sign-in can succeed first try or
+via one retry), stale presence-rule comments in `run-all.sh` and this
+README rewritten.
