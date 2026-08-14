@@ -153,9 +153,9 @@ const mkTurn = (
     clashes: [],
     moves: {},
     winners: [],
-    // Every unit carries a facing; irrelevant here (every test stages all
+    // Every unit carries an orientation; irrelevant here (every test stages all
     // moves) beyond satisfying the Turn shape.
-    unitFacing: Object.fromEntries(ids.map((id) => [id, { dx: 1, dy: 0 }])),
+    orientation: Object.fromEntries(ids.map((id) => [id, { dx: 1, dy: 0 }])),
     ...overrides,
   }
 }

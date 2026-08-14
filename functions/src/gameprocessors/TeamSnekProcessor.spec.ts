@@ -50,11 +50,11 @@ const mkTurn = (
     moves: {},
     winners: [],
     ...overrides,
-    // Every unit carries a facing; tests override the units whose facing
+    // Every unit carries an orientation; tests override the units whose orientation
     // matters.
-    unitFacing: {
+    orientation: {
       ...Object.fromEntries(playerIDs.map((id) => [id, { dx: 1, dy: 0 }])),
-      ...overrides.unitFacing,
+      ...overrides.orientation,
     },
   }
 }
@@ -187,15 +187,15 @@ describe("TeamSnekProcessor win conditions", () => {
 describe("TeamSnekProcessor default moves (nothing staged at resolution)", () => {
   // 7x7 board: index = y * 7 + x, perimeter (x=0|6, y=0|6) is wall.
 
-  it("steps a stacked-spawn snake one square in its facing direction", () => {
+  it("steps a stacked-spawn snake one square along its orientation", () => {
     // Both snakes are freshly spawned ([p, p, p]); the default move is one
-    // step in the facing direction, which turn 0 stamps toward the centre.
+    // step along the orientation, which turn 0 stamps toward the centre.
     const turn = mkTurn(
       {
         t1: [24, 24, 24],
         t2: [10, 10, 10],
       },
-      { unitFacing: { t1: { dx: 1, dy: 0 }, t2: { dx: 0, dy: 1 } } }
+      { orientation: { t1: { dx: 1, dy: 0 }, t2: { dx: 0, dy: 1 } } }
     )
     const processor = new TeamSnekProcessor(mkGameState(mkSetup(), turn))
 
@@ -210,13 +210,13 @@ describe("TeamSnekProcessor default moves (nothing staged at resolution)", () =>
 
   it("continues straight for snakes with movement history", () => {
     // Both snakes face +x (the direction they last moved); with nothing
-    // staged each steps one square along that facing.
+    // staged each steps one square along that orientation.
     const turn = mkTurn(
       {
         t1: [24, 23, 22],
         t2: [10, 9, 8],
       },
-      { unitFacing: { t1: { dx: 1, dy: 0 }, t2: { dx: 1, dy: 0 } } }
+      { orientation: { t1: { dx: 1, dy: 0 }, t2: { dx: 1, dy: 0 } } }
     )
     const processor = new TeamSnekProcessor(mkGameState(mkSetup(), turn))
 
@@ -229,22 +229,22 @@ describe("TeamSnekProcessor default moves (nothing staged at resolution)", () =>
     expect(next.clashes).toEqual([])
   })
 
-  it("steps along the facing even into a fatal square — the default never re-routes", () => {
-    // t2 is stacked at 8 (x=1, y=1) facing +x, straight at t1's body on 9.
-    // The default is exactly one step along the facing, so t2 walks into
+  it("steps along the orientation even into a fatal square — the default never re-routes", () => {
+    // t2 is stacked at 8 (x=1, y=1) oriented +x, straight at t1's body on 9.
+    // The default is exactly one step along the orientation, so t2 walks into
     // the body and dies there.
     const turn = mkTurn(
       {
         t1: [11, 10, 9, 16, 15, 22],
         t2: [8, 8, 8],
       },
-      { unitFacing: { t1: { dx: 1, dy: 0 }, t2: { dx: 1, dy: 0 } } }
+      { orientation: { t1: { dx: 1, dy: 0 }, t2: { dx: 1, dy: 0 } } }
     )
     const processor = new TeamSnekProcessor(mkGameState(mkSetup(), turn))
 
     const next = processor.applyMoves(turn, [])
 
-    expect(next.moves.t2).toBe(9) // one step along the facing, nothing else
+    expect(next.moves.t2).toBe(9) // one step along the orientation, nothing else
     expect(next.playerPieces.t1).toEqual([12, 11, 10, 9, 16, 15]) // continued straight
     expect(next.alivePlayers).toEqual(["t1"])
     const t2Reasons = next.clashes

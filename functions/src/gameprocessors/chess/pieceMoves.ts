@@ -1,6 +1,6 @@
 import { UnitType } from "@shared/types/Game"
 
-export interface Facing {
+export interface Orientation {
   dx: number
   dy: number
 }
@@ -33,19 +33,19 @@ export const toIndex = (x: number, y: number, boardWidth: number): number => y *
 export const isInterior = (x: number, y: number, boardWidth: number, boardHeight: number): boolean =>
   x >= 1 && x <= boardWidth - 2 && y >= 1 && y <= boardHeight - 2
 
-export const ORTHOGONALS: Facing[] = [
+export const ORTHOGONALS: Orientation[] = [
   { dx: 1, dy: 0 },
   { dx: -1, dy: 0 },
   { dx: 0, dy: 1 },
   { dx: 0, dy: -1 },
 ]
-const DIAGONALS: Facing[] = [
+const DIAGONALS: Orientation[] = [
   { dx: 1, dy: 1 },
   { dx: 1, dy: -1 },
   { dx: -1, dy: 1 },
   { dx: -1, dy: -1 },
 ]
-const KNIGHT_OFFSETS: Facing[] = [
+const KNIGHT_OFFSETS: Orientation[] = [
   { dx: 1, dy: 2 },
   { dx: 2, dy: 1 },
   { dx: 2, dy: -1 },
@@ -56,10 +56,10 @@ const KNIGHT_OFFSETS: Facing[] = [
   { dx: -1, dy: 2 },
 ]
 
-// The legal facing-direction set per unit type: the directions a unit's
+// The legal orientation set per unit type: the directions a unit's
 // orientation can ever take (snake/rook/pawn: the 4 orthogonals; bishop:
 // the 4 diagonals; queen/king: all 8; knight: its 8 L-offsets).
-export const facingDirections = (type: UnitType): Facing[] => {
+export const legalOrientations = (type: UnitType): Orientation[] => {
   switch (type) {
     case "bishop":
       return DIAGONALS
@@ -73,25 +73,26 @@ export const facingDirections = (type: UnitType): Facing[] => {
   }
 }
 
-// Spawn orientation candidates: the facing(s) from the type's legal set
+// Spawn orientation candidates: the orientation(s) from the type's legal
+// orientation set
 // with minimal angle to the vector from the spawn square to the board
 // centre. Several candidates tie when the spawn sits on a symmetry axis of
 // the set (e.g. a rook exactly on the diagonal from centre) or exactly at
 // the centre (every candidate ties).
-export const spawnFacingCandidates = (
+export const spawnOrientationCandidates = (
   type: UnitType,
   index: number,
   boardWidth: number,
   boardHeight: number,
-): Facing[] => {
+): Orientation[] => {
   const { x, y } = toXY(index, boardWidth)
   const vx = (boardWidth - 1) / 2 - x
   const vy = (boardHeight - 1) / 2 - y
-  const candidates = facingDirections(type)
+  const candidates = legalOrientations(type)
   if (vx === 0 && vy === 0) return candidates
 
   const EPS = 1e-9
-  let best: Facing[] = []
+  let best: Orientation[] = []
   let bestScore = -Infinity
   candidates.forEach((f) => {
     // cos(angle) up to the constant |v|: dot(f, v) / |f|
@@ -108,20 +109,20 @@ export const spawnFacingCandidates = (
 
 // Spawn orientation, assigned once at turn 0: toward the board centre,
 // ties resolved uniformly at random among the tied candidates.
-export const spawnFacing = (
+export const spawnOrientation = (
   type: UnitType,
   index: number,
   boardWidth: number,
   boardHeight: number,
-): Facing => {
-  const best = spawnFacingCandidates(type, index, boardWidth, boardHeight)
+): Orientation => {
+  const best = spawnOrientationCandidates(type, index, boardWidth, boardHeight)
   return best[Math.floor(Math.random() * best.length)]
 }
 
 export type PieceAction =
   | { kind: "stay" }
   | { kind: "move"; path: number[] }
-  | { kind: "rotate"; facing: Facing }
+  | { kind: "rotate"; orientation: Orientation }
 
 /**
  * Plans a piece's staged destination into an action.
@@ -139,7 +140,7 @@ export const planPieceAction = (
   dest: number,
   boardWidth: number,
   boardHeight: number,
-  facing: Facing,
+  orientation: Orientation,
   pawnTargets?: Set<number>,
 ): PieceAction | null => {
   if (dest === origin) return { kind: "stay" }
@@ -171,14 +172,14 @@ export const planPieceAction = (
         ? { kind: "move", path: rayPath(o, d, boardWidth) }
         : null
     case "pawn": {
-      if (dx === facing.dx && dy === facing.dy) return { kind: "move", path: [dest] }
+      if (dx === orientation.dx && dy === orientation.dy) return { kind: "move", path: [dest] }
       // Side squares: a full-turn quarter rotation toward that side.
-      if ((dx === -facing.dy && dy === facing.dx) || (dx === facing.dy && dy === -facing.dx)) {
-        return { kind: "rotate", facing: { dx, dy } }
+      if ((dx === -orientation.dy && dy === orientation.dx) || (dx === orientation.dy && dy === -orientation.dx)) {
+        return { kind: "rotate", orientation: { dx, dy } }
       }
       // Diagonal-forward: attack/eat only.
-      const diag1 = { dx: facing.dx - facing.dy, dy: facing.dy + facing.dx }
-      const diag2 = { dx: facing.dx + facing.dy, dy: facing.dy - facing.dx }
+      const diag1 = { dx: orientation.dx - orientation.dy, dy: orientation.dy + orientation.dx }
+      const diag2 = { dx: orientation.dx + orientation.dy, dy: orientation.dy - orientation.dx }
       if ((dx === diag1.dx && dy === diag1.dy) || (dx === diag2.dx && dy === diag2.dy)) {
         return pawnTargets?.has(dest) ? { kind: "move", path: [dest] } : null
       }

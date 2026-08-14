@@ -3,11 +3,11 @@ import { Timestamp } from "firebase-admin/firestore"
 import { logger } from "../logger"
 import {
   DEFAULT_PAWN_PROMOTION_WEIGHT,
-  Facing,
+  Orientation,
   ORTHOGONALS,
   isPieceType,
   planPieceAction,
-  spawnFacing,
+  spawnOrientation,
   toXY,
 } from "./chess/pieceMoves"
 import { SimUnit, runChessTurnSim } from "./chess/chessTurnSim"
@@ -37,8 +37,8 @@ export interface SnakeGameState {
   newScores: { [playerID: string]: number }
 
   // Per-unit orientation, seeded from the current turn and rewritten by
-  // updateUnitFacing once the turn's movement and deaths have resolved.
-  unitFacing: { [playerID: string]: Facing }
+  // updateOrientation once the turn's movement and deaths have resolved.
+  orientation: { [playerID: string]: Orientation }
 
   // Chess-piece games only (see docs/chess-pieces.md)
   unitTypes?: { [playerID: string]: UnitType }
@@ -172,11 +172,11 @@ export class TeamSnekProcessor {
     })
 
     // Spawn orientation: every unit faces toward the board centre, chosen
-    // from its type's legal facing-direction set (ties resolve uniformly at
+    // from its type's legal orientation set (ties resolve uniformly at
     // random).
-    const unitFacing: { [playerID: string]: Facing } = {}
+    const orientation: { [playerID: string]: Orientation } = {}
     gamePlayers.forEach((player) => {
-      unitFacing[player.id] = spawnFacing(
+      orientation[player.id] = spawnOrientation(
         player.unitType ?? "snake",
         playerPieces[player.id][0],
         boardWidth,
@@ -205,7 +205,7 @@ export class TeamSnekProcessor {
       invulnerabilityPotions: [],
       playerInvulnerabilityLevel: initialInvulnerabilityLevel,
       activeEffects: [],
-      unitFacing,
+      orientation,
     }
 
     if (this.hasPieceUnits()) {
@@ -246,9 +246,9 @@ export class TeamSnekProcessor {
       // 4. Process food and health
       this.processFoodAndHealth(gameState)
 
-      // Facing rewrites after the last phase that can kill, so the map it
+      // Orientation rewrites after the last phase that can kill, so the map it
       // rebuilds holds exactly the units still on the board.
-      this.updateUnitFacing(gameState, originSquares)
+      this.updateOrientation(gameState, originSquares)
 
       // 5. Process invulnerability potion collection
       this.processInvulnerabilityPotionCollection(gameState, currentTurnNumber)
@@ -318,10 +318,10 @@ export class TeamSnekProcessor {
     // 5. Regicide: a team configured with kings dies with its last king
     this.applyRegicide(gameState)
 
-    // Facing rewrites after the last phase that can kill, so the map it
+    // Orientation rewrites after the last phase that can kill, so the map it
     // rebuilds holds exactly the units still on the board — and before
-    // promotion, so a pawn that promotes this turn keeps its pawn facing.
-    this.updateUnitFacing(gameState, originSquares)
+    // promotion, so a pawn that promotes this turn keeps its pawn orientation.
+    this.updateOrientation(gameState, originSquares)
 
     // 6-8. Potions, spawns, effect expiry (unchanged phases)
     this.processInvulnerabilityPotionCollection(gameState, currentTurnNumber)
@@ -337,7 +337,7 @@ export class TeamSnekProcessor {
     return this.createNewTurn(currentTurn, gameState, winners)
   }
 
-  // Head squares before movement resolves, threaded into updateUnitFacing
+  // Head squares before movement resolves, threaded into updateOrientation
   // once it has.
   private captureOriginSquares(gameState: SnakeGameState): { [playerID: string]: number } {
     const originSquares: { [playerID: string]: number } = {}
@@ -347,22 +347,22 @@ export class TeamSnekProcessor {
     return originSquares
   }
 
-  // Rewrites unitFacing for the turn. The map is rebuilt from the units
+  // Rewrites orientation for the turn. The map is rebuilt from the units
   // still on the board, so dead units drop out. A unit that moved faces its
   // movement direction — sliders and kings the unit step (e.g. {1,0},
   // {1,1}), knights their exact L-offset (e.g. {1,-2}), snakes head minus
   // the origin square the head left (the neck position at move time, so the
   // rule holds even for a snake severed down to its head or one that grew
-  // this turn). Pawns change facing only via their rotation action, which
-  // planChessMoves already applied. Units that held keep their facing.
-  private updateUnitFacing(
+  // this turn). Pawns change orientation only via their rotation action, which
+  // planChessMoves already applied. Units that held keep their orientation.
+  private updateOrientation(
     gameState: SnakeGameState,
     originSquares: { [playerID: string]: number },
   ): void {
-    const facing: { [playerID: string]: Facing } = {}
+    const orientation: { [playerID: string]: Orientation } = {}
     const { boardWidth } = gameState
     Object.keys(gameState.newSnakes).forEach((playerID) => {
-      facing[playerID] = gameState.unitFacing[playerID]
+      orientation[playerID] = gameState.orientation[playerID]
       const type = gameState.unitTypes?.[playerID] ?? "snake"
       if (type === "pawn") return
 
@@ -383,10 +383,10 @@ export class TeamSnekProcessor {
       const t = toXY(to, boardWidth)
       const dx = t.x - f.x
       const dy = t.y - f.y
-      facing[playerID] =
+      orientation[playerID] =
         type === "knight" ? { dx, dy } : { dx: Math.sign(dx), dy: Math.sign(dy) }
     })
-    gameState.unitFacing = facing
+    gameState.orientation = orientation
   }
 
   private planChessMoves(
@@ -424,7 +424,7 @@ export class TeamSnekProcessor {
               staged,
               gameState.boardWidth,
               gameState.boardHeight,
-              gameState.unitFacing[playerID],
+              gameState.orientation[playerID],
               pawnTargets,
             ) ?? { kind: "stay" as const } // illegal destination → stay
 
@@ -433,7 +433,7 @@ export class TeamSnekProcessor {
         gameState.playerMoves[playerID] = action.path[action.path.length - 1]
       } else {
         if (action.kind === "rotate") {
-          gameState.unitFacing[playerID] = action.facing
+          gameState.orientation[playerID] = action.orientation
         }
         plannedPaths[playerID] = []
         gameState.playerMoves[playerID] = origin
@@ -588,7 +588,7 @@ export class TeamSnekProcessor {
       clashes: [],
       vulnerableSnakesCollided: new Set(),
       newScores: {},
-      unitFacing: { ...currentTurn.unitFacing },
+      orientation: { ...currentTurn.orientation },
     }
   }
 
@@ -635,16 +635,16 @@ export class TeamSnekProcessor {
     return moveIndex
   }
 
-  // The default move is one step in the snake's facing direction: the
-  // direction it last moved, or — on its first move — its spawn facing,
+  // The default move is one step along the snake's orientation: the
+  // direction it last moved, or — on its first move — its spawn orientation,
   // which points toward the board centre from an interior square and is
   // therefore always in-bounds.
   private getDefaultMove(gameState: SnakeGameState, playerID: string): number {
     const { boardWidth } = gameState
-    const facing = gameState.unitFacing[playerID]
+    const orientation = gameState.orientation[playerID]
     const headIndex = gameState.newSnakes[playerID][0]
-    const newX = (headIndex % boardWidth) + facing.dx
-    const newY = Math.floor(headIndex / boardWidth) + facing.dy
+    const newX = (headIndex % boardWidth) + orientation.dx
+    const newY = Math.floor(headIndex / boardWidth) + orientation.dy
     return newY * boardWidth + newX
   }
 
@@ -1364,7 +1364,7 @@ export class TeamSnekProcessor {
       invulnerabilityPotions: gameState.newInvulnerabilityPotions,
       playerInvulnerabilityLevel: gameState.playerInvulnerabilityLevel,
       activeEffects: gameState.activeEffects,
-      unitFacing: gameState.unitFacing,
+      orientation: gameState.orientation,
       // Chess-piece games: these must be rewritten every turn (the spread
       // above would otherwise freeze the previous turn's values).
       ...(gameState.unitTypes

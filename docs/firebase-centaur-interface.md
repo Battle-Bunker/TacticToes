@@ -197,9 +197,9 @@ underneath a staged write would silently invalidate it.
 When a turn resolves, each new `Turn` document's `moves` map records the
 move index **actually applied** for every snake — the winning staged move,
 or the engine's default when nothing valid was staged. The default policy is
-deterministic: **one step in the snake's facing direction**
-(`turn.unitFacing[playerID]` — the direction it last moved; on a snake's
-first move, its spawn facing). Clients can therefore both read the
+deterministic: **one step along the snake's orientation**
+(`turn.orientation[playerID]` — the direction it last moved; on a snake's
+first move, its spawn orientation). Clients can therefore both read the
 authoritative applied moves from the next turn and accurately predict what
 an unstaged, committed snake will do.
 
@@ -221,14 +221,14 @@ wire contract is unchanged in shape; what varies for a piece unit:
   entry records the square it actually ended on — a slider stopped by an
   in-flight collision records its stop square, with the squares it actually
   traversed in `turn.paths[playerID]`.
-- `turn.unitFacing[playerID]` carries every unit's orientation, in every
+- `turn.orientation[playerID]` carries every unit's orientation, in every
   game — snake-only games included. Rewritten each turn: a unit that moved
   faces its move direction (sliders/king: unit step; knight: exact
-  L-offset; snake: head minus neck); units that stayed keep their facing;
+  L-offset; snake: head minus neck); units that stayed keep their orientation;
   dead units drop out. Pawns rotate **only** via their rotation action —
-  forward/diagonal steps leave their facing alone. Turn 0: every unit
+  forward/diagonal steps leave their orientation alone. Turn 0: every unit
   faces toward the board centre, chosen from its type's legal
-  facing-direction set (snake/rook/pawn: 4 orthogonals; bishop: 4
+  orientation set (snake/rook/pawn: 4 orthogonals; bishop: 4
   diagonals; queen/king: 8; knight: its 8 L-offsets) with minimal angle to
   the spawn→centre vector, ties resolved uniformly at random.
 - In-flight clashes carry `subStep`, the within-turn step they happened on.

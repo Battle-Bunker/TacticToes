@@ -370,7 +370,7 @@ const GameLogic = ({
 
   // Render chess pieces: a piece is a weight-stack (N copies of one square),
   // drawn as a single cell with the piece glyph, a letter badge, a weight
-  // badge when the stack is taller than 1, and a facing marker for pawns.
+  // badge when the stack is taller than 1, and an orientation marker for pawns.
   Object.entries(playerPieces).forEach(([playerID, positions]) => {
     const unitType = getUnitType(playerID)
     if (unitType === "snake" || positions.length === 0) return
@@ -394,11 +394,11 @@ const GameLogic = ({
       zIndex: 3,
     }
 
-    let facingMarker: JSX.Element | null = null
-    const facing =
-      unitType === "pawn" ? selectedTurn.unitFacing[playerID] : undefined
-    if (facing) {
-      const { dx, dy } = facing
+    let orientationMarker: JSX.Element | null = null
+    const orientation =
+      unitType === "pawn" ? selectedTurn.orientation[playerID] : undefined
+    if (orientation) {
+      const { dx, dy } = orientation
       const arrow = dy < 0 ? "▲" : dy > 0 ? "▼" : dx < 0 ? "◀" : dx > 0 ? "▶" : null
       const placement: SxProps<Theme> =
         dy < 0
@@ -410,7 +410,7 @@ const GameLogic = ({
               ? { left: 0, top: "50%", transform: "translateY(-50%)" }
               : { right: 0, top: "50%", transform: "translateY(-50%)" }
       if (arrow) {
-        facingMarker = (
+        orientationMarker = (
           <Box
             sx={{
               position: "absolute",
@@ -463,7 +463,7 @@ const GameLogic = ({
         {weight > 1 && (
           <Box sx={{ ...badgeStyle, bottom: "18%", right: 2 }}>{weight}</Box>
         )}
-        {facingMarker}
+        {orientationMarker}
         {healthBar(playerID)}
       </Cell>
     )
