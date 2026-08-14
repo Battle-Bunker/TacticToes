@@ -40,12 +40,12 @@ Moves stay a single destination square index on the wire (`Move.move`).
 The path is derived: unique straight ray for rook/bishop/queen, single jump
 for the knight, single step for king/pawn.
 
-Every unit carries an orientation (`Turn.unitFacing`), usually implied by
-its last moved direction but tracked independently so the two can diverge
-(pawns rotate only via their rotation action). At spawn every unit faces
-toward the board centre, chosen from its type's legal facing-direction
-set; thereafter non-pawn units face the way they last moved. For pawns
-alone, orientation is also engine-legality-bearing (see below).
+Every unit in every game carries an orientation (`Turn.unitFacing`) —
+snake-only games included. At spawn every unit faces toward the board
+centre, chosen from its type's legal facing-direction set; each turn
+thereafter a unit that moved faces the way it moved, a unit that held
+keeps its facing, and pawns change facing only via their rotation action.
+For pawns alone, orientation is also engine-legality-bearing (see below).
 
 - **Rook**: any distance along a row/column. **Bishop**: along a diagonal.
   **Queen**: either. Range is unlimited (health cost is the limiter).
@@ -155,20 +155,21 @@ the longest path staged this turn.
 - Weights are fixed for the whole simulation (growth happens in the food
   phase, after collisions — same as today's snakes).
 
-Snake-only games (no piece units configured) run the exact pre-existing
-single-pass resolution path — zero behavioural change.
+Snake-only games (no piece units configured) resolve in a single pass:
+every snake moves exactly one square per turn, so there is nothing for
+sub-steps to order.
 
-## Wire format additions (all optional / backward compatible)
+## Wire format
 
 - `GameSetup.unitsPerTeam?: { snake?, pawn?, knight?, bishop?, rook?,
-  queen?, king? }` — counts per team. Absent → `snakesPerTeam` snakes
-  (legacy). When present, `snakesPerTeam` is ignored by expansion.
+  queen?, king? }` — counts per team. Absent → `snakesPerTeam` snakes.
+  When present, `snakesPerTeam` is ignored by expansion.
 - `GamePlayer.unitType?: UnitType` — absent means `"snake"`.
 - `Turn.unitTypes?: { [playerID]: UnitType }` — current type per unit
-  (changes on pawn promotion).
-- `Turn.unitFacing?: { [playerID]: { dx, dy } }` — per-unit orientation,
-  written for **every** unit in piece games (snakes included; absent in
-  snake-only legacy games). Rewritten every turn: a unit that moved faces
+  (changes on pawn promotion); absent in snake-only games.
+- `Turn.unitFacing: { [playerID]: { dx, dy } }` — per-unit orientation,
+  written for **every** unit in **every** game, snake-only games
+  included. Rewritten every turn: a unit that moved faces
   the direction it moved — sliders/king the unit step (e.g. `{1,0}`,
   `{1,1}`), knight its exact L-offset (e.g. `{1,-2}`), snake head minus
   neck — while units that stayed keep their previous facing and dead units

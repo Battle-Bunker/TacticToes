@@ -621,8 +621,8 @@ const GameSetup: React.FC = () => {
     });
   };
 
-  // Current per-team unit counts. Absent unitsPerTeam mirrors the legacy
-  // setup: snakesPerTeam snakes and zero of every chess piece.
+  // Current per-team unit counts. Absent unitsPerTeam means snakesPerTeam
+  // snakes and zero of every chess piece.
   const unitCounts: UnitCounts = gameSetup.unitsPerTeam ?? {
     snake: gameSetup.snakesPerTeam,
   };

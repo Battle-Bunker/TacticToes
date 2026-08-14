@@ -56,6 +56,12 @@ const mkTurn = (
     moves: {},
     winners: [],
     ...overrides,
+    // Every unit carries a facing; tests override the units whose facing
+    // matters.
+    unitFacing: {
+      ...Object.fromEntries(ids.map((id) => [id, { dx: 1, dy: 0 }])),
+      ...overrides.unitFacing,
+    },
   }
 }
 
@@ -303,7 +309,7 @@ describe("chess pieces: pawns", () => {
 
     expect(next.playerPieces.t1).toEqual([pawnAt]) // did not move
     expect(next.moves.t1).toBe(pawnAt)
-    expect(next.unitFacing?.t1).toEqual({ dx: 0, dy: -1 })
+    expect(next.unitFacing.t1).toEqual({ dx: 0, dy: -1 })
     expect(next.playerHealth.t1).toBe(100) // no movement cost
   })
 
@@ -434,7 +440,7 @@ describe("chess pieces: regicide and winners", () => {
   })
 })
 
-describe("unit orientation (unitFacing)", () => {
+describe("unit orientation (unitFacing) — every unit in every game", () => {
   it("a slider that moved faces its unit step direction", () => {
     const players = [gp("t1", "t1", "A", "rook"), gp("t2", "t2", "A", "bishop")]
     const next = run(
@@ -443,8 +449,8 @@ describe("unit orientation (unitFacing)", () => {
       [mv("t1", at(4, 5)), mv("t2", at(5, 5))]
     )
 
-    expect(next.unitFacing?.t1).toEqual({ dx: 1, dy: 0 }) // rook slid right
-    expect(next.unitFacing?.t2).toEqual({ dx: 1, dy: 1 }) // bishop slid down-right
+    expect(next.unitFacing.t1).toEqual({ dx: 1, dy: 0 }) // rook slid right
+    expect(next.unitFacing.t2).toEqual({ dx: 1, dy: 1 }) // bishop slid down-right
   })
 
   it("a knight faces its exact L-offset", () => {
@@ -456,7 +462,7 @@ describe("unit orientation (unitFacing)", () => {
     )
 
     expect(next.playerPieces.t1).toEqual([at(5, 2)])
-    expect(next.unitFacing?.t1).toEqual({ dx: 1, dy: -2 })
+    expect(next.unitFacing.t1).toEqual({ dx: 1, dy: -2 })
   })
 
   it("a pawn's diagonal step leaves its facing unchanged", () => {
@@ -469,7 +475,7 @@ describe("unit orientation (unitFacing)", () => {
     )
 
     expect(next.playerPieces.t1).toEqual([at(4, 4), at(4, 4)])
-    expect(next.unitFacing?.t1).toEqual({ dx: 1, dy: 0 }) // not rotated
+    expect(next.unitFacing.t1).toEqual({ dx: 1, dy: 0 }) // not rotated
   })
 
   it("a unit that holds keeps its previous facing", () => {
@@ -481,8 +487,8 @@ describe("unit orientation (unitFacing)", () => {
       { unitFacing: { t1: { dx: 0, dy: 1 }, t2: { dx: -1, dy: 0 } } }
     )
 
-    expect(next.unitFacing?.t1).toEqual({ dx: 0, dy: 1 })
-    expect(next.unitFacing?.t2).toEqual({ dx: -1, dy: 0 })
+    expect(next.unitFacing.t1).toEqual({ dx: 0, dy: 1 })
+    expect(next.unitFacing.t2).toEqual({ dx: -1, dy: 0 })
   })
 
   it("a snake faces head-minus-neck after its move", () => {
@@ -494,7 +500,7 @@ describe("unit orientation (unitFacing)", () => {
     )
 
     expect(next.playerPieces.t1).toEqual([at(4, 4), at(4, 5), at(3, 5)])
-    expect(next.unitFacing?.t1).toEqual({ dx: 0, dy: -1 })
+    expect(next.unitFacing.t1).toEqual({ dx: 0, dy: -1 })
   })
 
   // Turn 0 at preset squares so spawn-facing assertions are exact.
@@ -535,12 +541,12 @@ describe("unit orientation (unitFacing)", () => {
       s: at(6, 2), // (-1,3) → (0,1)
     })
 
-    expect(turn0.unitFacing?.p).toEqual({ dx: 1, dy: 0 })
-    expect(turn0.unitFacing?.r).toEqual({ dx: 0, dy: -1 })
-    expect(turn0.unitFacing?.b).toEqual({ dx: 1, dy: 1 })
-    expect(turn0.unitFacing?.n).toEqual({ dx: -2, dy: -1 })
-    expect(turn0.unitFacing?.k).toEqual({ dx: 1, dy: 0 })
-    expect(turn0.unitFacing?.s).toEqual({ dx: 0, dy: 1 })
+    expect(turn0.unitFacing.p).toEqual({ dx: 1, dy: 0 })
+    expect(turn0.unitFacing.r).toEqual({ dx: 0, dy: -1 })
+    expect(turn0.unitFacing.b).toEqual({ dx: 1, dy: 1 })
+    expect(turn0.unitFacing.n).toEqual({ dx: -2, dy: -1 })
+    expect(turn0.unitFacing.k).toEqual({ dx: 1, dy: 0 })
+    expect(turn0.unitFacing.s).toEqual({ dx: 0, dy: 1 })
   })
 
   it("spawn: ties on a symmetry axis resolve to one of the tied candidates", () => {
@@ -571,7 +577,7 @@ describe("unit orientation (unitFacing)", () => {
     ;(["r", "p", "n", "q"] as const).forEach((id) => {
       const candidates = spawnFacingCandidates(types[id], positions[id], W, W)
       expect(candidates.length).toBeGreaterThan(1)
-      expect(candidates).toContainEqual(turn0.unitFacing?.[id])
+      expect(candidates).toContainEqual(turn0.unitFacing[id])
     })
     expect(spawnFacingCandidates("queen", positions.q, W, W)).toHaveLength(8)
   })
@@ -579,16 +585,18 @@ describe("unit orientation (unitFacing)", () => {
   it("promotion keeps the pawn's facing on the new queen", () => {
     const players = [gp("t1", "t1", "A", "pawn"), gp("t2", "t2", "A", "king")]
     const pawnAt = at(3, 5)
+    // The promoting step is diagonal-forward ({1,-1}), which a pawn's facing
+    // ignores — the new queen keeps the pawn facing, not the step direction.
     const next = run(
       players,
       { t1: [pawnAt, pawnAt], t2: [at(8, 8)] }, // weight 2, threshold 3
-      [mv("t1", at(4, 5))],
-      { unitFacing: { t1: { dx: 1, dy: 0 } }, food: [at(4, 5)] },
+      [mv("t1", at(4, 4))],
+      { unitFacing: { t1: { dx: 1, dy: 0 } }, food: [at(4, 4)] },
       { pawnPromotionWeight: 3 }
     )
 
     expect(next.unitTypes?.t1).toBe("queen")
-    expect(next.unitFacing?.t1).toEqual({ dx: 1, dy: 0 })
+    expect(next.unitFacing.t1).toEqual({ dx: 1, dy: 0 })
   })
 
   it("dead units drop out of the facing map", () => {
@@ -602,8 +610,49 @@ describe("unit orientation (unitFacing)", () => {
     )
 
     expect(next.alivePlayers).toEqual(["t1"])
-    expect(next.unitFacing?.t1).toEqual({ dx: 1, dy: 0 }) // faced its slide
-    expect(next.unitFacing?.t2).toBeUndefined()
+    expect(next.unitFacing.t1).toEqual({ dx: 1, dy: 0 }) // faced its slide
+    expect(next.unitFacing.t2).toBeUndefined()
+  })
+
+  it("snake-only game: spawn facing points toward the centre from the orthogonals", () => {
+    const players = [gp("s1", "t1", "A", "snake"), gp("s2", "t2", "A", "snake")]
+    const turn0 = spawnTurn0(players, {
+      s1: at(2, 5), // centre vector (3,0) → (1,0)
+      s2: at(6, 2), // (-1,3) → (0,1)
+    })
+
+    expect(turn0.unitFacing.s1).toEqual({ dx: 1, dy: 0 })
+    expect(turn0.unitFacing.s2).toEqual({ dx: 0, dy: 1 })
+    // unitTypes and paths stay chess-only.
+    expect(turn0.unitTypes).toBeUndefined()
+    expect(turn0.paths).toBeUndefined()
+  })
+
+  it("snake-only game: each turn a snake faces head-minus-neck", () => {
+    const players = [gp("s1", "t1", "A", "snake"), gp("s2", "t2", "A", "snake")]
+    const next = run(
+      players,
+      { s1: [at(4, 5), at(3, 5), at(2, 5)], s2: [at(8, 8), at(8, 7), at(8, 6)] },
+      [mv("s1", at(4, 4)), mv("s2", at(8, 9))],
+      { unitFacing: { s1: { dx: 1, dy: 0 }, s2: { dx: 0, dy: 1 } } }
+    )
+
+    expect(next.playerPieces.s1).toEqual([at(4, 4), at(4, 5), at(3, 5)])
+    expect(next.unitFacing.s1).toEqual({ dx: 0, dy: -1 }) // turned upward
+    expect(next.unitFacing.s2).toEqual({ dx: 0, dy: 1 }) // kept going down
+  })
+
+  it("snake-only game: dead units drop out of the facing map", () => {
+    const players = [gp("s1", "t1", "A", "snake"), gp("s2", "t2", "A", "snake")]
+    const next = run(
+      players,
+      { s1: [at(4, 5), at(3, 5), at(2, 5)], s2: [at(1, 1), at(1, 2), at(1, 3)] },
+      [mv("s1", at(5, 5)), mv("s2", at(0, 1))] // s2 drives into the wall
+    )
+
+    expect(next.alivePlayers).toEqual(["s1"])
+    expect(next.unitFacing.s1).toEqual({ dx: 1, dy: 0 })
+    expect(next.unitFacing.s2).toBeUndefined()
   })
 })
 

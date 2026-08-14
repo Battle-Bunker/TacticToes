@@ -2,7 +2,7 @@
 // Provisions two centaurs (admin SDK), configures a mixed snake+piece game,
 // then drives both centaurs through the REAL client-SDK path, asserting the
 // chess mechanics on the resolved turns: piece spawns (weight-1 stacks,
-// unitTypes, pawn facing), per-type max health, movement-tied health loss
+// unitTypes, every-unit facing), per-type max health, movement-tied health loss
 // (stationary pieces spend nothing), slider paths + applied-move recording,
 // pawn rotation, and snake 1/turn drain.
 //
@@ -192,14 +192,12 @@ async function main() {
           move = pickClearSlide(game.setup, turn, head, 2)
           if (move !== null) state.rookSlide[unit.id] = { from: head, to: move }
         } else if (type === "pawn" && turnNumber === 1) {
-          const f = turn.unitFacing?.[unit.id]
-          if (f) {
-            // Stage a side square (perpendicular to facing) = quarter rotation.
-            const w = game.setup.boardWidth
-            const perp = { dx: -f.dy, dy: f.dx }
-            move = head + perp.dy * w + perp.dx
-            state.pawnRotate[unit.id] = { at: head, facing: { ...f }, staged: move }
-          }
+          const f = turn.unitFacing[unit.id]
+          // Stage a side square (perpendicular to facing) = quarter rotation.
+          const w = game.setup.boardWidth
+          const perp = { dx: -f.dy, dy: f.dx }
+          move = head + perp.dy * w + perp.dx
+          state.pawnRotate[unit.id] = { at: head, facing: { ...f }, staged: move }
         }
         // Everything else (kings always, rook/pawn on other turns) stays:
         // stage nothing; the engine defaults pieces to stay.
@@ -262,7 +260,9 @@ async function main() {
     check(t0.playerPieces[snakeId]?.length === 3, "snake spawns as stacked triple")
     check(t0.playerPieces[kingId]?.length === 1, "king spawns at weight 1")
     check(t0.unitTypes?.[rookId] === "rook", "turn.unitTypes carries rook")
-    check(!!t0.unitFacing?.[pawnId], "pawn has spawn facing")
+    for (const id of [snakeId, kingId, rookId, pawnId]) {
+      check(!!t0.unitFacing[id], `${id} has spawn facing`)
+    }
     check(t0.playerHealth[kingId] === 10, `king starts at configured max 10 (got ${t0.playerHealth[kingId]})`)
     check(t0.playerHealth[snakeId] === 100, "snake starts at 100")
     check(t0.scores[kingId] === 1 && t0.scores[snakeId] === 3, "scores = weight (piece 1, snake 3)")
@@ -306,7 +306,7 @@ async function main() {
   for (const [pawnId, rot] of Object.entries(state.pawnRotate)) {
     const t2 = turns[2]
     if (!t2 || !t2.alivePlayers.includes(pawnId)) { log(`  note: pawn ${pawnId} not alive turn 2, skipping`); continue }
-    const f2 = t2.unitFacing?.[pawnId]
+    const f2 = t2.unitFacing[pawnId]
     check(f2 && (f2.dx !== rot.facing.dx || f2.dy !== rot.facing.dy),
       `pawn facing changed (${JSON.stringify(rot.facing)} -> ${JSON.stringify(f2)})`)
     check(t2.playerPieces[pawnId][0] === rot.at, "rotating pawn did not move")

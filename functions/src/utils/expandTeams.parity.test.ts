@@ -69,7 +69,7 @@ describe("expandTeams backend/frontend parity", () => {
     }
   })
 
-  it("omits unitType entirely in legacy snakesPerTeam mode", () => {
+  it("omits unitType entirely in snakesPerTeam mode", () => {
     for (const fn of [backendExpandTeams, frontendExpandTeams]) {
       const result = fn([team("a")], 2)
       result.forEach((p) => expect("unitType" in p).toBe(false))

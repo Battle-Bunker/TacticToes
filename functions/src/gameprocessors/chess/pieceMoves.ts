@@ -33,7 +33,7 @@ export const toIndex = (x: number, y: number, boardWidth: number): number => y *
 export const isInterior = (x: number, y: number, boardWidth: number, boardHeight: number): boolean =>
   x >= 1 && x <= boardWidth - 2 && y >= 1 && y <= boardHeight - 2
 
-const ORTHOGONALS: Facing[] = [
+export const ORTHOGONALS: Facing[] = [
   { dx: 1, dy: 0 },
   { dx: -1, dy: 0 },
   { dx: 0, dy: 1 },
@@ -139,7 +139,7 @@ export const planPieceAction = (
   dest: number,
   boardWidth: number,
   boardHeight: number,
-  facing?: Facing,
+  facing: Facing,
   pawnTargets?: Set<number>,
 ): PieceAction | null => {
   if (dest === origin) return { kind: "stay" }
@@ -171,7 +171,6 @@ export const planPieceAction = (
         ? { kind: "move", path: rayPath(o, d, boardWidth) }
         : null
     case "pawn": {
-      if (!facing) return null
       if (dx === facing.dx && dy === facing.dy) return { kind: "move", path: [dest] }
       // Side squares: a full-turn quarter rotation toward that side.
       if ((dx === -facing.dy && dy === facing.dx) || (dx === facing.dy && dy === -facing.dx)) {

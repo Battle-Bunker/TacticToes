@@ -396,7 +396,7 @@ const GameLogic = ({
 
     let facingMarker: JSX.Element | null = null
     const facing =
-      unitType === "pawn" ? selectedTurn.unitFacing?.[playerID] : undefined
+      unitType === "pawn" ? selectedTurn.unitFacing[playerID] : undefined
     if (facing) {
       const { dx, dy } = facing
       const arrow = dy < 0 ? "▲" : dy > 0 ? "▼" : dx < 0 ? "◀" : dx > 0 ? "▶" : null

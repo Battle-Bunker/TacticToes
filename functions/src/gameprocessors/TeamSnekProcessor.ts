@@ -4,6 +4,7 @@ import { logger } from "../logger"
 import {
   DEFAULT_PAWN_PROMOTION_WEIGHT,
   Facing,
+  ORTHOGONALS,
   isPieceType,
   planPieceAction,
   spawnFacing,
@@ -35,9 +36,12 @@ export interface SnakeGameState {
   // Computed data
   newScores: { [playerID: string]: number }
 
+  // Per-unit orientation, seeded from the current turn and rewritten by
+  // updateUnitFacing once the turn's movement and deaths have resolved.
+  unitFacing: { [playerID: string]: Facing }
+
   // Chess-piece games only (see docs/chess-pieces.md)
   unitTypes?: { [playerID: string]: UnitType }
-  unitFacing?: { [playerID: string]: Facing }
   piecePaths?: { [playerID: string]: number[] } // squares traversed this turn
   pieceMoveCosts?: { [playerID: string]: number }
 }
@@ -167,6 +171,19 @@ export class TeamSnekProcessor {
       initialInvulnerabilityLevel[player.id] = 0
     })
 
+    // Spawn orientation: every unit faces toward the board centre, chosen
+    // from its type's legal facing-direction set (ties resolve uniformly at
+    // random).
+    const unitFacing: { [playerID: string]: Facing } = {}
+    gamePlayers.forEach((player) => {
+      unitFacing[player.id] = spawnFacing(
+        player.unitType ?? "snake",
+        playerPieces[player.id][0],
+        boardWidth,
+        boardHeight,
+      )
+    })
+
     const firstTurn: Turn = {
       playerHealth: initialHealth,
       // Placeholder window. The turn deadline has exactly one writer: the
@@ -188,25 +205,15 @@ export class TeamSnekProcessor {
       invulnerabilityPotions: [],
       playerInvulnerabilityLevel: initialInvulnerabilityLevel,
       activeEffects: [],
+      unitFacing,
     }
 
     if (this.hasPieceUnits()) {
       const unitTypes: { [playerID: string]: UnitType } = {}
-      const unitFacing: { [playerID: string]: Facing } = {}
       gamePlayers.forEach((player) => {
         unitTypes[player.id] = player.unitType ?? "snake"
-        // Spawn orientation: every unit faces toward the board centre,
-        // chosen from its type's legal facing-direction set (ties resolve
-        // uniformly at random).
-        unitFacing[player.id] = spawnFacing(
-          unitTypes[player.id],
-          playerPieces[player.id][0],
-          boardWidth,
-          boardHeight,
-        )
       })
       firstTurn.unitTypes = unitTypes
-      firstTurn.unitFacing = unitFacing
       firstTurn.paths = {}
     }
 
@@ -228,15 +235,20 @@ export class TeamSnekProcessor {
 
       // 1. Setup
       const gameState = this.initializeGameState(currentTurn)
+      const originSquares = this.captureOriginSquares(gameState)
 
       // 2. Process moves
       this.processPlayerMoves(gameState, moves)
-      
+
       // 3. Handle collisions (tiered by invulnerability level)
       this.detectAndHandleCollisions(gameState)
-      
+
       // 4. Process food and health
       this.processFoodAndHealth(gameState)
+
+      // Facing rewrites after the last phase that can kill, so the map it
+      // rebuilds holds exactly the units still on the board.
+      this.updateUnitFacing(gameState, originSquares)
 
       // 5. Process invulnerability potion collection
       this.processInvulnerabilityPotionCollection(gameState, currentTurnNumber)
@@ -267,7 +279,7 @@ export class TeamSnekProcessor {
   }
 
   // Max health for a unit type: per-type config with a universal default of
-  // 100. An absent type means "snake" (legacy games).
+  // 100. An absent type means "snake".
   private maxHealthFor(type: UnitType | undefined): number {
     return this.gameSetup.maxHealthPerUnit?.[type ?? "snake"] ?? 100
   }
@@ -284,26 +296,19 @@ export class TeamSnekProcessor {
   private applyMovesChess(currentTurn: Turn, moves: Move[], currentTurnNumber: number): Turn {
     const gameState = this.initializeGameState(currentTurn)
 
-    // Current unit types and per-unit facing, carried turn to turn.
+    // Current unit types, carried turn to turn.
     const unitTypes: { [playerID: string]: UnitType } = {}
     this.gameSetup.gamePlayers.forEach((p) => {
       unitTypes[p.id] = currentTurn.unitTypes?.[p.id] ?? p.unitType ?? "snake"
     })
     gameState.unitTypes = unitTypes
-    gameState.unitFacing = { ...(currentTurn.unitFacing ?? {}) }
-
-    // Head squares before movement resolves, for the facing update below.
-    const originSquares: { [playerID: string]: number } = {}
-    gameState.newAlivePlayers.forEach((playerID) => {
-      originSquares[playerID] = gameState.newSnakes[playerID][0]
-    })
+    const originSquares = this.captureOriginSquares(gameState)
 
     // 2. Validate staged moves into per-unit paths (no board mutation yet)
     const plannedPaths = this.planChessMoves(gameState, moves)
 
     // 3. Within-turn simulation: movement + all collisions
     this.runChessSimulation(gameState, plannedPaths)
-    this.updateUnitFacing(gameState, originSquares)
     this.scheduleVulnerableCollisionBuffExpiry(gameState)
     this.removeDeadPlayers(gameState)
 
@@ -312,6 +317,11 @@ export class TeamSnekProcessor {
 
     // 5. Regicide: a team configured with kings dies with its last king
     this.applyRegicide(gameState)
+
+    // Facing rewrites after the last phase that can kill, so the map it
+    // rebuilds holds exactly the units still on the board — and before
+    // promotion, so a pawn that promotes this turn keeps its pawn facing.
+    this.updateUnitFacing(gameState, originSquares)
 
     // 6-8. Potions, spawns, effect expiry (unchanged phases)
     this.processInvulnerabilityPotionCollection(gameState, currentTurnNumber)
@@ -322,53 +332,52 @@ export class TeamSnekProcessor {
     // Pawns that grew to the threshold promote after the food phase
     this.applyPawnPromotions(gameState)
 
-    // Facing rides only with living units: rebuild the map from whoever is
-    // still on the board so dead units drop out.
-    const livingFacing: { [playerID: string]: Facing } = {}
-    Object.keys(gameState.newSnakes).forEach((playerID) => {
-      const facing = gameState.unitFacing?.[playerID]
-      if (facing) livingFacing[playerID] = facing
-    })
-    gameState.unitFacing = livingFacing
-
     // 9-10. Winners and turn assembly
     const winners = this.calculateWinners(gameState)
     return this.createNewTurn(currentTurn, gameState, winners)
   }
 
-  // Orientation is per-unit per-turn engine state, usually implied by the
-  // last moved direction but represented independently so the two can
-  // diverge. A unit that moved this turn faces the way it moved — sliders
-  // and kings the unit step direction (e.g. {1,0}, {1,1}), knights their
-  // exact L-offset (e.g. {1,-2}), snakes head-minus-neck. Pawns are the
-  // exception: steps (diagonal included) never rotate them — only their
-  // rotation action does, and planChessMoves already applied it. Units that
-  // stayed or held keep their previous facing.
+  // Head squares before movement resolves, threaded into updateUnitFacing
+  // once it has.
+  private captureOriginSquares(gameState: SnakeGameState): { [playerID: string]: number } {
+    const originSquares: { [playerID: string]: number } = {}
+    gameState.newAlivePlayers.forEach((playerID) => {
+      originSquares[playerID] = gameState.newSnakes[playerID][0]
+    })
+    return originSquares
+  }
+
+  // Rewrites unitFacing for the turn. The map is rebuilt from the units
+  // still on the board, so dead units drop out. A unit that moved faces its
+  // movement direction — sliders and kings the unit step (e.g. {1,0},
+  // {1,1}), knights their exact L-offset (e.g. {1,-2}), snakes head minus
+  // the origin square the head left (the neck position at move time, so the
+  // rule holds even for a snake severed down to its head or one that grew
+  // this turn). Pawns change facing only via their rotation action, which
+  // planChessMoves already applied. Units that held keep their facing.
   private updateUnitFacing(
     gameState: SnakeGameState,
     originSquares: { [playerID: string]: number },
   ): void {
-    const facing = { ...(gameState.unitFacing ?? {}) }
+    const facing: { [playerID: string]: Facing } = {}
     const { boardWidth } = gameState
     Object.keys(gameState.newSnakes).forEach((playerID) => {
+      facing[playerID] = gameState.unitFacing[playerID]
       const type = gameState.unitTypes?.[playerID] ?? "snake"
       if (type === "pawn") return
 
-      let from: number | undefined
-      let to: number | undefined
+      let from: number
+      let to: number
       if (type === "snake") {
-        const body = gameState.newSnakes[playerID]
-        // Head minus neck; a snake severed down to its head alone falls
-        // back to the square it moved from (the same direction).
-        from = body.length > 1 ? body[1] : originSquares[playerID]
-        to = body[0]
+        from = originSquares[playerID]
+        to = gameState.newSnakes[playerID][0]
       } else {
         const traversed = gameState.piecePaths?.[playerID]
-        if (!traversed || traversed.length === 0) return // stayed put
+        if (!traversed || traversed.length === 0) return // held
         from = originSquares[playerID]
         to = traversed[0]
       }
-      if (from === undefined || to === undefined || from === to) return
+      if (from === to) return
 
       const f = toXY(from, boardWidth)
       const t = toXY(to, boardWidth)
@@ -415,7 +424,7 @@ export class TeamSnekProcessor {
               staged,
               gameState.boardWidth,
               gameState.boardHeight,
-              gameState.unitFacing?.[playerID],
+              gameState.unitFacing[playerID],
               pawnTargets,
             ) ?? { kind: "stay" as const } // illegal destination → stay
 
@@ -424,7 +433,7 @@ export class TeamSnekProcessor {
         gameState.playerMoves[playerID] = action.path[action.path.length - 1]
       } else {
         if (action.kind === "rotate") {
-          gameState.unitFacing = { ...(gameState.unitFacing ?? {}), [playerID]: action.facing }
+          gameState.unitFacing[playerID] = action.facing
         }
         plannedPaths[playerID] = []
         gameState.playerMoves[playerID] = origin
@@ -578,7 +587,8 @@ export class TeamSnekProcessor {
       deadPlayers: new Set(),
       clashes: [],
       vulnerableSnakesCollided: new Set(),
-      newScores: {}
+      newScores: {},
+      unitFacing: { ...currentTurn.unitFacing },
     }
   }
 
@@ -620,52 +630,22 @@ export class TeamSnekProcessor {
 
     // Player didn't submit a valid move or move is invalid
     if (!moveIndex || !allowedMoves.includes(moveIndex)) {
-      return this.getDefaultMove(gameState, snake, allowedMoves, playerID)
+      return this.getDefaultMove(gameState, playerID)
     }
     return moveIndex
   }
 
-  private getDefaultMove(gameState: SnakeGameState, snake: number[], allowedMoves: number[], playerID: string): number {
-    const { boardWidth, boardHeight } = gameState
-    const direction = this.getLastDirection(snake, boardWidth)
-
-    if (direction) {
-      // Snake has real movement history: continue straight.
-      const headIndex = snake[0]
-      const newX = (headIndex % boardWidth) + direction.dx
-      const newY = Math.floor(headIndex / boardWidth) + direction.dy
-      return newY * boardWidth + newX
-    }
-
-    // No direction yet (stacked spawn / single cell): fall back to a legal
-    // adjacent cell. Prefer a cell that is neither wall nor snake body; if
-    // every neighbor is occupied, any non-wall neighbor; only then anything
-    // in-bounds. Centaurs rely on this contract (Chris-Centaur's
-    // continuationDirection returns null here and expects the engine's
-    // adjacent-cell pick).
-    const walls = new Set(this.getWallPositions(boardWidth, boardHeight))
-    const occupied = new Set<number>()
-    Object.values(gameState.newSnakes).forEach((body) => {
-      body.forEach((pos) => occupied.add(pos))
-    })
-
-    const openMove = allowedMoves.find(
-      (cell) => !walls.has(cell) && !occupied.has(cell),
-    )
-    if (openMove !== undefined) return openMove
-
-    const nonWallMove = allowedMoves.find((cell) => !walls.has(cell))
-    if (nonWallMove !== undefined) return nonWallMove
-
-    if (allowedMoves.length > 0) {
-      return allowedMoves[0]
-    }
-
-    // No adjacent cells at all (degenerate board), eliminate the player
-    logger.warn(
-      `Snek: Player ${playerID} did not submit a move and has no previous direction.`,
-    )
-    return snake[0] + 1
+  // The default move is one step in the snake's facing direction: the
+  // direction it last moved, or — on its first move — its spawn facing,
+  // which points toward the board centre from an interior square and is
+  // therefore always in-bounds.
+  private getDefaultMove(gameState: SnakeGameState, playerID: string): number {
+    const { boardWidth } = gameState
+    const facing = gameState.unitFacing[playerID]
+    const headIndex = gameState.newSnakes[playerID][0]
+    const newX = (headIndex % boardWidth) + facing.dx
+    const newY = Math.floor(headIndex / boardWidth) + facing.dy
+    return newY * boardWidth + newX
   }
 
   private moveSnake(snake: number[], moveIndex: number): void {
@@ -1384,12 +1364,12 @@ export class TeamSnekProcessor {
       invulnerabilityPotions: gameState.newInvulnerabilityPotions,
       playerInvulnerabilityLevel: gameState.playerInvulnerabilityLevel,
       activeEffects: gameState.activeEffects,
+      unitFacing: gameState.unitFacing,
       // Chess-piece games: these must be rewritten every turn (the spread
       // above would otherwise freeze the previous turn's values).
       ...(gameState.unitTypes
         ? {
             unitTypes: gameState.unitTypes,
-            unitFacing: gameState.unitFacing ?? {},
             paths: gameState.piecePaths ?? {},
           }
         : {}),
@@ -1642,14 +1622,7 @@ export class TeamSnekProcessor {
     const y = Math.floor(index / boardWidth)
     const indices: number[] = []
 
-    const directions = [
-      { dx: 0, dy: -1 }, // Up
-      { dx: 0, dy: 1 }, // Down
-      { dx: -1, dy: 0 }, // Left
-      { dx: 1, dy: 0 }, // Right
-    ]
-
-    directions.forEach(({ dx, dy }) => {
+    ORTHOGONALS.forEach(({ dx, dy }) => {
       const newX = x + dx
       const newY = y + dy
       if (newX >= 0 && newX < boardWidth && newY >= 0 && newY < boardHeight) {
@@ -1658,31 +1631,6 @@ export class TeamSnekProcessor {
     })
 
     return indices
-  }
-
-  private getLastDirection(
-    snake: number[],
-    boardWidth: number,
-  ): { dx: number; dy: number } | null {
-    if (snake.length < 2) return null
-    const head = snake[0]
-    const neck = snake[1]
-
-    const headX = head % boardWidth
-    const headY = Math.floor(head / boardWidth)
-    const neckX = neck % boardWidth
-    const neckY = Math.floor(neck / boardWidth)
-
-    const dx = headX - neckX
-    const dy = headY - neckY
-
-    // Zero displacement means the snake has not actually moved yet (stacked
-    // spawns are [p, p, p]) — that is "no direction", not a direction. A
-    // truthy {dx: 0, dy: 0} would make the default move target the snake's
-    // own square and kill it by self-collision.
-    if (dx === 0 && dy === 0) return null
-
-    return { dx, dy }
   }
 
   private getFreePositions(

@@ -40,10 +40,10 @@ export interface Team {
   color: string
 }
 
-// Unit kinds. Absent unitType fields mean "snake" (legacy games).
+// Unit kinds. Absent unitType fields mean "snake".
 export type UnitType = "snake" | "pawn" | "knight" | "bishop" | "rook" | "queen" | "king"
 
-// Per-team unit counts. Absent → snakesPerTeam snakes (legacy behavior).
+// Per-team unit counts. Absent → snakesPerTeam snakes.
 export interface UnitCounts {
   snake?: number
   pawn?: number
@@ -151,7 +151,7 @@ export interface Turn {
   teamScores?: { [teamID: string]: number }
   teamClusterFallback?: boolean // Team clusters requested but fell back
   unitTypes?: { [playerID: string]: UnitType } // Current type per unit (changes on pawn promotion); absent in snake-only games
-  unitFacing?: { [playerID: string]: { dx: number; dy: number } } // Per-unit orientation, every unit in piece games (absent in snake-only games). A unit that moved faces its move direction (sliders/king: unit step; knight: exact L-offset; snake: head minus neck) — except pawns, which rotate only via their rotation action. Spawn: toward the board centre from the type's legal facing set, ties random
+  unitFacing: { [playerID: string]: { dx: number; dy: number } } // Per-unit orientation, every unit in every game (snake-only included); dead units drop out. A unit that moved faces its move direction (sliders/king: unit step; knight: exact L-offset; snake: head minus neck) — except pawns, which rotate only via their rotation action. Spawn: toward the board centre from the type's legal facing set, ties random
   paths?: { [playerID: string]: number[] } // Squares each chess piece actually traversed this turn (snakes excluded)
   fertileTiles?: number[]
   invulnerabilityPotions?: number[]
