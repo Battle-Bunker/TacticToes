@@ -216,11 +216,21 @@ wire contract is unchanged in shape; what varies for a piece unit:
 - A staged `move` is still one full-board index: any square on a legal ray
   (rook/bishop/queen), jump (knight), or step (king/pawn) — or the unit's
   own square to stay. A pawn staged onto its left/right side square spends
-  the turn rotating to face that way (`turn.unitFacing` carries facing).
+  the turn rotating to face that way.
   Illegal or missing moves default to **stay**, and the piece's `moves`
   entry records the square it actually ended on — a slider stopped by an
   in-flight collision records its stop square, with the squares it actually
   traversed in `turn.paths[playerID]`.
+- `turn.unitFacing[playerID]` carries every unit's orientation (snakes
+  included), rewritten each turn: a unit that moved faces its move
+  direction (sliders/king: unit step; knight: exact L-offset; snake: head
+  minus neck); units that stayed keep their facing; dead units drop out.
+  Pawns rotate **only** via their rotation action — forward/diagonal steps
+  leave their facing alone. Turn 0: every unit faces toward the board
+  centre, chosen from its type's legal facing-direction set
+  (snake/rook/pawn: 4 orthogonals; bishop: 4 diagonals; queen/king: 8;
+  knight: its 8 L-offsets) with minimal angle to the spawn→centre vector,
+  ties resolved uniformly at random. Absent in snake-only games.
 - In-flight clashes carry `subStep`, the within-turn step they happened on.
 
 ### Timing semantics

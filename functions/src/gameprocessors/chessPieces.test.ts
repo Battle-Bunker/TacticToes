@@ -6,8 +6,10 @@ import {
   StartedGameSetup,
   Team,
   Turn,
+  UnitType,
 } from "@shared/types/Game"
 import { TeamSnekProcessor } from "./TeamSnekProcessor"
+import { spawnFacingCandidates } from "./chess/pieceMoves"
 
 // 11x11 board: index = y * 11 + x, perimeter is wall (interior 1..9).
 const W = 11
@@ -429,6 +431,179 @@ describe("chess pieces: regicide and winners", () => {
 
     expect(next.alivePlayers.sort()).toEqual(["t1", "t2"])
     expect(next.playerPieces.t1).toEqual([at(4, 5), at(4, 4), at(5, 4), at(5, 5)])
+  })
+})
+
+describe("unit orientation (unitFacing)", () => {
+  it("a slider that moved faces its unit step direction", () => {
+    const players = [gp("t1", "t1", "A", "rook"), gp("t2", "t2", "A", "bishop")]
+    const next = run(
+      players,
+      { t1: [at(1, 5)], t2: [at(2, 2)] },
+      [mv("t1", at(4, 5)), mv("t2", at(5, 5))]
+    )
+
+    expect(next.unitFacing?.t1).toEqual({ dx: 1, dy: 0 }) // rook slid right
+    expect(next.unitFacing?.t2).toEqual({ dx: 1, dy: 1 }) // bishop slid down-right
+  })
+
+  it("a knight faces its exact L-offset", () => {
+    const players = [gp("t1", "t1", "A", "knight"), gp("t2", "t2", "A", "king")]
+    const next = run(
+      players,
+      { t1: [at(4, 4)], t2: [at(8, 8)] },
+      [mv("t1", at(5, 2))]
+    )
+
+    expect(next.playerPieces.t1).toEqual([at(5, 2)])
+    expect(next.unitFacing?.t1).toEqual({ dx: 1, dy: -2 })
+  })
+
+  it("a pawn's diagonal step leaves its facing unchanged", () => {
+    const players = [gp("t1", "t1", "A", "pawn"), gp("t2", "t2", "A", "king")]
+    const next = run(
+      players,
+      { t1: [at(3, 5)], t2: [at(8, 8)] },
+      [mv("t1", at(4, 4))], // diagonal-forward onto food
+      { unitFacing: { t1: { dx: 1, dy: 0 } }, food: [at(4, 4)] }
+    )
+
+    expect(next.playerPieces.t1).toEqual([at(4, 4), at(4, 4)])
+    expect(next.unitFacing?.t1).toEqual({ dx: 1, dy: 0 }) // not rotated
+  })
+
+  it("a unit that holds keeps its previous facing", () => {
+    const players = [gp("t1", "t1", "A", "rook"), gp("t2", "t2", "A", "king")]
+    const next = run(
+      players,
+      { t1: [at(3, 3)], t2: [at(8, 8)] },
+      [], // both stay put
+      { unitFacing: { t1: { dx: 0, dy: 1 }, t2: { dx: -1, dy: 0 } } }
+    )
+
+    expect(next.unitFacing?.t1).toEqual({ dx: 0, dy: 1 })
+    expect(next.unitFacing?.t2).toEqual({ dx: -1, dy: 0 })
+  })
+
+  it("a snake faces head-minus-neck after its move", () => {
+    const players = [gp("t1", "t1", "A", "snake"), gp("t2", "t2", "A", "king")]
+    const next = run(
+      players,
+      { t1: [at(4, 5), at(3, 5), at(2, 5)], t2: [at(8, 8)] },
+      [mv("t1", at(4, 4))] // head turns upward
+    )
+
+    expect(next.playerPieces.t1).toEqual([at(4, 4), at(4, 5), at(3, 5)])
+    expect(next.unitFacing?.t1).toEqual({ dx: 0, dy: -1 })
+  })
+
+  // Turn 0 at preset squares so spawn-facing assertions are exact.
+  const spawnTurn0 = (
+    players: GamePlayer[],
+    positions: { [playerID: string]: number }
+  ): Turn => {
+    const processor = new TeamSnekProcessor({
+      setup: mkSetup(twoTeams, players, {
+        usePreviewBoard: true,
+        presetPlayerPositions: positions,
+      }),
+      turns: [],
+      walls: [],
+      timeCreated: Timestamp.fromMillis(0),
+      timeFinished: null,
+    })
+    return processor.firstTurn()
+  }
+
+  it("spawn: every unit faces toward the board centre from its type's legal facing set", () => {
+    // Centre is (5,5); every spawn here is clearly off-axis for its type,
+    // so the minimal-angle candidate is unique and deterministic.
+    const players = [
+      gp("p", "t1", "A", "pawn"),
+      gp("r", "t1", "B", "rook"),
+      gp("b", "t1", "C", "bishop"),
+      gp("n", "t2", "A", "knight"),
+      gp("k", "t2", "B", "king"),
+      gp("s", "t2", "C", "snake"),
+    ]
+    const turn0 = spawnTurn0(players, {
+      p: at(2, 5), // centre vector (3,0)
+      r: at(5, 8), // (0,-3)
+      b: at(2, 4), // (3,1) → closest diagonal is (1,1)
+      n: at(8, 6), // (-3,-1) → closest L-offset is (-2,-1)
+      k: at(2, 6), // (3,-1) → (1,0) beats (1,-1)
+      s: at(6, 2), // (-1,3) → (0,1)
+    })
+
+    expect(turn0.unitFacing?.p).toEqual({ dx: 1, dy: 0 })
+    expect(turn0.unitFacing?.r).toEqual({ dx: 0, dy: -1 })
+    expect(turn0.unitFacing?.b).toEqual({ dx: 1, dy: 1 })
+    expect(turn0.unitFacing?.n).toEqual({ dx: -2, dy: -1 })
+    expect(turn0.unitFacing?.k).toEqual({ dx: 1, dy: 0 })
+    expect(turn0.unitFacing?.s).toEqual({ dx: 0, dy: 1 })
+  })
+
+  it("spawn: ties on a symmetry axis resolve to one of the tied candidates", () => {
+    const players = [
+      gp("r", "t1", "A", "rook"),
+      gp("p", "t1", "B", "pawn"),
+      gp("n", "t2", "A", "knight"),
+      gp("q", "t2", "B", "queen"),
+    ]
+    const positions = {
+      r: at(2, 2), // exactly on the diagonal from centre: (1,0) ties (0,1)
+      p: at(2, 2), // pawns tie-break at random too (no dominant-axis pick)
+      n: at(8, 8), // (-3,-3): (-1,-2) ties (-2,-1)
+      q: at(5, 5), // exactly at centre: all 8 directions tie
+    }
+    const turn0 = spawnTurn0(players, positions)
+
+    expect(spawnFacingCandidates("rook", positions.r, W, W)).toEqual([
+      { dx: 1, dy: 0 },
+      { dx: 0, dy: 1 },
+    ])
+    const types: { [id: string]: UnitType } = {
+      r: "rook",
+      p: "pawn",
+      n: "knight",
+      q: "queen",
+    }
+    ;(["r", "p", "n", "q"] as const).forEach((id) => {
+      const candidates = spawnFacingCandidates(types[id], positions[id], W, W)
+      expect(candidates.length).toBeGreaterThan(1)
+      expect(candidates).toContainEqual(turn0.unitFacing?.[id])
+    })
+    expect(spawnFacingCandidates("queen", positions.q, W, W)).toHaveLength(8)
+  })
+
+  it("promotion keeps the pawn's facing on the new queen", () => {
+    const players = [gp("t1", "t1", "A", "pawn"), gp("t2", "t2", "A", "king")]
+    const pawnAt = at(3, 5)
+    const next = run(
+      players,
+      { t1: [pawnAt, pawnAt], t2: [at(8, 8)] }, // weight 2, threshold 3
+      [mv("t1", at(4, 5))],
+      { unitFacing: { t1: { dx: 1, dy: 0 } }, food: [at(4, 5)] },
+      { pawnPromotionWeight: 3 }
+    )
+
+    expect(next.unitTypes?.t1).toBe("queen")
+    expect(next.unitFacing?.t1).toEqual({ dx: 1, dy: 0 })
+  })
+
+  it("dead units drop out of the facing map", () => {
+    const players = [gp("t1", "t1", "A", "rook"), gp("t2", "t2", "A", "bishop")]
+    const blocker = at(4, 5)
+    const next = run(
+      players,
+      { t1: [at(1, 5), at(1, 5), at(1, 5)], t2: [blocker] }, // weight 3 vs 1
+      [mv("t1", at(9, 5))],
+      { unitFacing: { t1: { dx: 0, dy: 1 }, t2: { dx: 0, dy: 1 } } }
+    )
+
+    expect(next.alivePlayers).toEqual(["t1"])
+    expect(next.unitFacing?.t1).toEqual({ dx: 1, dy: 0 }) // faced its slide
+    expect(next.unitFacing?.t2).toBeUndefined()
   })
 })
 

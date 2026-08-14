@@ -33,14 +33,89 @@ export const toIndex = (x: number, y: number, boardWidth: number): number => y *
 export const isInterior = (x: number, y: number, boardWidth: number, boardHeight: number): boolean =>
   x >= 1 && x <= boardWidth - 2 && y >= 1 && y <= boardHeight - 2
 
-// Default pawn facing: toward the board centre along the dominant axis
-// (ties prefer horizontal). Assigned once at spawn.
-export const defaultFacing = (index: number, boardWidth: number, boardHeight: number): Facing => {
+const ORTHOGONALS: Facing[] = [
+  { dx: 1, dy: 0 },
+  { dx: -1, dy: 0 },
+  { dx: 0, dy: 1 },
+  { dx: 0, dy: -1 },
+]
+const DIAGONALS: Facing[] = [
+  { dx: 1, dy: 1 },
+  { dx: 1, dy: -1 },
+  { dx: -1, dy: 1 },
+  { dx: -1, dy: -1 },
+]
+const KNIGHT_OFFSETS: Facing[] = [
+  { dx: 1, dy: 2 },
+  { dx: 2, dy: 1 },
+  { dx: 2, dy: -1 },
+  { dx: 1, dy: -2 },
+  { dx: -1, dy: -2 },
+  { dx: -2, dy: -1 },
+  { dx: -2, dy: 1 },
+  { dx: -1, dy: 2 },
+]
+
+// The legal facing-direction set per unit type: the directions a unit's
+// orientation can ever take (snake/rook/pawn: the 4 orthogonals; bishop:
+// the 4 diagonals; queen/king: all 8; knight: its 8 L-offsets).
+export const facingDirections = (type: UnitType): Facing[] => {
+  switch (type) {
+    case "bishop":
+      return DIAGONALS
+    case "queen":
+    case "king":
+      return [...ORTHOGONALS, ...DIAGONALS]
+    case "knight":
+      return KNIGHT_OFFSETS
+    default: // snake, rook, pawn
+      return ORTHOGONALS
+  }
+}
+
+// Spawn orientation candidates: the facing(s) from the type's legal set
+// with minimal angle to the vector from the spawn square to the board
+// centre. Several candidates tie when the spawn sits on a symmetry axis of
+// the set (e.g. a rook exactly on the diagonal from centre) or exactly at
+// the centre (every candidate ties).
+export const spawnFacingCandidates = (
+  type: UnitType,
+  index: number,
+  boardWidth: number,
+  boardHeight: number,
+): Facing[] => {
   const { x, y } = toXY(index, boardWidth)
-  const dx = (boardWidth - 1) / 2 - x
-  const dy = (boardHeight - 1) / 2 - y
-  if (Math.abs(dx) >= Math.abs(dy)) return { dx: dx >= 0 ? 1 : -1, dy: 0 }
-  return { dx: 0, dy: dy >= 0 ? 1 : -1 }
+  const vx = (boardWidth - 1) / 2 - x
+  const vy = (boardHeight - 1) / 2 - y
+  const candidates = facingDirections(type)
+  if (vx === 0 && vy === 0) return candidates
+
+  const EPS = 1e-9
+  let best: Facing[] = []
+  let bestScore = -Infinity
+  candidates.forEach((f) => {
+    // cos(angle) up to the constant |v|: dot(f, v) / |f|
+    const score = (f.dx * vx + f.dy * vy) / Math.hypot(f.dx, f.dy)
+    if (score > bestScore + EPS) {
+      bestScore = score
+      best = [f]
+    } else if (score > bestScore - EPS) {
+      best.push(f)
+    }
+  })
+  return best
+}
+
+// Spawn orientation, assigned once at turn 0: toward the board centre,
+// ties resolved uniformly at random among the tied candidates.
+export const spawnFacing = (
+  type: UnitType,
+  index: number,
+  boardWidth: number,
+  boardHeight: number,
+): Facing => {
+  const best = spawnFacingCandidates(type, index, boardWidth, boardHeight)
+  return best[Math.floor(Math.random() * best.length)]
 }
 
 export type PieceAction =

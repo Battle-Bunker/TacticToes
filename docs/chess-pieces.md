@@ -40,12 +40,19 @@ Moves stay a single destination square index on the wire (`Move.move`).
 The path is derived: unique straight ray for rook/bishop/queen, single jump
 for the knight, single step for king/pawn.
 
+Every unit carries an orientation (`Turn.unitFacing`), usually implied by
+its last moved direction but tracked independently so the two can diverge
+(pawns rotate only via their rotation action). At spawn every unit faces
+toward the board centre, chosen from its type's legal facing-direction
+set; thereafter non-pawn units face the way they last moved. For pawns
+alone, orientation is also engine-legality-bearing (see below).
+
 - **Rook**: any distance along a row/column. **Bishop**: along a diagonal.
   **Queen**: either. Range is unlimited (health cost is the limiter).
 - **Knight**: the 8 L-jumps; touches only its destination.
 - **King**: 1 step in any of the 8 directions.
-- **Pawn**: has a facing, assigned at spawn (toward the board centre,
-  dominant axis). Each turn a pawn may do exactly one of:
+- **Pawn**: has a facing, assigned at spawn (toward the board centre, like
+  every unit). Each turn a pawn may do exactly one of:
   - step 1 square **straight forward**;
   - step 1 square **diagonal-forward**, but only to attack or eat — legal
     only when that square holds food or another unit at the start of the
@@ -159,8 +166,19 @@ single-pass resolution path — zero behavioural change.
 - `GamePlayer.unitType?: UnitType` — absent means `"snake"`.
 - `Turn.unitTypes?: { [playerID]: UnitType }` — current type per unit
   (changes on pawn promotion).
-- `Turn.unitFacing?: { [playerID]: { dx, dy } }` — pawn facing, written at
-  turn 0 and updated when a pawn spends its turn rotating.
+- `Turn.unitFacing?: { [playerID]: { dx, dy } }` — per-unit orientation,
+  written for **every** unit in piece games (snakes included; absent in
+  snake-only legacy games). Rewritten every turn: a unit that moved faces
+  the direction it moved — sliders/king the unit step (e.g. `{1,0}`,
+  `{1,1}`), knight its exact L-offset (e.g. `{1,-2}`), snake head minus
+  neck — while units that stayed keep their previous facing and dead units
+  drop out. Pawns are the exception: forward and diagonal steps never
+  rotate them; only their rotation action changes facing. Spawn (turn 0):
+  every unit faces toward the board centre, chosen from its type's legal
+  facing-direction set (snake/rook/pawn: the 4 orthogonals; bishop: the 4
+  diagonals; queen/king: all 8; knight: its 8 L-offsets) — the candidate
+  with minimal angle to the spawn→centre vector, ties (spawn on a symmetry
+  axis, or exactly at centre) resolved uniformly at random.
 - `Turn.paths?: { [playerID]: number[] }` — squares each piece actually
   traversed this turn (for animation/inspection). Snakes are not included.
 - `Clash.subStep?: number` — which sub-step an in-flight clash happened on.
