@@ -181,10 +181,16 @@ sub-steps to order.
   with minimal angle to the spawn→centre vector, ties (spawn on a symmetry
   axis, or exactly at centre) resolved uniformly at random.
 - `Turn.paths?: { [playerID]: number[] }` — squares each piece actually
-  traversed this turn (for animation/inspection). Snakes are not included.
+  traversed this turn (for animation/inspection). A dead piece's path ends
+  at the square it died on. Snakes are not included, and neither is a
+  piece that did not move (it has no traversed squares).
 - `Clash.subStep?: number` — which sub-step an in-flight clash happened on.
 - `turn.moves` remains one integer per player: the square the unit actually
-  ended its move on (a truncated slider records its stop square).
+  ended its move on (a truncated slider records its stop square). This is
+  the death-square guarantee for clients: a piece that dies mid-path
+  records the square it died on — never its origin or staged destination —
+  and the clash recording the death carries the same square (with its
+  `subStep`). A dead snake records its attempted head square.
 
 ## Scoring & elimination
 

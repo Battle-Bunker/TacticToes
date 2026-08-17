@@ -41,9 +41,16 @@ export interface ChessTurnSimResult {
   deadIDs: Set<string>
   /** Tier at death, for the vulnerable-collision buff-expiry rule. */
   deadTiers: Map<string, number>
-  /** Squares each piece actually entered (movement health cost + Turn.paths). */
+  /**
+   * Squares each piece actually entered (movement health cost + Turn.paths).
+   * A dead piece's list ends at the square it died on.
+   */
   traversed: Map<string, number[]>
-  /** Final square of each piece that staged a move (truncated sliders stop early). */
+  /**
+   * Final square of every piece (truncated sliders stop early). Authoritative
+   * for dead pieces too: a piece that dies mid-path records the square it
+   * died on — never its origin or staged destination.
+   */
   finalSquare: Map<string, number>
   /** Post-hazard health of every unit (the food phase settles movement costs). */
   healths: Map<string, number>

@@ -124,6 +124,12 @@ describe("chess pieces: within-turn movement and collisions", () => {
     expect(clash).toBeDefined()
     expect(clash!.subStep).toBe(2)
     expect(clash!.playerIDs.sort()).toEqual(["t1", "t2"])
+    // Death-square guarantee: each dead piece's move is the square it died
+    // on, and its path ends there.
+    expect(next.moves.t1).toBe(at(4, 4))
+    expect(next.moves.t2).toBe(at(4, 4))
+    expect(next.paths?.t1).toEqual([at(3, 3), at(4, 4)])
+    expect(next.paths?.t2).toEqual([at(5, 3), at(4, 4)])
   })
 
   it("a heavier rook kills a lighter stationary piece mid-path and stops on the kill square", () => {
@@ -275,6 +281,9 @@ describe("chess pieces: within-turn movement and collisions", () => {
     expect(clash!.reason).toBe("Entered hazard")
     expect(clash!.index).toBe(hazard)
     expect(clash!.subStep).toBe(3)
+    // Death-square guarantee: the move and path end on the hazard square.
+    expect(next.moves.t1).toBe(hazard)
+    expect(next.paths?.t1).toEqual([at(2, 5), at(3, 5), hazard])
   })
 
   it("a piece with nothing staged (or an illegal destination) stays and spends no health", () => {
@@ -293,6 +302,82 @@ describe("chess pieces: within-turn movement and collisions", () => {
     expect(next.moves.t2).toBe(bishopAt)
     expect(next.playerHealth.t1).toBe(100)
     expect(next.playerHealth.t2).toBe(100)
+  })
+})
+
+describe("chess pieces: death squares on the wire", () => {
+  // The client's death rendering relies on this contract: for EVERY unit that
+  // dies during a turn, `moves[dead]` is the square it actually died on
+  // (pieces: mid-path when stopped in flight; snakes: the attempted head
+  // square), a dead piece's `paths` entry ends at that square, and the clash
+  // recording the death carries the same square with its subStep.
+
+  it("a slider that dies mid-ray on a snake body records the death square in moves and paths", () => {
+    const players = [gp("t1", "t1", "A", "bishop"), gp("t2", "t2", "A", "snake")]
+    // Bishop (2,2) -> (6,6); the snake's post-move body covers (4,4), the
+    // bishop's second ray square.
+    const next = run(
+      players,
+      { t1: [at(2, 2)], t2: [at(4, 3), at(4, 4), at(4, 5), at(4, 6)] },
+      [mv("t1", at(6, 6)), mv("t2", at(4, 2))]
+    )
+
+    expect(next.alivePlayers).toEqual(["t2"])
+    expect(next.moves.t1).toBe(at(4, 4)) // NOT the staged (6,6), NOT the origin
+    expect(next.paths?.t1).toEqual([at(3, 3), at(4, 4)])
+    const clash = next.clashes.find((c) => c.playerIDs.includes("t1"))
+    expect(clash!.index).toBe(at(4, 4))
+    expect(clash!.subStep).toBe(2)
+  })
+
+  it("a piece that dies exchanging squares in flight records its landing square", () => {
+    const players = [gp("t1", "t1", "A", "king"), gp("t2", "t2", "A", "king")]
+    const a = at(4, 5)
+    const b = at(5, 5)
+    const next = run(
+      players,
+      { t1: [a, a], t2: [b] }, // weight 2 vs 1: t2 dies in flight
+      [mv("t1", b), mv("t2", a)]
+    )
+
+    expect(next.alivePlayers).toEqual(["t1"])
+    expect(next.moves.t2).toBe(a)
+    expect(next.paths?.t2).toEqual([a])
+    const clash = next.clashes.find((c) => c.index === a)
+    expect(clash!.playerIDs.sort()).toEqual(["t1", "t2"])
+    expect(clash!.subStep).toBe(1)
+  })
+
+  it("a piece that starves on arrival records the arrival square as its death square", () => {
+    const players = [gp("t1", "t1", "A", "rook"), gp("t2", "t2", "A", "king")]
+    const dest = at(5, 5)
+    const next = run(
+      players,
+      { t1: [at(1, 5)], t2: [at(9, 9)] },
+      [mv("t1", dest)],
+      { playerHealth: { t1: 3, t2: 100 } } // 4 squares traversed > 3 health
+    )
+
+    expect(next.alivePlayers).toEqual(["t2"])
+    expect(next.moves.t1).toBe(dest)
+    expect(next.paths?.t1).toEqual([at(2, 5), at(3, 5), at(4, 5), dest])
+    expect(
+      next.clashes.some((c) => c.index === dest && c.reason === "Died due to zero health")
+    ).toBe(true)
+  })
+
+  it("a dead snake in a chess game records its attempted head square in moves", () => {
+    const players = [gp("t1", "t1", "A", "snake"), gp("t2", "t2", "A", "rook")]
+    const target = at(5, 5)
+    const heavy = [target, target, target, target, target] // weight 5 wall
+    const next = run(
+      players,
+      { t1: [at(4, 5), at(3, 5), at(2, 5)], t2: heavy },
+      [mv("t1", target)]
+    )
+
+    expect(next.alivePlayers).toEqual(["t2"])
+    expect(next.moves.t1).toBe(target)
   })
 })
 
