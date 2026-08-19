@@ -76,7 +76,7 @@ const AppContent: React.FC = () => {
   return (
     <>
       <AppBar position="static">
-        <Container maxWidth="sm" sx={{ p: 1, display: "flex" }}>
+        <Container maxWidth="lg" sx={{ p: 1, display: "flex" }}>
           <Button
             color="primary"
             sx={{
@@ -111,7 +111,11 @@ const AppContent: React.FC = () => {
           </Button>
         </Container>
       </AppBar>
-      <Container maxWidth="sm" sx={{ p: 1 }}>
+      {/* The app's column. Wider than the old "sm" (600px) so the board has
+          room to be read at a cell size its units can write their numbers on;
+          the board itself may be dragged wider still and simply overflows this
+          column, which clips nothing. */}
+      <Container maxWidth="lg" sx={{ p: 1 }}>
         <Box width="100%">
           <Routes>
             <Route path="/" element={<HomePage />} />

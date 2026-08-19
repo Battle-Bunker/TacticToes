@@ -1647,6 +1647,42 @@ interface TagRect {
   letterAtEnd: boolean
 }
 
+/** A drawn tag's rect, named by the unit it belongs to, for hit-testing. */
+interface TagHit extends TagRect {
+  unitId: string
+}
+
+// Where the last render left each unit's tag, per canvas — the only record a
+// pointer can be tested against, and the reason the hit-test can never disagree
+// with what is on screen. A tag that has STEPPED ASIDE under the pointer keeps
+// publishing its rect: that rect is what lets the caller see the pointer leave
+// it and bring the tag back.
+const tagRectsByCanvas = new WeakMap<HTMLCanvasElement, TagHit[]>()
+
+/**
+ * The unit whose TAG a pointer event landed on, or null. Rects are recorded in
+ * the renderer's CSS-pixel space, which is what `pointerToCanvas` answers in.
+ */
+export function getTagAt(
+  canvas: HTMLCanvasElement,
+  event: { clientX: number; clientY: number },
+): string | null {
+  const rects = tagRectsByCanvas.get(canvas)
+  if (!rects || rects.length === 0) return null
+  const point = pointerToCanvas(canvas, event)
+  for (const r of rects) {
+    if (
+      point.x >= r.x &&
+      point.x <= r.x + r.w &&
+      point.y >= r.y &&
+      point.y <= r.y + r.h
+    ) {
+      return r.unitId
+    }
+  }
+  return null
+}
+
 interface TagLayout {
   rect: TagRect
   fontSize: number
@@ -1776,13 +1812,23 @@ function drawUnitTag(ctx: CanvasRenderingContext2D, tag: TagLayout) {
 // question `bodyPlans` answers (unitBodyInfoPlan). A snake long enough to spell
 // everything out never wears a tag; a piece, having no body to write on, always
 // warrants one.
+// This is a spectator board, so there is no display mode and no ownership: every
+// warranted tag is shown. The pointer is the only other input — resting on a tag
+// makes it STEP ASIDE (`tagHoverUnitId`) so the board under it can be read, and
+// the tag comes straight back when the pointer leaves. The stepped-aside tag is
+// still laid out and still published: it holds its place against the other tags,
+// and its rect is what tells the caller the pointer has left it.
 function renderUnitTags(
   ctx: CanvasRenderingContext2D,
+  canvas: HTMLCanvasElement,
   board: BoardModel,
   cellSize: number,
   bodyPlans: Map<string, BodyInfoPlan>,
   currentTurn: number,
+  tagHoverUnitId: string | null,
 ) {
+  const rects: TagHit[] = []
+  tagRectsByCanvas.set(canvas, rects)
   // Other units' head cells (board-pixel rects) for overlap avoidance.
   const headRects: Record<string, PlateBox> = {}
   board.units.forEach((u) => {
@@ -1937,24 +1983,38 @@ function renderUnitTags(
     // No diagonal cell exists at all (a 1×1 board): nothing to anchor to.
     if (!best) return
 
-    drawUnitTag(ctx, {
-      rect: best,
-      fontSize,
-      font,
-      letterFont,
-      padX,
-      gap,
-      iconGap,
-      chipW,
-      tagH,
-      letterAtEnd: best.letterAtEnd,
-      letter,
-      stats,
-      unitColor,
-    })
+    // The one tag the pointer is resting on is laid out but not painted: that
+    // is the whole "hover the tag to peek underneath" gesture.
+    if (tagHoverUnitId !== unit.id) {
+      drawUnitTag(ctx, {
+        rect: best,
+        fontSize,
+        font,
+        letterFont,
+        padX,
+        gap,
+        iconGap,
+        chipW,
+        tagH,
+        letterAtEnd: best.letterAtEnd,
+        letter,
+        stats,
+        unitColor,
+      })
+    }
 
     placed.push(best)
+    rects.push({ unitId: unit.id, ...best })
   })
+}
+
+/** Everything outside the turn itself that changes what a board draws. */
+export interface RenderOptions {
+  /**
+   * The unit whose TAG the pointer is resting on. That tag steps aside for as
+   * long as the pointer is on it, so the board underneath can be read.
+   */
+  tagHoverUnitId?: string | null
 }
 
 /**
@@ -1964,6 +2024,7 @@ function renderUnitTags(
 export function renderBoard(
   canvas: HTMLCanvasElement,
   board: BoardModel,
+  options?: RenderOptions,
 ): number {
   if (!canvas || !board) return 0
 
@@ -2113,7 +2174,15 @@ export function renderBoard(
     if (plan) drawUnitBodyInfo(ctx, plan)
   })
 
-  renderUnitTags(ctx, board, cellSize, bodyPlans, turn)
+  renderUnitTags(
+    ctx,
+    canvas,
+    board,
+    cellSize,
+    bodyPlans,
+    turn,
+    options?.tagHoverUnitId ?? null,
+  )
 
   // Death markers last, so a cell that ended the turn as a grave says so over
   // whatever terrain it sits on.
