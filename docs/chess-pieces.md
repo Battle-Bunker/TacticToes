@@ -28,7 +28,8 @@ snakes (the pure chess variant).
   length, so scoring, team scores, winner adjudication, and the wire format
   all work unchanged.
 - Pieces start at weight 1. Eating food: +1 weight (push a duplicate) and
-  health restored to 100, same as snakes.
+  health restored to 100, same as snakes. A promoting pawn is the one place
+  weight goes down without a death: it returns to weight 1 as a queen.
 - A snake's weight is its length, including stacked tail segments. Severing
   reduces it automatically.
 - Weight never decays. Nothing is gained from a kill. Dead units vanish
@@ -67,7 +68,12 @@ For pawns alone, orientation is also engine-legality-bearing (see below).
   - stay (also the default).
   The square directly behind is never a legal destination.
   **Promotion**: at weight ≥ `pawnPromotionWeight` (config, default 10) a
-  pawn becomes a queen (keeps id, letter, weight, health).
+  pawn becomes a queen. It keeps id, letter, orientation and current health
+  (clamped down to the queen's configured max if it was carrying more), and
+  **resets to weight 1** — its stack collapses to the single square it
+  occupies. The accumulated mass is the price of the queen's mobility. The
+  queen's `maxHealthPerUnit` entry therefore applies to any game with pawns,
+  whether or not queens are fielded at spawn.
 - **Staying still is legal and free** of movement cost. It is also the
   default when a piece stages nothing or stages an illegal destination
   (pieces have no momentum; the snake default of "continue straight" has no
@@ -153,7 +159,9 @@ the longest path staged this turn.
   sub-step (mid-flight); ≤ 0 health dies on that square, survivors keep
   going. Snakes are dosed on head entry. See "Hazard damage" above.
 - Weights are fixed for the whole simulation (growth happens in the food
-  phase, after collisions — same as today's snakes).
+  phase, after collisions — same as today's snakes; promotion's weight reset
+  is later still, after regicide and orientation, so nothing this turn is
+  adjudicated against the reset weight).
 
 Snake-only games (no piece units configured) resolve in a single pass:
 every snake moves exactly one square per turn, so there is nothing for
@@ -197,8 +205,13 @@ sub-steps to order.
 - Piece score = weight (`playerPieces[id].length`), so team score = sum of
   weights, and turn-limit/MMR adjudication work unchanged. Note the start
   asymmetry: a snake spawns worth 3, a piece worth 1.
+- Promotion costs score: the promoting team's score drops by
+  `pawnPromotionWeight - 1` on that turn. Adjudication reads the post-promotion
+  board, so a promotion on the final turn is scored at weight 1.
 - A team is alive while any of its units is alive — plus the regicide rule
-  for teams configured with kings.
+  for teams configured with kings. Weight never reaches 0 by promotion (the
+  queen stands on its square at weight 1), so promoting can never eliminate a
+  unit or a team.
 
 ## Implementer judgment calls (reported, not escalated)
 

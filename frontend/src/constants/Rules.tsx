@@ -39,8 +39,9 @@ export const TeamSnekRules: React.FC = () => {
       <Typography>
         Pawns face a direction and may spend a turn rotating; they step
         forward, attack diagonally, and promote to queens at the configured
-        weight. A team fielding kings is eliminated the moment its last king
-        dies.
+        weight — a promoting pawn trades all its mass for the crown and
+        restarts at weight 1. A team fielding kings is eliminated the moment
+        its last king dies.
       </Typography>
     </Stack>
   )

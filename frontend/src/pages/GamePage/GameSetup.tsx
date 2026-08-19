@@ -629,6 +629,13 @@ const GameSetup: React.FC = () => {
   const unitCount = (type: UnitType): number => unitCounts[type] ?? 0;
   const totalUnits = totalUnitCount(unitCounts);
 
+  // Whether a unit type's max health is meaningful for this setup. Normally
+  // that means "some are fielded", but a pawn promotes to a queen, so queen
+  // max health matters whenever pawns are in play even with zero queens
+  // configured. Queen is the only promotion-reachable type.
+  const maxHealthApplies = (type: UnitType): boolean =>
+    unitCount(type) > 0 || (type === "queen" && unitCount("pawn") > 0);
+
   const handleUnitCountChange = async (unitType: UnitType, value: number) => {
     const next: UnitCounts = {};
     UNIT_TYPES.forEach(({ type }) => {
@@ -1288,31 +1295,38 @@ const GameSetup: React.FC = () => {
                   disabled={started || isConfigDisabled}
                   sx={{ mt: 1.5, width: 200 }}
                   inputProps={{ min: 2, max: 100, step: 1 }}
+                  helperText="A promoted queen restarts at weight 1"
                 />
               )}
-              {/* Max health, one small input per unit type in play */}
+              {/* Max health, one small input per unit type in play. Queens
+                  count as "in play" whenever pawns are, because a pawn
+                  promotes into one. */}
               <Typography variant="body2" sx={{ mt: 1.5 }} gutterBottom>
                 Max health (default 100)
               </Typography>
               <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
-                {UNIT_TYPES.filter(({ type }) => unitCount(type) > 0).map(
-                  ({ type, label }) => (
-                    <TextField
-                      key={type}
-                      label={label}
-                      type="number"
-                      size="small"
-                      value={maxHealthPerUnit[type] ?? ""}
-                      placeholder="100"
-                      onChange={(e) => {
-                        const value = parseInt(e.target.value);
-                        if (!isNaN(value)) handleMaxHealthChange(type, value);
-                      }}
-                      disabled={started || isConfigDisabled}
-                      sx={{ width: 110 }}
-                      inputProps={{ min: 1, max: 1000, step: 1 }}
-                    />
-                  ),
+                {UNIT_TYPES.filter(({ type }) => maxHealthApplies(type)).map(
+                  ({ type, label }) => {
+                    const promotedOnly = type === "queen" && unitCount("queen") === 0;
+                    return (
+                      <TextField
+                        key={type}
+                        label={label}
+                        type="number"
+                        size="small"
+                        value={maxHealthPerUnit[type] ?? ""}
+                        placeholder="100"
+                        onChange={(e) => {
+                          const value = parseInt(e.target.value);
+                          if (!isNaN(value)) handleMaxHealthChange(type, value);
+                        }}
+                        disabled={started || isConfigDisabled}
+                        sx={{ width: promotedOnly ? 150 : 110 }}
+                        inputProps={{ min: 1, max: 1000, step: 1 }}
+                        helperText={promotedOnly ? "Promoted pawns" : undefined}
+                      />
+                    );
+                  },
                 )}
               </Box>
             </Box>

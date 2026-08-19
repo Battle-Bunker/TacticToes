@@ -330,7 +330,11 @@ export class TeamSnekProcessor {
     this.generateNewInvulnerabilityPotions(gameState)
     this.expireEffects(gameState, currentTurnNumber)
 
-    // Pawns that grew to the threshold promote after the food phase
+    // Pawns that grew to the threshold promote after the food phase, so a pawn
+    // that eats into the threshold promotes the same turn. The weight reset it
+    // applies lands after every phase that reads weight (collisions, regicide)
+    // and before winners and turn assembly, so scores and adjudication see the
+    // promoted queen at weight 1.
     this.applyPawnPromotions(gameState)
 
     // 9-10. Winners and turn assembly
@@ -541,13 +545,19 @@ export class TeamSnekProcessor {
         (gameState.newSnakes[playerID]?.length ?? 0) >= threshold
       ) {
         gameState.unitTypes![playerID] = "queen"
+        // Promotion trades the accumulated mass for the queen's mobility: the
+        // stack collapses to the single square the unit occupies, weight 1.
+        // The unit stays on the board (weight 1, not 0), so it is never
+        // eliminated by promoting — only its score drops.
+        gameState.newSnakes[playerID] = [gameState.newSnakes[playerID][0]]
         // A promoted pawn may carry more health than a queen is allowed:
-        // clamp to the queen's configured max.
+        // clamp to the queen's configured max. Health is not otherwise
+        // touched — only eating restores it.
         const queenMax = this.maxHealthFor("queen")
         if (gameState.newPlayerHealth[playerID] > queenMax) {
           gameState.newPlayerHealth[playerID] = queenMax
         }
-        logger.info(`Snek: Pawn ${playerID} promoted to queen.`)
+        logger.info(`Snek: Pawn ${playerID} promoted to queen at weight 1.`)
       }
     })
   }

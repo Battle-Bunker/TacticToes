@@ -441,9 +441,11 @@ describe("chess pieces: pawns", () => {
     expect(next.playerPieces.t1).toEqual([at(4, 4), at(4, 4)])
   })
 
-  it("promotes to queen at the configured weight and can then slide", () => {
+  it("promotes to queen at the configured weight, resetting to weight 1", () => {
     const players = [gp("t1", "t1", "A", "pawn"), gp("t2", "t2", "A", "king")]
     const pawnAt = at(3, 5)
+    // Eats at (4,5) to reach weight 3 — the threshold — and promotes the same
+    // turn, trading the accumulated mass for the crown.
     const next = run(
       players,
       { t1: [pawnAt, pawnAt], t2: [at(8, 8)] }, // weight 2, threshold 3
@@ -452,18 +454,76 @@ describe("chess pieces: pawns", () => {
       { pawnPromotionWeight: 3 }
     )
 
-    expect(next.playerPieces.t1).toHaveLength(3)
     expect(next.unitTypes?.t1).toBe("queen")
+    expect(next.playerPieces.t1).toEqual([at(4, 5)]) // weight 1, on its square
+    expect(next.moves.t1).toBe(at(4, 5)) // applied move still the square reached
+    expect(next.paths?.t1).toEqual([at(4, 5)]) // path of the step it made as a pawn
+    expect(next.scores.t1).toBe(1)
+    expect(next.alivePlayers).toContain("t1") // weight 1, not 0: still alive
 
-    // Next turn the promoted queen slides like a queen.
+    // Next turn the promoted queen slides like a queen, from weight 1.
     const players2 = [gp("t1", "t1", "A", "pawn"), gp("t2", "t2", "A", "king")]
     const turn2 = run(
       players2,
-      { t1: [at(4, 5), at(4, 5), at(4, 5)], t2: [at(8, 8)] },
+      { t1: [at(4, 5)], t2: [at(8, 8)] },
       [mv("t1", at(4, 8))],
       { unitTypes: { t1: "queen", t2: "king" } }
     )
-    expect(turn2.playerPieces.t1).toEqual([at(4, 8), at(4, 8), at(4, 8)])
+    expect(turn2.playerPieces.t1).toEqual([at(4, 8)])
+  })
+
+  it("a pawn already at the threshold promotes to weight 1 without eating", () => {
+    const players = [gp("t1", "t1", "A", "pawn"), gp("t2", "t2", "A", "king")]
+    const pawnAt = at(3, 5)
+    const next = run(
+      players,
+      { t1: [pawnAt, pawnAt, pawnAt, pawnAt], t2: [at(8, 8)] }, // weight 4 >= 3
+      [mv("t1", at(4, 5))],
+      { orientation: { t1: { dx: 1, dy: 0 } } },
+      { pawnPromotionWeight: 3 }
+    )
+
+    expect(next.unitTypes?.t1).toBe("queen")
+    expect(next.playerPieces.t1).toEqual([at(4, 5)])
+    expect(next.playerHealth.t1).toBe(99) // one step, no eat: normal movement cost
+  })
+
+  it("a promoting team's score drops but the team is not eliminated", () => {
+    // t1's only unit is the promoting pawn: the team score falls from 3 to 1
+    // and the team must still read as alive, with no winner declared.
+    const players = [gp("t1", "t1", "A", "pawn"), gp("t2", "t2", "A", "king")]
+    const pawnAt = at(3, 5)
+    const next = run(
+      players,
+      { t1: [pawnAt, pawnAt], t2: [at(8, 8)] },
+      [mv("t1", at(4, 5))],
+      { orientation: { t1: { dx: 1, dy: 0 } }, food: [at(4, 5)] },
+      { pawnPromotionWeight: 3 }
+    )
+
+    expect(next.alivePlayers).toEqual(expect.arrayContaining(["t1", "t2"]))
+    expect(next.scores.t1).toBe(1)
+    expect(next.winners).toEqual([])
+    expect(next.clashes.some((c) => c.playerIDs.includes("t1"))).toBe(false)
+  })
+
+  it("turn-limit adjudication scores a promoting team at its reset weight", () => {
+    // Turn limit hits on this very turn. t1 promotes (weight 3 -> 1); t2's
+    // rook holds at weight 2 and therefore wins on score.
+    const players = [gp("t1", "t1", "A", "pawn"), gp("t2", "t2", "A", "rook")]
+    const pawnAt = at(3, 5)
+    const rookAt = at(8, 8)
+    const next = run(
+      players,
+      { t1: [pawnAt, pawnAt], t2: [rookAt, rookAt] },
+      [mv("t1", at(4, 5))],
+      { orientation: { t1: { dx: 1, dy: 0 } }, food: [at(4, 5)] },
+      { pawnPromotionWeight: 3, maxTurns: 1 }
+    )
+
+    expect(next.unitTypes?.t1).toBe("queen")
+    expect(next.winners.map((w) => w.playerID)).toEqual(["t2"])
+    expect(next.winners[0].teamScore).toBe(2)
   })
 })
 
@@ -905,6 +965,7 @@ describe("configurable per-unit-type max health", () => {
     expect(next.unitTypes?.t1).toBe("queen")
     // Ate as a pawn (restored to 200), then clamped to the queen max on promotion.
     expect(next.playerHealth.t1).toBe(50)
+    expect(next.playerPieces.t1).toEqual([at(4, 5)]) // and reset to weight 1
   })
 
   it("pawn promotion leaves health alone when it is within the queen's max", () => {
@@ -919,7 +980,9 @@ describe("configurable per-unit-type max health", () => {
     )
 
     expect(next.unitTypes?.t1).toBe("queen")
-    expect(next.playerHealth.t1).toBe(80) // pawn restore carried through unclamped
+    // Health is never topped up by promotion, only clamped: the pawn's 80
+    // carries through even though the queen may hold 500.
+    expect(next.playerHealth.t1).toBe(80)
   })
 
   it("config absent: everything restores to 100 exactly as before", () => {

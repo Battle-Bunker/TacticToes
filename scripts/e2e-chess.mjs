@@ -4,7 +4,7 @@
 // chess mechanics on the resolved turns: piece spawns (weight-1 stacks,
 // unitTypes, every-unit orientation), per-type max health, movement-tied health loss
 // (stationary pieces spend nothing), slider paths + applied-move recording,
-// pawn rotation, and snake 1/turn drain.
+// pawn rotation, pawn promotion (weight reset to 1), and snake 1/turn drain.
 //
 // Usage: node e2e-chess.mjs
 // Requires: GOOGLE_APPLICATION_CREDENTIALS + VITE_FIREBASE_* (or E2E_*) env,
@@ -313,6 +313,22 @@ async function main() {
     const t1 = turns[1]
     check(t2.playerHealth[pawnId] === t1.playerHealth[pawnId], "rotation cost no health")
   }
+
+  // --- Promotion (opportunistic): if any pawn promoted, it did so at weight 1 ---
+  log("pawn promotion (if one happened)")
+  let sawPromotion = false
+  for (let i = 1; i < turns.length; i++) {
+    const prev = turns[i - 1], cur = turns[i]
+    for (const p of gp) {
+      if ((prev.unitTypes?.[p.id]) !== "pawn" || (cur.unitTypes?.[p.id]) !== "queen") continue
+      sawPromotion = true
+      check(cur.playerPieces[p.id]?.length === 1,
+        `promoted pawn ${p.id} reset to weight 1 (got ${cur.playerPieces[p.id]?.length})`)
+      check(cur.scores[p.id] === 1, "promoted unit scores 1")
+      check(cur.alivePlayers.includes(p.id), "promoting did not eliminate the unit")
+    }
+  }
+  if (!sawPromotion) log("  note: no pawn reached the promotion weight this run")
 
   // --- Snakes drain exactly 1/turn when not eating ---
   log("snake movement drain")
