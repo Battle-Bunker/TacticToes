@@ -5,7 +5,7 @@ import { Team, UnitCounts } from "@shared/types/Game"
 import { useTeamColors } from "../hooks/useTeamColors"
 import { expandTeams } from "../utils/expandTeams"
 import { getFertileTileColor } from "../utils/fertileTileColor"
-import { unitGlyph } from "../utils/unitGlyphs"
+import { unitMark } from "../utils/unitGlyphs"
 
 export interface BoardPresetData {
   fertileTiles: number[]
@@ -183,7 +183,7 @@ export const SnekConfiguration: React.FC<SnekConfigurationProps> = ({
                     const player = previewPlayers.find(p => p.id === playerId)
                     const color = (player && teamColorByID.get(player.teamID)) || "#fff"
                     // Every unit shows its own glyph, in its team's colour.
-                    const marker = unitGlyph(player?.unitType)
+                    const marker = unitMark(player?.unitType)
                     content = (
                       <Box sx={{
                         width: "100%", height: "100%",
