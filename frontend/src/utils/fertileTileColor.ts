@@ -1,8 +1,7 @@
 // Grass-like coloring for fertile ground tiles. Deterministic per tile:
 // a positional noise term plus the count of adjacent fertile tiles picks
 // the HSL values, so denser patches render darker/more saturated.
-// Canonical copy shared by SnekConfiguration (board preview) and
-// SnakeGameLogic (live game board).
+// Used by SnekConfiguration's board preview.
 export function getFertileTileColor(index: number, w: number, fertileSet: Set<number>): string {
   const px = index % w
   const py = Math.floor(index / w)
