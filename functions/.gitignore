@@ -6,3 +6,9 @@ typings/
 
 # Node.js dependency directory
 node_modules/
+
+# Deployment config is environment variables only -- this codebase reads no
+# .env file and nothing generates one. Any that shows up is a local accident
+# and must not be committed (the repo is deployment agnostic).
+.env
+.env.*

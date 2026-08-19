@@ -1,15 +1,24 @@
-// Mid-tone colours chosen to stay legible on both dark and light backgrounds.
+// Ordered for maximal pairwise OKLab distance in every prefix (farthest-point
+// walk), and kept clear of the board's reserved hues: fertile-ground yellow,
+// hazard red, food orange, the selection purple, the sky-blue orientation eye,
+// and the white/black/grey neutrals. Yellows and yellow-greens are excluded
+// outright. Assignment is by arrival order (nextTeamColor takes the first
+// unused entry), so a team's colour is predictable from when it was created.
+// Kept in lockstep with the operator palette in Chris-Centaur's
+// src/shared/player-palette.ts.
 export const TEAM_COLOR_PALETTE: string[] = [
-  "#E6194B", // crimson
-  "#F58231", // orange
-  "#C9A227", // gold
-  "#3CB44B", // green
-  "#2AA79B", // teal
-  "#29ABE2", // sky blue
-  "#4363D8", // royal blue
-  "#7E57C2", // violet
-  "#F032E6", // magenta
-  "#8D6E63", // mocha
+  "#156cdd", // azure
+  "#ff4d6d", // coral rose
+  "#0a7e3a", // emerald
+  "#8629c0", // violet
+  "#119ba7", // cyan-teal
+  "#c70389", // magenta
+  "#88411a", // rust brown
+  "#12cdae", // turquoise
+  "#9b84ff", // periwinkle
+  "#05556f", // deep petrol
+  "#8e0746", // crimson wine
+  "#06726e", // deep teal-green
 ]
 
 const hslToHex = (h: number, s: number, l: number): string => {

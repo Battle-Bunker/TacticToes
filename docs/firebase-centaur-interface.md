@@ -197,11 +197,41 @@ underneath a staged write would silently invalidate it.
 When a turn resolves, each new `Turn` document's `moves` map records the
 move index **actually applied** for every snake — the winning staged move,
 or the engine's default when nothing valid was staged. The default policy is
-deterministic: **continue the previous move** (step in the head−neck
-direction), falling back to the first in-bounds adjacent cell for a snake
-with no direction yet. Clients can therefore both read the authoritative
-applied moves from the next turn and accurately predict what an unstaged,
-committed snake will do.
+deterministic: **one step along the snake's orientation**
+(`turn.orientation[playerID]` — the direction it last moved; on a snake's
+first move, its spawn orientation). Clients can therefore both read the
+authoritative applied moves from the next turn and accurately predict what
+an unstaged, committed snake will do.
+
+### Chess-piece games
+
+Games whose setup carries `unitsPerTeam` field chess pieces alongside (or
+instead of) snakes — see `docs/chess-pieces.md` for the complete rules. The
+wire contract is unchanged in shape; what varies for a piece unit:
+
+- `gamePlayers[i].unitType` names the unit's initial type; the current type
+  per turn (pawns promote to queens) is `turn.unitTypes[playerID]`.
+- A piece's `turn.playerPieces[playerID]` entry is its **weight-stack**: N
+  copies of the single square it occupies, where N is its weight.
+- A staged `move` is still one full-board index: any square on a legal ray
+  (rook/bishop/queen), jump (knight), or step (king/pawn) — or the unit's
+  own square to stay. A pawn staged onto its left/right side square spends
+  the turn rotating to face that way.
+  Illegal or missing moves default to **stay**, and the piece's `moves`
+  entry records the square it actually ended on — a slider stopped by an
+  in-flight collision records its stop square, with the squares it actually
+  traversed in `turn.paths[playerID]`.
+- `turn.orientation[playerID]` carries every unit's orientation, in every
+  game — snake-only games included. Rewritten each turn: a unit that moved
+  faces its move direction (sliders/king: unit step; knight: exact
+  L-offset; snake: head minus neck); units that stayed keep their orientation;
+  dead units drop out. Pawns rotate **only** via their rotation action —
+  forward/diagonal steps leave their orientation alone. Turn 0: every unit
+  faces toward the board centre, chosen from its type's legal
+  orientation set (snake/rook/pawn: 4 orthogonals; bishop: 4
+  diagonals; queen/king: 8; knight: its 8 L-offsets) with minimal angle to
+  the spawn→centre vector, ties resolved uniformly at random.
+- In-flight clashes carry `subStep`, the within-turn step they happened on.
 
 ### Timing semantics
 

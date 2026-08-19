@@ -8,10 +8,15 @@ set -euo pipefail
 #                        frontend build so the two cannot disagree.
 #   GCP_SA_KEY_B64       base64 of the deployer service account JSON key
 #                        (created by scripts/create-deployer-sa.sh)
-#
-# Optional:
 #   VITE_FIREBASE_FUNCTIONS_REGION
-#                        defaults to australia-southeast1, must match Firestore
+#                        no default by design; must match the target project's
+#                        Firestore region. Read straight from the environment
+#                        by both halves of the deploy: the frontend build
+#                        (Vite) and the functions build, which stamps it into
+#                        the generated entrypoint for the CLI's function
+#                        discovery and the deployed runtime (see
+#                        functions/tools/build-entry.mjs). No config files are
+#                        involved anywhere.
 #
 # Usage:
 #   bash scripts/deploy.sh                      # everything
@@ -22,8 +27,11 @@ TARGETS="${1:-firestore:rules,firestore:indexes,hosting,functions}"
 
 : "${VITE_FIREBASE_PROJECT_ID:?set VITE_FIREBASE_PROJECT_ID (Replit Secrets)}"
 : "${GCP_SA_KEY_B64:?set GCP_SA_KEY_B64 (Replit Secrets)}"
-
-export VITE_FIREBASE_FUNCTIONS_REGION="${VITE_FIREBASE_FUNCTIONS_REGION:-australia-southeast1}"
+: "${VITE_FIREBASE_FUNCTIONS_REGION:?set VITE_FIREBASE_FUNCTIONS_REGION -- there is no default; it must match the Firestore region of the target project}"
+# Exported, not just set: the functions build runs as the CLI's predeploy hook
+# and reads it from the environment, which is the only channel that carries a
+# deployment secret into function discovery and the deployed runtime.
+export VITE_FIREBASE_FUNCTIONS_REGION
 
 # The CLI resolves credentials in this order: --token, FIREBASE_TOKEN, a cached
 # interactive login in the configstore, and only THEN application default
@@ -58,6 +66,28 @@ fi
 echo "Using firebase CLI: $FIREBASE_BIN"
 
 export CI=true
+
+# Guard: the (default) Firestore database must already exist. firebase.json
+# deliberately pins no "location" (region hardcodes are banned), which revives
+# a known footgun: `firebase deploy --only firestore:rules` against a project
+# with no database SILENTLY CREATES one, defaulting to the nam5 US
+# multi-region, with no prompt even in interactive mode -- and Firestore
+# location is permanent. So verify the database exists before deploying
+# anything, and leave database creation to scripts/bootstrap-gcp-project.sh.
+DB_LIST="$("$FIREBASE_BIN" firestore:databases:list \
+  --project "$VITE_FIREBASE_PROJECT_ID" --non-interactive 2>&1)" || {
+  echo "ERROR: could not list Firestore databases for $VITE_FIREBASE_PROJECT_ID:" >&2
+  echo "$DB_LIST" >&2
+  exit 1
+}
+if ! echo "$DB_LIST" | grep -qF "(default)"; then
+  echo "ERROR: project $VITE_FIREBASE_PROJECT_ID has no (default) Firestore database." >&2
+  echo "Deploying now would let the Firebase CLI silently create one in the" >&2
+  echo "wrong region (nam5), and Firestore location is PERMANENT." >&2
+  echo "Create the database first with scripts/bootstrap-gcp-project.sh, in the" >&2
+  echo "region that VITE_FIREBASE_FUNCTIONS_REGION names." >&2
+  exit 1
+fi
 
 echo "Deploying [$TARGETS] to $VITE_FIREBASE_PROJECT_ID (region $VITE_FIREBASE_FUNCTIONS_REGION)"
 

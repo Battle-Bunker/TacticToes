@@ -31,11 +31,14 @@ TARGETS="${REPLIT_DEPLOY_TARGETS:-firestore:rules,firestore:indexes,functions}"
 # just deployed. The frontend config throws on a missing value at import time,
 # so an unset var here would otherwise ship a site that is blank on load.
 : "${VITE_FIREBASE_PROJECT_ID:?production VITE_FIREBASE_ vars missing from the deployment secrets}"
+# Region is required, per-deployment config with no default; it must match the
+# target project's Firestore region (see functions/src/config/region.ts).
+: "${VITE_FIREBASE_FUNCTIONS_REGION:?set VITE_FIREBASE_FUNCTIONS_REGION in the deployment secrets -- no default; must match the Firestore region of the project}"
 
 echo "=========================================="
 echo "Replit production deploy"
 echo "  Firebase project: $VITE_FIREBASE_PROJECT_ID"
-echo "  Region:           ${VITE_FIREBASE_FUNCTIONS_REGION:-australia-southeast1 (default)}"
+echo "  Region:           $VITE_FIREBASE_FUNCTIONS_REGION"
 echo "  Targets:          ${TARGETS:-<none>}"
 echo "=========================================="
 

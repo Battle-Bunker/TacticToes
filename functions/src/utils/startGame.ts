@@ -53,9 +53,15 @@ export function reasonNotToStart(setup: GameSetup, trigger: StartTrigger): strin
   if (setup.started) return "game already started"
   if (setup.teams.length < 2) return "fewer than 2 teams"
 
-  // Every snake needs a spawnable interior cell (the perimeter is walls).
+  // Every unit needs a spawnable interior cell (the perimeter is walls).
   const interiorCells = (setup.boardWidth - 2) * (setup.boardHeight - 2)
-  if (setup.teams.length * setup.snakesPerTeam > interiorCells) {
+  const unitsPerTeam = setup.unitsPerTeam
+    ? Object.values(setup.unitsPerTeam).reduce((a, b) => a + (b ?? 0), 0)
+    : setup.snakesPerTeam
+  if (setup.unitsPerTeam && unitsPerTeam < 1) {
+    return "each team needs at least one unit"
+  }
+  if (setup.teams.length * unitsPerTeam > interiorCells) {
     return "board too small for teams × snakesPerTeam"
   }
 
@@ -134,7 +140,7 @@ export async function startGame(
       return null
     }
 
-    const gamePlayers = expandTeams(setup.teams, setup.snakesPerTeam)
+    const gamePlayers = expandTeams(setup.teams, setup.snakesPerTeam, setup.unitsPerTeam)
     const gameSetup: StartedGameSetup = { ...setup, gamePlayers, started: true }
 
     // The processor needs a GameState to build against; only `setup` is read

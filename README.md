@@ -1,12 +1,20 @@
 # Team Snek — Development & Deployment Guide
 
 This project runs on **Firebase Functions** and uses **Google Cloud Tasks** for background jobs.  
-Production runs on the **`team-snek`** project, with Firestore and all Cloud
-Functions in **`australia-southeast1`** (Sydney).
+The source code is deployment agnostic: **there is no default region anywhere
+in the repo**. Every deployment sets `VITE_FIREBASE_FUNCTIONS_REGION`
+explicitly, as an ordinary environment variable — a Replit Secret, a CI
+variable, an `export` in your shell. There are no config files to create: the
+frontend build (Vite) and the functions build both read it from the
+environment. It must match that project's Firestore region. Anything
+region-dependent throws or fails fast when it is unset.
+As a fact about one specific deployment: production runs on the
+**`team-snek`** project, with Firestore and all Cloud Functions in
+`australia-southeast1` (Sydney).
 
-> TL;DR: provision a project with `scripts/bootstrap-gcp-project.sh`, put the
-> frontend env it prints into `frontend/.env` (or Replit Secrets), then deploy
-> with `npm run deploy`.
+> TL;DR: provision a project with `scripts/bootstrap-gcp-project.sh
+> <PROJECT_ID> <REGION>`, put the frontend env it prints into `frontend/.env`
+> (or Replit Secrets), then deploy with `npm run deploy`.
 
 ---
 
@@ -29,7 +37,12 @@ Functions in **`australia-southeast1`** (Sydney).
 
 ## ⚙️ 1) Environment Variables
 
-We keep env files **separate** per workspace to avoid leaking server secrets into the browser and to match tooling expectations.
+All configuration is read from **ordinary environment variables** — Replit
+Secrets, CI variables, an `export` in your shell — so a fresh workspace needs
+no files. The frontend additionally accepts a local `frontend/.env` because
+Vite reads one and it is convenient for local work; the functions codebase
+reads no files at all. Keep the two workspaces' variables separate so server
+secrets never reach the browser bundle.
 
 ### 1.1 Frontend (`/frontend/.env`)
 
@@ -77,30 +90,31 @@ project.
 
 > 🔐 Never commit real `.env` files.
 
-### 1.2 Functions (`/functions/.env`)
+### 1.2 Functions (environment only — no files)
 
-1. Copy the template and fill your values:
+Functions config is **environment variables, nothing else**. Set the region in
+the same place as every other deployment secret and deploy:
 
 ```bash
-cp functions/.env.example functions/.env
+export VITE_FIREBASE_FUNCTIONS_REGION=<region>   # must match that project's Firestore region
+bash scripts/deploy.sh functions
 ```
 
-**`functions/.env.example`**
+There is no default and no config file: `functions/src/config/region.ts` throws
+at module load if the value is missing, and `scripts/deploy.sh` refuses to run
+without it.
 
-```env
-# Cloud Tasks / Backend settings
-TASKS_PROJECT_ID=        # e.g. team-snek
-TASKS_LOCATION=us-central1
-TASKS_QUEUE=turn-expirations
-```
-
-Your Functions code should read these and **fallback** to defaults if unset:
-
-- `TASKS_PROJECT_ID` → defaults to the runtime project (e.g., `process.env.GCLOUD_PROJECT`)
-- `TASKS_LOCATION` → default `us-central1`
-- `TASKS_QUEUE` → default `turn-expirations`
-
-> Keep server secrets here or use `firebase functions:config:set` (not shown here).
+How the value gets from your shell into the deployed functions is worth
+knowing, because it is not obvious. firebase-tools does not pass the ambient
+environment to the processes it spawns — function discovery, the emulated
+runtime and the deployed runtime each get an environment it constructs itself
+(`FIREBASE_CONFIG`, `GCLOUD_PROJECT`, `GOOGLE_CLOUD_QUOTA_PROJECT`, `PORT`,
+`FUNCTIONS_CONTROL_API`, `HOME`, `PATH`), and `.env` files reach only the
+deployed runtime, never discovery. The functions **build** does run in your
+shell, though (it is the `predeploy` hook), so that is where the environment is
+read: `functions/tools/build-entry.mjs` stamps the config into the generated
+entrypoint `functions/lib/entry.js`, exactly as Vite bakes `VITE_` vars into
+the frontend bundle. A real environment variable always wins over the stamp.
 
 ### 1.3 (Optional) Root Shared Env
 
@@ -110,7 +124,7 @@ If you want a single source of truth for shared constants:
 
 ```env
 PROJECT_ID=
-REGION=us-central1
+REGION=        # REQUIRED: must match the project's Firestore region
 ```
 
 You can load this in scripts and write into both sub-envs if desired. This is **optional** and not required by the app.
@@ -204,14 +218,20 @@ gcloud services enable   cloudtasks.googleapis.com   appengine.googleapis.com   
 
 ### 4.3 Create App Engine app (if not already created)
 
+Use your project's region family (must pair with the queue location below,
+which in turn must match the Firestore region — see the note above):
+
 ```bash
-gcloud app create --region=us-central
+gcloud app create --region=<REGION_FAMILY>
 ```
 
 ### 4.4 Create the Cloud Tasks queue
 
+Use the configured region (the same value as `VITE_FIREBASE_FUNCTIONS_REGION`;
+it must match the project's Firestore region):
+
 ```bash
-gcloud tasks queues create turn-expirations --location=us-central1
+gcloud tasks queues create turn-expirations --location=<REGION>
 ```
 
 ### 4.5 Grant IAM roles to the calling Service Account
@@ -254,7 +274,7 @@ gcloud config get-value project
 gcloud app describe
 
 # Queue exists?
-gcloud tasks queues describe turn-expirations --location=us-central1
+gcloud tasks queues describe turn-expirations --location=<REGION>
 
 # IAM check for the SA
 PROJECT_ID=<YOUR_PROJECT_ID>
@@ -291,7 +311,7 @@ firebase deploy
   Run `npm run build` in `/functions` after changes.
 
 - **`FAILED_PRECONDITION: App Engine app does not exist`**  
-  Run `gcloud app create --region=us-central` first, then create your queue.
+  Run `gcloud app create --region=<REGION_FAMILY>` first, then create your queue.
 
 - **`PERMISSION_DENIED` when enqueueing tasks**  
   Ensure the caller SA has `roles/cloudtasks.enqueuer`.  
@@ -319,11 +339,11 @@ gcloud config set project <YOUR_PROJECT_ID>
 # Enable APIs
 gcloud services enable cloudtasks.googleapis.com appengine.googleapis.com cloudfunctions.googleapis.com firestore.googleapis.com iam.googleapis.com
 
-# Create App Engine (us-central)
-gcloud app create --region=us-central
+# Create App Engine (region family must pair with the queue location)
+gcloud app create --region=<REGION_FAMILY>
 
-# Create queue (us-central1)
-gcloud tasks queues create turn-expirations --location=us-central1
+# Create queue (the configured region; must match the Firestore region)
+gcloud tasks queues create turn-expirations --location=<REGION>
 
 # IAM roles
 PROJECT_ID=<YOUR_PROJECT_ID>

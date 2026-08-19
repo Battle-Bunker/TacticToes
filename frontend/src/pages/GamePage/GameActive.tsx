@@ -1,20 +1,8 @@
 import React from "react"
 
-import {
-  Alert,
-  Box,
-  Stack,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Typography,
-} from "@mui/material"
+import { Alert, Stack, Typography } from "@mui/material"
 
 import { useGameStateContext } from "../../context/GameStateContext"
-import { snakeLabel } from "../../utils/snakeLabel"
 import GameGrid from "./GameGrid"
 
 const GameActive: React.FC = () => {
@@ -39,7 +27,6 @@ const GameActive: React.FC = () => {
     )
   }
 
-  const { teams, gamePlayers } = gameState.setup
   const gameOver = currentTurn.winners.length > 0
 
   const movedCount =
@@ -73,64 +60,12 @@ const GameActive: React.FC = () => {
 
       {!gameOver && (
         <Typography variant="body2" color="text.secondary">
-          {movedCount} of {aliveCount} snakes have moved.
+          {movedCount} of {aliveCount} units have moved.
         </Typography>
       )}
 
-      {/* Game Grid */}
+      {/* The board being watched, its turn controls, and its scoreboard. */}
       <GameGrid />
-
-      {/* Team score table */}
-      <TableContainer sx={{ my: 2, width: "100%" }}>
-        <Table size="small" sx={{ borderCollapse: "collapse" }}>
-          <TableHead>
-            <TableRow>
-              <TableCell>Team</TableCell>
-              <TableCell align="right">Score</TableCell>
-              <TableCell align="left">Snakes</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {teams.map((team) => {
-              const teamScore = currentTurn.teamScores?.[team.id] || 0
-              const teamSnakes = gamePlayers.filter(
-                (gp) => gp.teamID === team.id,
-              )
-
-              return (
-                <TableRow key={team.id} sx={{ backgroundColor: team.color }}>
-                  <TableCell>{team.name}</TableCell>
-                  <TableCell align="right">{teamScore}</TableCell>
-                  <TableCell align="left">
-                    {teamSnakes.map((snake) => {
-                      const alive = currentTurn.alivePlayers.includes(snake.id)
-                      const health = currentTurn.playerHealth[snake.id] ?? 0
-                      const length =
-                        currentTurn.playerPieces[snake.id]?.length ?? 0
-
-                      return (
-                        <Box
-                          key={snake.id}
-                          component="span"
-                          sx={{
-                            mr: 1,
-                            whiteSpace: "nowrap",
-                            textDecoration: alive ? "none" : "line-through",
-                            opacity: alive ? 1 : 0.5,
-                          }}
-                        >
-                          {snakeLabel(team, snake)}
-                          {alive && ` ♥${health} ×${length}`}
-                        </Box>
-                      )
-                    })}
-                  </TableCell>
-                </TableRow>
-              )
-            })}
-          </TableBody>
-        </Table>
-      </TableContainer>
     </Stack>
   )
 }

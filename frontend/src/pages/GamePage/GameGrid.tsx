@@ -1,10 +1,12 @@
 import { Box, IconButton, Typography, Slider } from "@mui/material"
-import { Clash, GamePlayer, GameState } from "@shared/types/Game"
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import React, { useEffect, useMemo, useState } from "react"
 import { useGameStateContext } from "../../context/GameStateContext"
+import BoardCanvas from "../../board/BoardCanvas"
+import { clashesAtCell } from "../../board/clashes"
+import { Cell } from "../../board/renderer"
+import { turnToBoard } from "../../board/turnToBoard"
 import ClashDialog from "./ClashDialog"
-import GridCell from "./GridCell"
-import SnakeGameLogic from "./SnakeGameLogic"
+import Scoreboard from "./Scoreboard"
 import {
   ArrowBack,
   ArrowForward,
@@ -12,66 +14,13 @@ import {
   LastPage,
 } from "@mui/icons-material"
 
-export interface GameLogicProps {
-  gameState: GameState
-  cellSize: number
-  selectedTurnIndex: number
-}
-
-export interface GameLogicReturn {
-  cellContentMap: { [index: number]: JSX.Element }
-  cellBackgroundMap: { [index: number]: string }
-  clashesAtPosition: { [index: number]: Clash }
-}
-
 const GameGrid: React.FC = () => {
-  const { gameState, latestTurn } = useGameStateContext()
-
-  const winners = latestTurn?.winners || []
-  const gridWidth = gameState?.setup.boardWidth || 8
-  const gridHeight = gameState?.setup.boardHeight || 8
-  const totalCells = gridWidth * gridHeight
-  const winningSquaresSet = new Set(
-    winners.flatMap((winner) => winner.winningSquares),
-  )
+  const { gameState } = useGameStateContext()
 
   const [selectedTurnIndex, setSelectedTurnIndex] = useState<number>(-1)
   const [turnCount, setTurnCount] = useState<number>(0)
 
-  const [clashReason, setClashReason] = useState<string>("")
-  const [openClashDialog, setOpenClashDialog] = useState(false)
-  const [clashPlayersList, setClashPlayersList] = useState<GamePlayer[]>([])
-  const gridRef = useRef<HTMLDivElement>(null)
-  const [containerWidth, setContainerWidth] = useState<number>(0)
-
-  const cellSize = containerWidth ? containerWidth / gridWidth : 0
-
-  useLayoutEffect(() => {
-    const updateContainerWidth = () => {
-      if (gridRef.current) {
-        setContainerWidth(gridRef.current.offsetWidth)
-      }
-    }
-    updateContainerWidth()
-    window.addEventListener("resize", updateContainerWidth)
-    return () => {
-      window.removeEventListener("resize", updateContainerWidth)
-    }
-  }, [gridWidth, selectedTurnIndex])
-
-  const handleSquareClick = (index: number) => {
-    if (!gameState) return
-
-    const clash = gameLogicReturn?.clashesAtPosition[index]
-    if (!clash) return
-
-    const playersInvolved = gameState.setup.gamePlayers.filter((player) =>
-      clash.playerIDs.includes(player.id),
-    )
-    setClashReason(clash.reason)
-    setClashPlayersList(playersInvolved)
-    setOpenClashDialog(true)
-  }
+  const [inspectedClashCell, setInspectedClashCell] = useState<Cell | null>(null)
 
   // Follow the latest turn as new turns arrive
   useEffect(() => {
@@ -85,17 +34,26 @@ const GameGrid: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gameState?.turns?.length])
 
-  const gameLogicReturn: GameLogicReturn | undefined = useMemo(
+  const viewedTurnIndex = selectedTurnIndex >= 0 ? selectedTurnIndex : 0
+
+  const board = useMemo(
     () =>
       gameState
-        ? SnakeGameLogic({
-            gameState,
-            cellSize,
-            selectedTurnIndex: selectedTurnIndex >= 0 ? selectedTurnIndex : 0,
+        ? turnToBoard(gameState, viewedTurnIndex, {
+            showWinningSquares: viewedTurnIndex === gameState.turns.length - 1,
           })
-        : undefined,
-    [gameState, cellSize, selectedTurnIndex],
+        : null,
+    [gameState, viewedTurnIndex],
   )
+
+  // Clash squares stay clickable whether or not a death marker is drawn on
+  // them: the panel explains what happened there, and a survivor standing on
+  // the square is exactly when that explanation is worth reading. Every record
+  // the square carries is kept — one square can hold several collisions.
+  const handleSquareClick = (cell: Cell) => {
+    if (!board || clashesAtCell(board, cell).length === 0) return
+    setInspectedClashCell(cell)
+  }
 
   // Navigation handlers
   const handlePrevTurn = () => {
@@ -126,38 +84,11 @@ const GameGrid: React.FC = () => {
     setSelectedTurnIndex(newValue as number)
   }
 
-  if (!gameLogicReturn) return null
+  if (!board) return null
 
   return (
     <>
-      <Box
-        ref={gridRef}
-        sx={{
-          display: "grid",
-          gridTemplateColumns: `repeat(${gridWidth}, 1fr)`,
-          width: "100%",
-          maxWidth: 600,
-          margin: "0 auto",
-          border: "2px solid black",
-          boxSizing: "border-box",
-        }}
-      >
-        {Array.from({ length: totalCells }).map((_, index) => (
-          <GridCell
-            key={index}
-            index={index}
-            cellSize={cellSize}
-            cellContent={gameLogicReturn.cellContentMap[index]}
-            backgroundColor={gameLogicReturn.cellBackgroundMap[index]}
-            isWinningSquare={
-              selectedTurnIndex === turnCount - 1 &&
-              winningSquaresSet.has(index)
-            }
-            hasClash={Boolean(gameLogicReturn.clashesAtPosition[index])}
-            onClick={handleSquareClick}
-          />
-        ))}
-      </Box>
+      <BoardCanvas board={board} onCellClick={handleSquareClick} />
 
       {/* Turn navigation controls with slider */}
       <Box
@@ -214,12 +145,13 @@ const GameGrid: React.FC = () => {
         </Box>
       </Box>
 
+      <Scoreboard board={board} />
+
       <ClashDialog
-        open={openClashDialog}
-        onClose={() => setOpenClashDialog(false)}
-        clashReason={clashReason}
-        clashPlayersList={clashPlayersList}
-        teams={gameState?.setup.teams || []}
+        open={inspectedClashCell !== null}
+        onClose={() => setInspectedClashCell(null)}
+        cell={inspectedClashCell}
+        board={board}
       />
     </>
   )

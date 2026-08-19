@@ -62,6 +62,38 @@ service cloud.firestore {
         (teams.size() < 10 || isValidTeam(teams[9]));
     }
 
+    // Per-team unit counts for chess-piece games. Total is capped at 26 so
+    // every unit still gets a letter A-Z.
+    function isValidUnitCounts(uc) {
+      return uc is map &&
+        uc.keys().hasOnly(['snake', 'pawn', 'knight', 'bishop', 'rook', 'queen', 'king']) &&
+        uc.get('snake', 0) is int && uc.get('snake', 0) >= 0 &&
+        uc.get('pawn', 0) is int && uc.get('pawn', 0) >= 0 &&
+        uc.get('knight', 0) is int && uc.get('knight', 0) >= 0 &&
+        uc.get('bishop', 0) is int && uc.get('bishop', 0) >= 0 &&
+        uc.get('rook', 0) is int && uc.get('rook', 0) >= 0 &&
+        uc.get('queen', 0) is int && uc.get('queen', 0) >= 0 &&
+        uc.get('king', 0) is int && uc.get('king', 0) >= 0 &&
+        (uc.get('snake', 0) + uc.get('pawn', 0) + uc.get('knight', 0) + uc.get('bishop', 0)
+          + uc.get('rook', 0) + uc.get('queen', 0) + uc.get('king', 0)) >= 1 &&
+        (uc.get('snake', 0) + uc.get('pawn', 0) + uc.get('knight', 0) + uc.get('bishop', 0)
+          + uc.get('rook', 0) + uc.get('queen', 0) + uc.get('king', 0)) <= 26;
+    }
+
+    // Per-type max health for units. Every key is optional; a missing key
+    // means the default of 100, so `.get(k, 100)` makes absent keys pass.
+    function isValidUnitMaxHealth(mh) {
+      return mh is map &&
+        mh.keys().hasOnly(['snake', 'pawn', 'knight', 'bishop', 'rook', 'queen', 'king']) &&
+        mh.get('snake', 100) is int && mh.get('snake', 100) >= 1 && mh.get('snake', 100) <= 1000 &&
+        mh.get('pawn', 100) is int && mh.get('pawn', 100) >= 1 && mh.get('pawn', 100) <= 1000 &&
+        mh.get('knight', 100) is int && mh.get('knight', 100) >= 1 && mh.get('knight', 100) <= 1000 &&
+        mh.get('bishop', 100) is int && mh.get('bishop', 100) >= 1 && mh.get('bishop', 100) <= 1000 &&
+        mh.get('rook', 100) is int && mh.get('rook', 100) >= 1 && mh.get('rook', 100) <= 1000 &&
+        mh.get('queen', 100) is int && mh.get('queen', 100) >= 1 && mh.get('queen', 100) <= 1000 &&
+        mh.get('king', 100) is int && mh.get('king', 100) >= 1 && mh.get('king', 100) <= 1000;
+    }
+
     function isValidSetup(setup) {
       let hasRequiredFields = setup.keys().hasAll([
           'teams', 'snakesPerTeam', 'boardWidth', 'boardHeight',
@@ -79,7 +111,11 @@ service cloud.firestore {
 
       let validOptionalFields = (
         (!('maxTurns' in setup.keys()) || (setup.maxTurns is int && setup.maxTurns > 0 && setup.maxTurns <= 1000)) &&
-        (!('firstTurnTime' in setup.keys()) || (setup.firstTurnTime is int && setup.firstTurnTime > 0))
+        (!('firstTurnTime' in setup.keys()) || (setup.firstTurnTime is int && setup.firstTurnTime > 0)) &&
+        (!('pawnPromotionWeight' in setup.keys()) || (setup.pawnPromotionWeight is int && setup.pawnPromotionWeight >= 2 && setup.pawnPromotionWeight <= 100)) &&
+        (!('hazardDamage' in setup.keys()) || (setup.hazardDamage is int && setup.hazardDamage >= 1 && setup.hazardDamage <= 1000)) &&
+        (!('unitsPerTeam' in setup.keys()) || isValidUnitCounts(setup.unitsPerTeam)) &&
+        (!('maxHealthPerUnit' in setup.keys()) || isValidUnitMaxHealth(setup.maxHealthPerUnit))
       );
 
       let validTournamentFields = (

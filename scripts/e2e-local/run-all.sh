@@ -6,6 +6,9 @@
 # Usage: CENTAUR_DIR=/path/to/Chris-Centaur scripts/e2e-local/run-all.sh
 #
 #   CENTAUR_DIR      required — Chris-Centaur checkout (node_modules installed)
+#   FUNCTIONS_REGION required — no default by design. Any value works locally
+#                    (e.g. local-region-1); it is threaded to the emulated
+#                    functions and both centaurs so they agree.
 #   LOG_DIR          where to write logs (default: mktemp under /tmp)
 #   FIRST_TURN_TIME  default 15   MAX_TURN_TIME default 6 (keep >= ~3)
 #   MAX_TURNS        default 40   WANT_TURNS    default 5 (watch assertion)
@@ -24,6 +27,10 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CENTAUR_DIR="${CENTAUR_DIR:?set CENTAUR_DIR to a Chris-Centaur checkout}"
+# Required, no default: the emulated functions and the centaur clients must
+# agree on a region (any value, e.g. local-region-1). Exported so
+# run-emulators.sh and run-centaur.sh inherit it.
+export FUNCTIONS_REGION="${FUNCTIONS_REGION:?set FUNCTIONS_REGION -- no default; any value works locally, e.g. local-region-1}"
 LOG_DIR="${LOG_DIR:-$(mktemp -d /tmp/tt-e2e.XXXXXX)}"
 mkdir -p "$LOG_DIR"
 

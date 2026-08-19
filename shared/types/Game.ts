@@ -40,9 +40,37 @@ export interface Team {
   color: string
 }
 
+// Unit kinds. Absent unitType fields mean "snake".
+export type UnitType = "snake" | "pawn" | "knight" | "bishop" | "rook" | "queen" | "king"
+
+// Per-team unit counts. Absent → snakesPerTeam snakes.
+export interface UnitCounts {
+  snake?: number
+  pawn?: number
+  knight?: number
+  bishop?: number
+  rook?: number
+  queen?: number
+  king?: number
+}
+
+// Per-type max health. Absent keys (or the whole map) mean 100.
+export interface UnitMaxHealth {
+  snake?: number
+  pawn?: number
+  knight?: number
+  bishop?: number
+  rook?: number
+  queen?: number
+  king?: number
+}
+
 export interface GameSetup {
   teams: Team[]
   snakesPerTeam: number
+  unitsPerTeam?: UnitCounts // When present, snakesPerTeam is ignored by expansion
+  pawnPromotionWeight?: number // Pawns promote to queens at this weight (default 10)
+  maxHealthPerUnit?: UnitMaxHealth // per-type max health, default 100
   boardWidth: number
   boardHeight: number
   maxTurnTime: number // Time limit per turn in seconds
@@ -52,6 +80,7 @@ export interface GameSetup {
   timeCreated: Timestamp | FieldValue
   maxTurns?: number
   hazardPercentage?: number // Percentage of the board to fill with hazards (defaults to 0)
+  hazardDamage?: number // health lost per hazard square entered (default 100)
   teamClustersEnabled?: boolean
   fertileGroundEnabled?: boolean
   fertileGroundDensity?: number // Percentage of tiles that are fertile (0-100)
@@ -77,6 +106,7 @@ export interface GamePlayer {
   id: string
   teamID: string
   letter: string // "A".."Z", consecutive within the team
+  unitType?: UnitType // Initial unit type; absent means "snake"
 }
 
 // The setup as embedded in a started game document.
@@ -114,12 +144,15 @@ export interface Turn {
   alivePlayers: string[]
   food: number[]
   hazards: number[]
-  playerPieces: { [playerID: string]: number[] } // Snake body, index 0 = head
+  playerPieces: { [playerID: string]: number[] } // Snake body (index 0 = head) or a chess piece's weight-stack (N copies of its square)
   clashes: Clash[]
-  moves: { [playerID: string]: number } // Move actually applied for each player
+  moves: { [playerID: string]: number } // Square each unit actually ended its move on (truncated sliders record their stop square)
   winners: Winner[]
   teamScores?: { [teamID: string]: number }
   teamClusterFallback?: boolean // Team clusters requested but fell back
+  unitTypes?: { [playerID: string]: UnitType } // Current type per unit (changes on pawn promotion); absent in snake-only games
+  orientation: { [playerID: string]: { dx: number; dy: number } } // Per-unit orientation, every unit in every game (snake-only included); dead units drop out. A unit that moved faces its move direction (sliders/king: unit step; knight: exact L-offset; snake: head minus neck) — except pawns, which rotate only via their rotation action. Spawn: toward the board centre from the type's legal orientation set, ties random
+  paths?: { [playerID: string]: number[] } // Squares each chess piece actually traversed this turn (snakes excluded)
   fertileTiles?: number[]
   invulnerabilityPotions?: number[]
   playerInvulnerabilityLevel?: { [playerID: string]: number }
@@ -138,6 +171,7 @@ export interface Clash {
   index: number
   playerIDs: string[]
   reason: string
+  subStep?: number // Which within-turn sub-step an in-flight clash happened on (piece games only)
 }
 
 export interface GameResult {

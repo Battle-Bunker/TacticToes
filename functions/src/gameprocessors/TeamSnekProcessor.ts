@@ -1,6 +1,17 @@
-import { ActiveEffect, Clash, GamePlayer, GameState, Move, StartedGameSetup, Turn, Winner } from "@shared/types/Game"
+import { ActiveEffect, Clash, GamePlayer, GameState, Move, StartedGameSetup, Turn, UnitType, Winner } from "@shared/types/Game"
 import { Timestamp } from "firebase-admin/firestore"
 import { logger } from "../logger"
+import {
+  DEFAULT_PAWN_PROMOTION_WEIGHT,
+  Orientation,
+  ORTHOGONALS,
+  isPieceType,
+  planPieceAction,
+  spawnOrientation,
+  toXY,
+} from "./chess/pieceMoves"
+import { SimUnit, runChessTurnSim } from "./chess/chessTurnSim"
+import { assignCellsToSlices, sliceDistance } from "../utils/radialSlices"
 
 export interface SnakeGameState {
   // Input data
@@ -25,6 +36,15 @@ export interface SnakeGameState {
   
   // Computed data
   newScores: { [playerID: string]: number }
+
+  // Per-unit orientation, seeded from the current turn and rewritten by
+  // updateOrientation once the turn's movement and deaths have resolved.
+  orientation: { [playerID: string]: Orientation }
+
+  // Chess-piece games only (see docs/chess-pieces.md)
+  unitTypes?: { [playerID: string]: UnitType }
+  piecePaths?: { [playerID: string]: number[] } // squares traversed this turn
+  pieceMoveCosts?: { [playerID: string]: number }
 }
 
 // The board projection the team scoring/win logic works on. Built either from
@@ -107,7 +127,7 @@ export class TeamSnekProcessor {
       gamePlayers.forEach((player) => {
         const pos = presetPositions[player.id]
         if (pos !== undefined) {
-          playerPieces[player.id] = [pos, pos, pos]
+          playerPieces[player.id] = isPieceType(player.unitType) ? [pos] : [pos, pos, pos]
         }
       })
       if (Object.keys(playerPieces).length !== gamePlayers.length) {
@@ -135,21 +155,34 @@ export class TeamSnekProcessor {
       ? this.gameSetup.presetFood
       : this.initializeFood(boardWidth, boardHeight, playerPieces, hazards)
 
-    // Initialize player health
+    // Initialize player health (per-type configurable max, default 100)
     const initialHealth: { [playerID: string]: number } = {}
     gamePlayers.forEach((player) => {
-      initialHealth[player.id] = 100
+      initialHealth[player.id] = this.maxHealthFor(player.unitType)
     })
 
-    // Initialize scores
+    // Initialize scores (score = length/weight: snakes spawn at 3, pieces at 1)
     const initialScores: { [playerID: string]: number } = {}
     gamePlayers.forEach((player) => {
-      initialScores[player.id] = 3 // Initial snake length is 3
+      initialScores[player.id] = isPieceType(player.unitType) ? 1 : 3
     })
 
     const initialInvulnerabilityLevel: { [playerID: string]: number } = {}
     gamePlayers.forEach((player) => {
       initialInvulnerabilityLevel[player.id] = 0
+    })
+
+    // Spawn orientation: every unit faces toward the board centre, chosen
+    // from its type's legal orientation set (ties resolve uniformly at
+    // random).
+    const orientation: { [playerID: string]: Orientation } = {}
+    gamePlayers.forEach((player) => {
+      orientation[player.id] = spawnOrientation(
+        player.unitType ?? "snake",
+        playerPieces[player.id][0],
+        boardWidth,
+        boardHeight,
+      )
     })
 
     const firstTurn: Turn = {
@@ -173,6 +206,16 @@ export class TeamSnekProcessor {
       invulnerabilityPotions: [],
       playerInvulnerabilityLevel: initialInvulnerabilityLevel,
       activeEffects: [],
+      orientation,
+    }
+
+    if (this.hasPieceUnits()) {
+      const unitTypes: { [playerID: string]: UnitType } = {}
+      gamePlayers.forEach((player) => {
+        unitTypes[player.id] = player.unitType ?? "snake"
+      })
+      firstTurn.unitTypes = unitTypes
+      firstTurn.paths = {}
     }
 
     return firstTurn
@@ -185,17 +228,28 @@ export class TeamSnekProcessor {
       }
       const currentTurnNumber = this.gameState.turns.length
 
+      // Games with chess pieces resolve through the within-turn sub-step
+      // simulation; snake-only games keep the original single-pass path.
+      if (this.hasPieceUnits()) {
+        return this.applyMovesChess(currentTurn, moves, currentTurnNumber)
+      }
+
       // 1. Setup
       const gameState = this.initializeGameState(currentTurn)
-      
+      const originSquares = this.captureOriginSquares(gameState)
+
       // 2. Process moves
       this.processPlayerMoves(gameState, moves)
-      
+
       // 3. Handle collisions (tiered by invulnerability level)
       this.detectAndHandleCollisions(gameState)
-      
+
       // 4. Process food and health
       this.processFoodAndHealth(gameState)
+
+      // Orientation rewrites after the last phase that can kill, so the map it
+      // rebuilds holds exactly the units still on the board.
+      this.updateOrientation(gameState, originSquares)
 
       // 5. Process invulnerability potion collection
       this.processInvulnerabilityPotionCollection(gameState, currentTurnNumber)
@@ -219,6 +273,293 @@ export class TeamSnekProcessor {
       logger.error(`Snek: Error applying moves:`, error)
       throw error
     }
+  }
+
+  protected hasPieceUnits(): boolean {
+    return this.gameSetup.gamePlayers.some((p) => isPieceType(p.unitType))
+  }
+
+  // Max health for a unit type: per-type config with a universal default of
+  // 100. An absent type means "snake".
+  private maxHealthFor(type: UnitType | undefined): number {
+    return this.gameSetup.maxHealthPerUnit?.[type ?? "snake"] ?? 100
+  }
+
+  // Health lost per hazard square entered (and per turn spent sitting on
+  // one, for stationary pieces). Default 100: usually lethal.
+  private hazardDamage(): number {
+    return this.gameSetup.hazardDamage ?? 100
+  }
+
+  // Turn resolution for games that include chess pieces. Same phase order as
+  // the snake-only path, with movement + collisions handled by the within-turn
+  // sub-step simulation, plus movement health costs, regicide and promotion.
+  private applyMovesChess(currentTurn: Turn, moves: Move[], currentTurnNumber: number): Turn {
+    const gameState = this.initializeGameState(currentTurn)
+
+    // Current unit types, carried turn to turn.
+    const unitTypes: { [playerID: string]: UnitType } = {}
+    this.gameSetup.gamePlayers.forEach((p) => {
+      unitTypes[p.id] = currentTurn.unitTypes?.[p.id] ?? p.unitType ?? "snake"
+    })
+    gameState.unitTypes = unitTypes
+    const originSquares = this.captureOriginSquares(gameState)
+
+    // 2. Validate staged moves into per-unit paths (no board mutation yet)
+    const plannedPaths = this.planChessMoves(gameState, moves)
+
+    // 3. Within-turn simulation: movement + all collisions
+    this.runChessSimulation(gameState, plannedPaths)
+    this.scheduleVulnerableCollisionBuffExpiry(gameState)
+    this.removeDeadPlayers(gameState)
+
+    // 4. Food and health (movement costs resolve here, at end of turn)
+    this.processFoodAndHealth(gameState)
+
+    // 5. Regicide: a team configured with kings dies with its last king
+    this.applyRegicide(gameState)
+
+    // Orientation rewrites after the last phase that can kill, so the map it
+    // rebuilds holds exactly the units still on the board — and before
+    // promotion, so a pawn that promotes this turn keeps its pawn orientation.
+    this.updateOrientation(gameState, originSquares)
+
+    // 6-8. Potions, spawns, effect expiry (unchanged phases)
+    this.processInvulnerabilityPotionCollection(gameState, currentTurnNumber)
+    this.generateNewFood(gameState)
+    this.generateNewInvulnerabilityPotions(gameState)
+    this.expireEffects(gameState, currentTurnNumber)
+
+    // Pawns that grew to the threshold promote after the food phase, so a pawn
+    // that eats into the threshold promotes the same turn. The weight reset it
+    // applies lands after every phase that reads weight (collisions, regicide)
+    // and before winners and turn assembly, so scores and adjudication see the
+    // promoted queen at weight 1.
+    this.applyPawnPromotions(gameState)
+
+    // 9-10. Winners and turn assembly
+    const winners = this.calculateWinners(gameState)
+    return this.createNewTurn(currentTurn, gameState, winners)
+  }
+
+  // Head squares before movement resolves, threaded into updateOrientation
+  // once it has.
+  private captureOriginSquares(gameState: SnakeGameState): { [playerID: string]: number } {
+    const originSquares: { [playerID: string]: number } = {}
+    gameState.newAlivePlayers.forEach((playerID) => {
+      originSquares[playerID] = gameState.newSnakes[playerID][0]
+    })
+    return originSquares
+  }
+
+  // Rewrites orientation for the turn. The map is rebuilt from the units
+  // still on the board, so dead units drop out. A unit that moved faces its
+  // movement direction — sliders and kings the unit step (e.g. {1,0},
+  // {1,1}), knights their exact L-offset (e.g. {1,-2}), snakes head minus
+  // the origin square the head left (the neck position at move time, so the
+  // rule holds even for a snake severed down to its head or one that grew
+  // this turn). Pawns change orientation only via their rotation action, which
+  // planChessMoves already applied. Units that held keep their orientation.
+  private updateOrientation(
+    gameState: SnakeGameState,
+    originSquares: { [playerID: string]: number },
+  ): void {
+    const orientation: { [playerID: string]: Orientation } = {}
+    const { boardWidth } = gameState
+    Object.keys(gameState.newSnakes).forEach((playerID) => {
+      orientation[playerID] = gameState.orientation[playerID]
+      const type = gameState.unitTypes?.[playerID] ?? "snake"
+      if (type === "pawn") return
+
+      let from: number
+      let to: number
+      if (type === "snake") {
+        from = originSquares[playerID]
+        to = gameState.newSnakes[playerID][0]
+      } else {
+        const traversed = gameState.piecePaths?.[playerID]
+        if (!traversed || traversed.length === 0) return // held
+        from = originSquares[playerID]
+        to = traversed[0]
+      }
+      if (from === to) return
+
+      const f = toXY(from, boardWidth)
+      const t = toXY(to, boardWidth)
+      const dx = t.x - f.x
+      const dy = t.y - f.y
+      orientation[playerID] =
+        type === "knight" ? { dx, dy } : { dx: Math.sign(dx), dy: Math.sign(dy) }
+    })
+    gameState.orientation = orientation
+  }
+
+  private planChessMoves(
+    gameState: SnakeGameState,
+    moves: Move[],
+  ): { [playerID: string]: number[] } {
+    moves.forEach((move) => {
+      gameState.playerMoves[move.playerID] = move.move
+    })
+
+    // Squares a pawn may step to diagonally: food or any unit, at turn start.
+    const pawnTargets = new Set<number>(gameState.newFood)
+    Object.values(gameState.newSnakes).forEach((body) => {
+      body.forEach((pos) => pawnTargets.add(pos))
+    })
+
+    const plannedPaths: { [playerID: string]: number[] } = {}
+    gameState.newAlivePlayers.forEach((playerID) => {
+      const type = gameState.unitTypes?.[playerID] ?? "snake"
+      if (type === "snake") {
+        const moveIndex = this.resolveSnakeMoveIndex(gameState, playerID)
+        gameState.playerMoves[playerID] = moveIndex
+        plannedPaths[playerID] = [moveIndex]
+        return
+      }
+
+      const origin = gameState.newSnakes[playerID][0]
+      const staged = gameState.playerMoves[playerID]
+      const action =
+        staged === undefined
+          ? { kind: "stay" as const }
+          : planPieceAction(
+              type,
+              origin,
+              staged,
+              gameState.boardWidth,
+              gameState.boardHeight,
+              gameState.orientation[playerID],
+              pawnTargets,
+            ) ?? { kind: "stay" as const } // illegal destination → stay
+
+      if (action.kind === "move") {
+        plannedPaths[playerID] = action.path
+        gameState.playerMoves[playerID] = action.path[action.path.length - 1]
+      } else {
+        if (action.kind === "rotate") {
+          gameState.orientation[playerID] = action.orientation
+        }
+        plannedPaths[playerID] = []
+        gameState.playerMoves[playerID] = origin
+      }
+    })
+    return plannedPaths
+  }
+
+  private runChessSimulation(
+    gameState: SnakeGameState,
+    plannedPaths: { [playerID: string]: number[] },
+  ): void {
+    const simUnits: SimUnit[] = gameState.newAlivePlayers.map((playerID) => {
+      const type = gameState.unitTypes?.[playerID] ?? "snake"
+      return {
+        id: playerID,
+        type,
+        isSnake: type === "snake",
+        body: gameState.newSnakes[playerID],
+        tier: gameState.playerInvulnerabilityLevel[playerID] ?? 0,
+        path: plannedPaths[playerID] ?? [],
+        health: gameState.newPlayerHealth[playerID],
+      }
+    })
+
+    const result = runChessTurnSim(
+      simUnits,
+      gameState.boardWidth,
+      gameState.boardHeight,
+      gameState.newHazards,
+      this.getWallPositions(gameState.boardWidth, gameState.boardHeight),
+      this.hazardDamage(),
+    )
+
+    gameState.clashes.push(...result.clashes)
+    // Hazard entry doses were deducted inside the sim; carry the post-hazard
+    // healths forward so the food phase settles movement costs on top.
+    result.healths.forEach((health, playerID) => {
+      gameState.newPlayerHealth[playerID] = health
+    })
+    result.deadIDs.forEach((playerID) => {
+      gameState.deadPlayers.add(playerID)
+      if ((result.deadTiers.get(playerID) ?? 0) < 0) {
+        gameState.vulnerableSnakesCollided.add(playerID)
+      }
+    })
+
+    gameState.piecePaths = {}
+    gameState.pieceMoveCosts = {}
+    result.traversed.forEach((squares, playerID) => {
+      if (squares.length > 0) gameState.piecePaths![playerID] = squares
+      gameState.pieceMoveCosts![playerID] = squares.length
+    })
+    // The applied move is the square the piece actually ended on (a truncated
+    // slider records its stop square; a dead piece the square it died on).
+    result.finalSquare.forEach((square, playerID) => {
+      gameState.playerMoves[playerID] = square
+    })
+  }
+
+  // Kings never change type (promotion only creates queens), so the setup's
+  // unitType is authoritative for which teams play under regicide.
+  private applyRegicide(gameState: SnakeGameState): void {
+    const players = this.gameSetup.gamePlayers
+    const kingTeams = new Set(
+      players.filter((p) => p.unitType === "king").map((p) => p.teamID),
+    )
+    let anyEliminated = false
+    kingTeams.forEach((teamID) => {
+      const kingAlive = players.some(
+        (p) =>
+          p.teamID === teamID &&
+          p.unitType === "king" &&
+          gameState.newAlivePlayers.includes(p.id) &&
+          !gameState.deadPlayers.has(p.id),
+      )
+      if (kingAlive) return
+
+      players
+        .filter((p) => p.teamID === teamID)
+        .forEach((p) => {
+          if (!gameState.newAlivePlayers.includes(p.id) || gameState.deadPlayers.has(p.id)) return
+          gameState.deadPlayers.add(p.id)
+          anyEliminated = true
+          new Set(gameState.newSnakes[p.id] ?? []).forEach((index) => {
+            gameState.clashes.push({
+              index,
+              playerIDs: [p.id],
+              reason: "Team eliminated: king fell",
+            })
+          })
+        })
+      logger.info(`Snek: Team ${teamID} eliminated — its last king fell.`)
+    })
+    if (anyEliminated) this.removeDeadPlayers(gameState)
+  }
+
+  private applyPawnPromotions(gameState: SnakeGameState): void {
+    if (!gameState.unitTypes) return
+    const threshold = this.gameSetup.pawnPromotionWeight ?? DEFAULT_PAWN_PROMOTION_WEIGHT
+    gameState.newAlivePlayers.forEach((playerID) => {
+      if (
+        gameState.unitTypes![playerID] === "pawn" &&
+        (gameState.newSnakes[playerID]?.length ?? 0) >= threshold
+      ) {
+        gameState.unitTypes![playerID] = "queen"
+        // Promotion trades the accumulated mass for the queen's mobility: the
+        // stack collapses to the single square the unit occupies, weight 1.
+        // The unit stays on the board (weight 1, not 0), so it is never
+        // eliminated by promoting — only its score drops.
+        gameState.newSnakes[playerID] = [gameState.newSnakes[playerID][0]]
+        // A promoted pawn may carry more health than a queen is allowed:
+        // clamp to the queen's configured max. Health is not otherwise
+        // touched — only eating restores it.
+        const queenMax = this.maxHealthFor("queen")
+        if (gameState.newPlayerHealth[playerID] > queenMax) {
+          gameState.newPlayerHealth[playerID] = queenMax
+        }
+        logger.info(`Snek: Pawn ${playerID} promoted to queen at weight 1.`)
+      }
+    })
   }
 
   private initializeGameState(currentTurn: Turn): SnakeGameState {
@@ -257,7 +598,8 @@ export class TeamSnekProcessor {
       deadPlayers: new Set(),
       clashes: [],
       vulnerableSnakesCollided: new Set(),
-      newScores: {}
+      newScores: {},
+      orientation: { ...currentTurn.orientation },
     }
   }
 
@@ -274,19 +616,7 @@ export class TeamSnekProcessor {
   }
 
   private processSinglePlayerMove(gameState: SnakeGameState, playerID: string): void {
-    let moveIndex = gameState.playerMoves[playerID]
-    const snake = gameState.newSnakes[playerID]
-        const headIndex = snake[0]
-        const allowedMoves = this.getAdjacentIndices(
-          headIndex,
-      gameState.boardWidth,
-      gameState.boardHeight,
-        )
-
-        // Player didn't submit a valid move or move is invalid
-        if (!moveIndex || !allowedMoves.includes(moveIndex)) {
-      moveIndex = this.getDefaultMove(gameState, snake, allowedMoves, playerID)
-    }
+    const moveIndex = this.resolveSnakeMoveIndex(gameState, playerID)
 
     // Record the move actually applied (submitted or default) so the turn's
     // `moves` map is complete for every player. Clients — including centaurs
@@ -295,50 +625,38 @@ export class TeamSnekProcessor {
     gameState.playerMoves[playerID] = moveIndex
 
     // Move the snake
-    this.moveSnake(snake, moveIndex)
+    this.moveSnake(gameState.newSnakes[playerID], moveIndex)
   }
 
-  private getDefaultMove(gameState: SnakeGameState, snake: number[], allowedMoves: number[], playerID: string): number {
-    const { boardWidth, boardHeight } = gameState
-    const direction = this.getLastDirection(snake, boardWidth)
-
-    if (direction) {
-      // Snake has real movement history: continue straight.
-      const headIndex = snake[0]
-      const newX = (headIndex % boardWidth) + direction.dx
-      const newY = Math.floor(headIndex / boardWidth) + direction.dy
-      return newY * boardWidth + newX
-    }
-
-    // No direction yet (stacked spawn / single cell): fall back to a legal
-    // adjacent cell. Prefer a cell that is neither wall nor snake body; if
-    // every neighbor is occupied, any non-wall neighbor; only then anything
-    // in-bounds. Centaurs rely on this contract (Chris-Centaur's
-    // continuationDirection returns null here and expects the engine's
-    // adjacent-cell pick).
-    const walls = new Set(this.getWallPositions(boardWidth, boardHeight))
-    const occupied = new Set<number>()
-    Object.values(gameState.newSnakes).forEach((body) => {
-      body.forEach((pos) => occupied.add(pos))
-    })
-
-    const openMove = allowedMoves.find(
-      (cell) => !walls.has(cell) && !occupied.has(cell),
+  // Validates a snake's staged move and substitutes the default (continue
+  // straight) when missing or illegal. Does not mutate the board.
+  private resolveSnakeMoveIndex(gameState: SnakeGameState, playerID: string): number {
+    const moveIndex = gameState.playerMoves[playerID]
+    const snake = gameState.newSnakes[playerID]
+    const allowedMoves = this.getAdjacentIndices(
+      snake[0],
+      gameState.boardWidth,
+      gameState.boardHeight,
     )
-    if (openMove !== undefined) return openMove
 
-    const nonWallMove = allowedMoves.find((cell) => !walls.has(cell))
-    if (nonWallMove !== undefined) return nonWallMove
-
-    if (allowedMoves.length > 0) {
-      return allowedMoves[0]
+    // Player didn't submit a valid move or move is invalid
+    if (!moveIndex || !allowedMoves.includes(moveIndex)) {
+      return this.getDefaultMove(gameState, playerID)
     }
+    return moveIndex
+  }
 
-    // No adjacent cells at all (degenerate board), eliminate the player
-    logger.warn(
-      `Snek: Player ${playerID} did not submit a move and has no previous direction.`,
-    )
-    return snake[0] + 1
+  // The default move is one step along the snake's orientation: the
+  // direction it last moved, or — on its first move — its spawn orientation,
+  // which points toward the board centre from an interior square and is
+  // therefore always in-bounds.
+  private getDefaultMove(gameState: SnakeGameState, playerID: string): number {
+    const { boardWidth } = gameState
+    const orientation = gameState.orientation[playerID]
+    const headIndex = gameState.newSnakes[playerID][0]
+    const newX = (headIndex % boardWidth) + orientation.dx
+    const newY = Math.floor(headIndex / boardWidth) + orientation.dy
+    return newY * boardWidth + newX
   }
 
   private moveSnake(snake: number[], moveIndex: number): void {
@@ -368,6 +686,11 @@ export class TeamSnekProcessor {
     this.removeDeadPlayers(gameState)
   }
 
+  // Hazards deal a configurable dose on head entry (default 100 — usually
+  // lethal). A snake dies here only when the dose leaves it at zero or
+  // below; a survivor carries its reduced health into the later collision
+  // passes and the food phase. Snakes always move, so the entry dose is the
+  // only hazard charge they ever pay.
   private checkHazardCollisions(gameState: SnakeGameState): void {
     if (!gameState.newHazards.length) return
 
@@ -376,6 +699,13 @@ export class TeamSnekProcessor {
       const headIndex = snake[0]
 
       if (gameState.newHazards.includes(headIndex)) {
+        gameState.newPlayerHealth[playerID] -= this.hazardDamage()
+        if (gameState.newPlayerHealth[playerID] > 0) {
+          logger.info(
+            `Snek: Player ${playerID} entered hazard at position ${headIndex} and survived with ${gameState.newPlayerHealth[playerID]} health.`,
+          )
+          return
+        }
         gameState.deadPlayers.add(playerID)
         if ((gameState.playerInvulnerabilityLevel[playerID] ?? 0) < 0) {
           gameState.vulnerableSnakesCollided.add(playerID)
@@ -809,39 +1139,55 @@ export class TeamSnekProcessor {
     })
   }
 
+  // Central health accounting, shared by the snake-only path and the chess
+  // sub-step path. Per alive unit: eating at its final square restores health
+  // to the unit type's max and adds one weight/length; otherwise it pays its
+  // movement cost — a snake always travels exactly 1 cell per turn, a piece
+  // pays 1 per square actually traversed (knight jump = 1; stay/rotate = 0,
+  // so a stationary piece spends nothing) — plus one hazardDamage dose if it
+  // is a piece that stayed put on a hazard square (movers already paid their
+  // per-square entry doses inside the sub-step sim, so a mover that stopped
+  // on a hazard square pays nothing extra here). Health at or below zero
+  // kills on the spot. Called with no chess state (snake-only path) this
+  // reduces exactly to the original 1/turn starvation tick.
   private processFoodAndHealth(gameState: SnakeGameState): void {
     Object.keys(gameState.newSnakes).forEach((playerID) => {
-      this.processPlayerFoodAndHealth(gameState, playerID)
-    })
-    
-    // Remove players who died from starvation
-    this.removeDeadPlayers(gameState)
-  }
+      const unit = gameState.newSnakes[playerID]
+      const headPosition = unit[0]
+      const type = gameState.unitTypes?.[playerID] ?? "snake"
+      const isSnake = type === "snake"
 
-  private processPlayerFoodAndHealth(gameState: SnakeGameState, playerID: string): void {
-    const snake = gameState.newSnakes[playerID]
-        const headPosition = snake[0]
+      const foodIndex = gameState.newFood.indexOf(headPosition)
+      if (foodIndex !== -1) {
+        // Eating restores health in full (to the unit's CURRENT type's max)
+        // and adds one weight/length
+        gameState.newFood.splice(foodIndex, 1)
+        unit.push(unit[unit.length - 1])
+        gameState.newPlayerHealth[playerID] = this.maxHealthFor(type)
+        return
+      }
 
-    const foodIndex = gameState.newFood.indexOf(headPosition)
-        if (foodIndex !== -1) {
-      // Player ate food
-      gameState.newFood.splice(foodIndex, 1)
-      snake.push(snake[snake.length - 1]) // Grow snake (duplicate tail)
-      gameState.newPlayerHealth[playerID] = 100 // Restore health
-        } else {
-      // Player didn't eat food, lose health
-      gameState.newPlayerHealth[playerID] -= 1
+      const movementCost = isSnake ? 1 : gameState.pieceMoveCosts?.[playerID] ?? 0
+      const stationaryHazardDose =
+        !isSnake && movementCost === 0 && gameState.newHazards.includes(headPosition)
+          ? this.hazardDamage()
+          : 0
+
+      gameState.newPlayerHealth[playerID] -= movementCost + stationaryHazardDose
       if (gameState.newPlayerHealth[playerID] <= 0) {
         gameState.deadPlayers.add(playerID)
-            snake.forEach((pos) => {
+        new Set(unit).forEach((pos) => {
           gameState.clashes.push({
-                index: pos,
-                playerIDs: [playerID],
-                reason: "Died due to zero health",
-              })
-            })
-          }
-        }
+            index: pos,
+            playerIDs: [playerID],
+            reason: "Died due to zero health",
+          })
+        })
+      }
+    })
+
+    // Remove players who died from starvation
+    this.removeDeadPlayers(gameState)
   }
 
   private generateNewFood(gameState: SnakeGameState): void {
@@ -1029,6 +1375,15 @@ export class TeamSnekProcessor {
       invulnerabilityPotions: gameState.newInvulnerabilityPotions,
       playerInvulnerabilityLevel: gameState.playerInvulnerabilityLevel,
       activeEffects: gameState.activeEffects,
+      orientation: gameState.orientation,
+      // Chess-piece games: these must be rewritten every turn (the spread
+      // above would otherwise freeze the previous turn's values).
+      ...(gameState.unitTypes
+        ? {
+            unitTypes: gameState.unitTypes,
+            paths: gameState.piecePaths ?? {},
+          }
+        : {}),
     }
 
     // Team-based scores
@@ -1072,8 +1427,10 @@ export class TeamSnekProcessor {
     gamePlayers.forEach((player, index) => {
       const { x, y } = positions[index]
       const startIndex = y * boardWidth + x
-      const snake = [startIndex, startIndex, startIndex]
-      playerPieces[player.id] = snake
+      // Snakes spawn as a stacked triple; chess pieces as a single square (weight 1)
+      playerPieces[player.id] = isPieceType(player.unitType)
+        ? [startIndex]
+        : [startIndex, startIndex, startIndex]
     })
 
     return { playerPieces, teamClusterFallback }
@@ -1276,14 +1633,7 @@ export class TeamSnekProcessor {
     const y = Math.floor(index / boardWidth)
     const indices: number[] = []
 
-    const directions = [
-      { dx: 0, dy: -1 }, // Up
-      { dx: 0, dy: 1 }, // Down
-      { dx: -1, dy: 0 }, // Left
-      { dx: 1, dy: 0 }, // Right
-    ]
-
-    directions.forEach(({ dx, dy }) => {
+    ORTHOGONALS.forEach(({ dx, dy }) => {
       const newX = x + dx
       const newY = y + dy
       if (newX >= 0 && newX < boardWidth && newY >= 0 && newY < boardHeight) {
@@ -1292,31 +1642,6 @@ export class TeamSnekProcessor {
     })
 
     return indices
-  }
-
-  private getLastDirection(
-    snake: number[],
-    boardWidth: number,
-  ): { dx: number; dy: number } | null {
-    if (snake.length < 2) return null
-    const head = snake[0]
-    const neck = snake[1]
-
-    const headX = head % boardWidth
-    const headY = Math.floor(head / boardWidth)
-    const neckX = neck % boardWidth
-    const neckY = Math.floor(neck / boardWidth)
-
-    const dx = headX - neckX
-    const dy = headY - neckY
-
-    // Zero displacement means the snake has not actually moved yet (stacked
-    // spawns are [p, p, p]) — that is "no direction", not a direction. A
-    // truthy {dx: 0, dy: 0} would make the default move target the snake's
-    // own square and kill it by self-collision.
-    if (dx === 0 && dy === 0) return null
-
-    return { dx, dy }
   }
 
   private getFreePositions(
@@ -1658,14 +1983,13 @@ export class TeamSnekProcessor {
     return !!this.gameSetup.teamClustersEnabled
   }
 
+  // Radial team spawns: the board is cut from its centre into one equal-angle
+  // pie slice per team, the whole partition sitting at a random rotation so
+  // wedges differ between games. Each team's units then take random legal
+  // cells inside the team's own slice.
   private generateTeamClusterStartingPositions(): { x: number; y: number }[] {
     const { boardWidth, boardHeight, gamePlayers, teams } = this.gameSetup
     const minDistance = 2
-    const intraTeamSpacing = 2
-    const ringInset = Math.max(
-      2,
-      Math.floor(Math.min(boardWidth, boardHeight) / 2) - 6,
-    )
 
     const teamMap = new Map<string, GamePlayer[]>()
     gamePlayers.forEach((player) => {
@@ -1676,100 +2000,98 @@ export class TeamSnekProcessor {
     })
 
     const teamIDs = this.getOrderedTeamIDs(teamMap, teams)
-    const teamCount = teamIDs.length
-    if (teamCount === 0) {
+    const sliceCount = teamIDs.length
+    if (sliceCount === 0) {
       return []
     }
 
-    const ringPositions = this.getSquareRingPositions(
-      boardWidth,
-      boardHeight,
-      ringInset,
-    )
-    if (ringPositions.length === 0) {
+    // Board capacity guard: every unit needs a legal spawn cell of its own.
+    const spawnCells = this.getSpawnCells(boardWidth, boardHeight)
+    if (spawnCells.length < gamePlayers.length) {
       return []
     }
 
-    const minGap = 2
-    const totalPlayers = teamIDs.reduce(
-      (sum, teamID) => sum + (teamMap.get(teamID)?.length || 0),
-      0,
-    )
-    if (totalPlayers === 0) {
-      return []
-    }
-
-    const maxAttempts = Math.min(12, ringPositions.length)
+    const maxAttempts = 8
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      const teamInfo = this.shuffleArray(
-        teamIDs.map((teamID) => ({
-          teamID,
-          players: this.shuffleArray(teamMap.get(teamID) || []),
-        })),
+      const rotation = Math.random() * Math.PI * 2
+      const slices = assignCellsToSlices(
+        spawnCells,
+        boardWidth,
+        boardHeight,
+        sliceCount,
+        rotation,
       )
 
-      const availableSlots = ringPositions.length - teamCount * minGap
-      if (availableSlots <= 0) {
-        return []
-      }
+      // Teams draw slices at random, so a team is not tied to one wedge.
+      const sliceForTeam = this.shuffleArray(slices.map((_cells, index) => index))
+      const orderedTeams = this.shuffleArray(teamIDs)
 
-      const segmentLengths = this.calculateTeamSegmentLengths(
-        teamInfo.map((team) => team.players.length),
-        availableSlots,
-        intraTeamSpacing,
-      )
-      if (!segmentLengths) {
-        return []
-      }
-
-      const rotation = Math.floor(Math.random() * ringPositions.length)
-      const rotatedRing = [
-        ...ringPositions.slice(rotation),
-        ...ringPositions.slice(0, rotation),
-      ]
-
-      const segments = this.buildTeamSegments(teamInfo, segmentLengths, rotatedRing, minGap)
-      if (!segments) {
-        continue
-      }
-
-      const placedPositions = new Map<string, { x: number; y: number }>()
-      const occupied: { x: number; y: number; teamID: string }[] = []
+      const placed = new Map<string, { x: number; y: number }>()
+      const occupied: { x: number; y: number }[] = []
       let failed = false
 
-      for (const segment of segments) {
-        const candidates = segment.positions.filter((pos) =>
-          this.isValidSpawnPosition(pos, true, boardWidth, boardHeight),
-        )
-        const block = this.findSpacedBlock(
-          candidates,
-          segment.players.length,
-          intraTeamSpacing,
-          occupied,
-          minDistance,
-          segment.teamID,
-        )
-        if (!block) {
-          failed = true
+      for (let index = 0; index < orderedTeams.length; index++) {
+        const players = teamMap.get(orderedTeams[index]) || []
+        const candidates = this.orderSliceCandidates(slices, sliceForTeam[index])
+        for (const player of players) {
+          // The minimum distance also keeps spawns distinct, since a cell is
+          // zero away from itself.
+          const spot = candidates.find((cell) =>
+            this.isFarFromAllSnakes(cell, occupied, minDistance),
+          )
+          if (!spot) {
+            failed = true
+            break
+          }
+          placed.set(player.id, spot)
+          occupied.push(spot)
+        }
+        if (failed) {
           break
         }
-
-        block.forEach((pos, index) => {
-          const player = segment.players[index]
-          if (!player) return
-          placedPositions.set(player.id, pos)
-          occupied.push({ ...pos, teamID: segment.teamID })
-        })
       }
 
-      if (!failed && placedPositions.size === gamePlayers.length) {
+      if (!failed && placed.size === gamePlayers.length) {
         return gamePlayers
-          .map((player) => placedPositions.get(player.id))
+          .map((player) => placed.get(player.id))
           .filter((pos): pos is { x: number; y: number } => !!pos)
       }
     }
 
     return []
+  }
+
+  // Every cell a unit may spawn on: board interior only, and on the spawn
+  // parity so any two spawns sit an even Manhattan distance apart.
+  private getSpawnCells(
+    boardWidth: number,
+    boardHeight: number,
+  ): { x: number; y: number }[] {
+    const cells: { x: number; y: number }[] = []
+    for (let y = 1; y < boardHeight - 1; y++) {
+      for (let x = 1; x < boardWidth - 1; x++) {
+        if (this.isValidSpawnPosition({ x, y }, true, boardWidth, boardHeight)) {
+          cells.push({ x, y })
+        }
+      }
+    }
+    return cells
+  }
+
+  // Cells a team may spawn on, best first: its own slice in random order,
+  // then — the fallback for a slice too small to hold the team under the
+  // spacing constraints — the nearest other slices, also randomly ordered.
+  private orderSliceCandidates(
+    slices: { x: number; y: number }[][],
+    sliceIndex: number,
+  ): { x: number; y: number }[] {
+    return this.shuffleArray(slices.map((cells, index) => ({ cells, index })))
+      .sort(
+        (a, b) =>
+          sliceDistance(a.index, sliceIndex, slices.length) -
+          sliceDistance(b.index, sliceIndex, slices.length),
+      )
+      .flatMap((slice) => this.shuffleArray(slice.cells))
   }
 
   private getOrderedTeamIDs(
@@ -1792,147 +2114,14 @@ export class TeamSnekProcessor {
     return ordered
   }
 
-  private getSquareRingPositions(
-    boardWidth: number,
-    boardHeight: number,
-    inset: number,
-  ): { x: number; y: number }[] {
-    const minX = inset
-    const minY = inset
-    const maxX = boardWidth - inset - 1
-    const maxY = boardHeight - inset - 1
-    if (minX >= maxX || minY >= maxY) {
-      return []
-    }
-
-    const positions: { x: number; y: number }[] = []
-    for (let x = minX; x <= maxX; x++) {
-      positions.push({ x, y: minY })
-    }
-    for (let y = minY + 1; y <= maxY; y++) {
-      positions.push({ x: maxX, y })
-    }
-    for (let x = maxX - 1; x >= minX; x--) {
-      positions.push({ x, y: maxY })
-    }
-    for (let y = maxY - 1; y > minY; y--) {
-      positions.push({ x: minX, y })
-    }
-
-    return positions
-  }
-
-  private calculateTeamSegmentLengths(
-    teamSizes: number[],
-    availableSlots: number,
-    intraTeamSpacing: number,
-  ): number[] | null {
-    const minPerTeam = teamSizes.map((size) =>
-      size <= 1 ? Math.max(size, 1) : 1 + (size - 1) * intraTeamSpacing,
-    )
-    const minTotal = minPerTeam.reduce((sum, len) => sum + len, 0)
-    if (minTotal > availableSlots) {
-      return null
-    }
-
-    const totalPlayers = teamSizes.reduce((sum, size) => sum + size, 0)
-    let remaining = availableSlots - minTotal
-    const lengths = minPerTeam.map((len, index) => {
-      if (remaining <= 0) return len
-      const extra = Math.floor((remaining * teamSizes[index]) / totalPlayers)
-      remaining -= extra
-      return len + extra
-    })
-
-    const order = this.shuffleArray(teamSizes.map((_size, index) => index))
-    let pointer = 0
-    while (remaining > 0) {
-      lengths[order[pointer % order.length]] += 1
-      remaining -= 1
-      pointer += 1
-    }
-
-    return lengths
-  }
-
-  private buildTeamSegments(
-    teamInfo: { teamID: string; players: GamePlayer[] }[],
-    segmentLengths: number[],
-    ringPositions: { x: number; y: number }[],
-    gap: number,
-  ): { teamID: string; players: GamePlayer[]; positions: { x: number; y: number }[] }[] | null {
-    const segments: { teamID: string; players: GamePlayer[]; positions: { x: number; y: number }[] }[] = []
-    let cursor = 0
-    for (let i = 0; i < teamInfo.length; i++) {
-      const length = segmentLengths[i]
-      if (cursor + length > ringPositions.length) {
-        return null
-      }
-      const positions = ringPositions.slice(cursor, cursor + length)
-      segments.push({
-        teamID: teamInfo[i].teamID,
-        players: teamInfo[i].players,
-        positions,
-      })
-      cursor += length + gap
-    }
-    return segments
-  }
-
-  private findSpacedBlock(
-    positions: { x: number; y: number }[],
-    blockSize: number,
-    spacing: number,
-    occupied: { x: number; y: number; teamID: string }[],
-    minDistance: number,
-    teamID: string,
-  ): { x: number; y: number }[] | null {
-    if (blockSize <= 0) return []
-    const maxStart = positions.length - 1 - spacing * (blockSize - 1)
-    if (maxStart < 0) return null
-
-    const startIndices = this.shuffleArray(
-      Array.from({ length: maxStart + 1 }, (_, i) => i),
-    )
-
-    for (const start of startIndices) {
-      const block = Array.from({ length: blockSize }, (_unused, index) => {
-        return positions[start + index * spacing]
-      })
-      const blockEntries = block.map((pos) => ({ ...pos, teamID }))
-      const valid =
-        this.arePositionsSpaced(blockEntries, minDistance) &&
-        blockEntries.every((pos) => this.isFarFromAllSnakes(pos, occupied, minDistance))
-      if (valid) {
-        return block
-      }
-    }
-
-    return null
-  }
-
   private isFarFromAllSnakes(
     position: { x: number; y: number },
-    occupied: { x: number; y: number; teamID: string }[],
+    occupied: { x: number; y: number }[],
     minDistance: number,
   ): boolean {
     return occupied.every(
       (other) => this.getManhattanDistance(position, other) >= minDistance,
     )
-  }
-
-  private arePositionsSpaced(
-    positions: { x: number; y: number; teamID: string }[],
-    minDistance: number,
-  ): boolean {
-    for (let i = 0; i < positions.length; i++) {
-      for (let j = i + 1; j < positions.length; j++) {
-        if (this.getManhattanDistance(positions[i], positions[j]) < minDistance) {
-          return false
-        }
-      }
-    }
-    return true
   }
 
   private shuffleArray<T>(items: T[]): T[] {

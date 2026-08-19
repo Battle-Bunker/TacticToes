@@ -12,14 +12,14 @@ import {
 import React from "react"
 import { useNavigate } from "react-router-dom"
 import { useGameStateContext } from "../../context/GameStateContext"
-import { snakeLabel } from "../../utils/snakeLabel"
+import { pieceGlyph } from "../../utils/unitGlyphs"
 
 interface TeamResult {
   teamID: string
   teamName: string
   teamColor: string
   teamScore: number
-  snakeNames: string[]
+  unitNames: string[]
   mmr?: number
   mmrChange?: number
 }
@@ -38,14 +38,26 @@ const GameFinished: React.FC = () => {
   // Every team gets a results row; winners additionally carry MMR updates.
   const teamResults: TeamResult[] = teams.map((team) => {
     const winner = winners.find((w) => w.teamID === team.id)
+    const teamUnits = gamePlayers.filter((gp) => gp.teamID === team.id)
     return {
       teamID: team.id,
       teamName: team.name,
       teamColor: team.color,
-      teamScore: winner?.teamScore ?? latestTurn.teamScores?.[team.id] ?? 0,
-      snakeNames: gamePlayers
-        .filter((gp) => gp.teamID === team.id)
-        .map((gp) => snakeLabel(team, gp)),
+      // Scored off the final board, exactly as the engine scores
+      // (TeamSnekProcessor.getTeamScore) and exactly as the live scoreboard
+      // does: the summed weight of the team's surviving units. Reading it from
+      // the board rather than from a stored summary is what makes an old log
+      // — written before teamScores existed — score correctly too.
+      teamScore: teamUnits.reduce(
+        (total, gp) => total + (latestTurn.playerPieces[gp.id]?.length ?? 0),
+        0,
+      ),
+      // The row already names the team, so a unit is its LETTER, with its type
+      // glyph — the same division of labour the scoreboard's team groups use.
+      unitNames: teamUnits.map((gp) => {
+        const glyph = pieceGlyph(latestTurn.unitTypes?.[gp.id] ?? gp.unitType)
+        return `${glyph ? `${glyph} ` : ""}${gp.letter}`
+      }),
       mmr: winner?.newMMR,
       mmrChange: winner?.mmrChange,
     }
@@ -96,7 +108,7 @@ const GameFinished: React.FC = () => {
                 <strong>MMR</strong>
               </TableCell>
               <TableCell align="left">
-                <strong>Snakes</strong>
+                <strong>Units</strong>
               </TableCell>
             </TableRow>
           </TableHead>
@@ -115,7 +127,7 @@ const GameFinished: React.FC = () => {
                     ? `${team.mmr} (${team.mmrChange ?? 0})`
                     : "-"}
                 </TableCell>
-                <TableCell align="left">{team.snakeNames.join(", ")}</TableCell>
+                <TableCell align="left">{team.unitNames.join(", ")}</TableCell>
               </TableRow>
             ))}
           </TableBody>

@@ -1,10 +1,11 @@
 import React, { useMemo } from "react"
 import { Checkbox, FormControl, FormControlLabel, IconButton, Slider, TextField, Typography, Box } from "@mui/material"
 import { RefreshCw } from "lucide-react"
-import { Team } from "@shared/types/Game"
+import { Team, UnitCounts } from "@shared/types/Game"
 import { useTeamColors } from "../hooks/useTeamColors"
 import { expandTeams } from "../utils/expandTeams"
 import { getFertileTileColor } from "../utils/fertileTileColor"
+import { unitMark } from "../utils/unitGlyphs"
 
 export interface BoardPresetData {
   fertileTiles: number[]
@@ -20,6 +21,8 @@ interface SnekConfigurationProps {
   onMaxTurnsChange: (turns: number) => void
   hazardPercentage: number
   onHazardPercentageChange: (percentage: number) => void
+  hazardDamage: number
+  onHazardDamageChange: (damage: number) => void
   fertileGroundEnabled: boolean
   onFertileGroundToggle: (enabled: boolean) => void
   fertileGroundDensity: number
@@ -37,11 +40,13 @@ interface SnekConfigurationProps {
   onRefreshPreview: () => void
   teams: Team[]
   snakesPerTeam: number
+  unitsPerTeam?: UnitCounts
 }
 
 export const SnekConfiguration: React.FC<SnekConfigurationProps> = ({
   maxTurns, maxTurnsEnabled, onMaxTurnsToggle, onMaxTurnsChange,
   hazardPercentage, onHazardPercentageChange,
+  hazardDamage, onHazardDamageChange,
   fertileGroundEnabled, onFertileGroundToggle,
   fertileGroundDensity, onFertileGroundDensityChange,
   fertileGroundClustering, onFertileGroundClusteringChange,
@@ -50,11 +55,11 @@ export const SnekConfiguration: React.FC<SnekConfigurationProps> = ({
   usePreviewBoard, onUsePreviewBoardChange,
   syncedPreviewData,
   isGeneratingPreview, onRefreshPreview,
-  teams, snakesPerTeam,
+  teams, snakesPerTeam, unitsPerTeam,
 }) => {
   const previewPlayers = useMemo(
-    () => expandTeams(teams, snakesPerTeam),
-    [teams, snakesPerTeam],
+    () => expandTeams(teams, snakesPerTeam, unitsPerTeam),
+    [teams, snakesPerTeam, unitsPerTeam],
   )
 
   const teamColorByID = useTeamColors(teams)
@@ -99,6 +104,17 @@ export const SnekConfiguration: React.FC<SnekConfigurationProps> = ({
           value={hazardPercentage} onChange={(_e, value) => onHazardPercentageChange(value as number)}
           min={0} max={100} step={1} valueLabelDisplay="auto" valueLabelFormat={(v) => `${v}%`} sx={{ mx: 1 }}
         />
+        {hazardPercentage > 0 && (
+          <TextField
+            type="number" label="Hazard damage" size="small" value={hazardDamage}
+            onChange={(e) => {
+              const value = parseInt(e.target.value)
+              if (!isNaN(value)) onHazardDamageChange(value)
+            }}
+            sx={{ mt: 1, width: 200 }} inputProps={{ min: 1, max: 1000, step: 1 }}
+            helperText="Health lost per hazard square entered"
+          />
+        )}
       </Box>
       <Box sx={{ mt: 1 }}>
         <Typography variant="body2" gutterBottom>Food Spawn Rate: {foodSpawnRate}/turn</Typography>
@@ -166,13 +182,15 @@ export const SnekConfiguration: React.FC<SnekConfigurationProps> = ({
                   if (playerId) {
                     const player = previewPlayers.find(p => p.id === playerId)
                     const color = (player && teamColorByID.get(player.teamID)) || "#fff"
+                    // Every unit shows its own glyph, in its team's colour.
+                    const marker = unitMark(player?.unitType)
                     content = (
                       <Box sx={{
                         width: "100%", height: "100%",
                         display: "flex", alignItems: "center", justifyContent: "center",
                         fontSize: Math.max(8, cellSize - 2), fontWeight: "bold",
                         color, lineHeight: 1,
-                      }}>✕</Box>
+                      }}>{marker}</Box>
                     )
                   } else if (isFood) {
                     content = (
