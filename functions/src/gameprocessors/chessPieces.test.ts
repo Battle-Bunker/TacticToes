@@ -936,3 +936,142 @@ describe("configurable per-unit-type max health", () => {
     expect(next.playerHealth.t2).toBe(100) // stationary king spends nothing
   })
 })
+
+// Snake bodies are absolute walls with NO friendly exemption: an ally's body
+// kills exactly like an enemy's. A slider that dies (or severs) mid-ray stops
+// at that square and never reaches — let alone eats at — its staged
+// destination. Reported from live play: a bishop appeared to slide over an
+// ally's body, eat at the far end and survive.
+describe("chess pieces: snake bodies are walls for allies too", () => {
+  // Bishop (2,2) -> (6,6) with food waiting on (6,6). The ally snake's
+  // POST-move body still covers (4,4), the bishop's second ray square.
+  const allyWall = {
+    players: [
+      gp("b", "t1", "A", "bishop"),
+      gp("s", "t1", "B", "snake"),
+      gp("e", "t2", "A", "king"),
+    ],
+    pieces: {
+      b: [at(2, 2)],
+      s: [at(4, 3), at(4, 4), at(4, 5), at(4, 6)],
+      e: [at(9, 9)],
+    },
+    moves: [mv("b", at(6, 6)), mv("s", at(4, 2))],
+  }
+
+  it("a bishop meeting its OWN TEAM's snake body at equal tier dies on that square", () => {
+    const next = run(allyWall.players, allyWall.pieces, allyWall.moves, {
+      food: [at(6, 6)],
+    })
+
+    // Dies on the body square, not at the origin and not at the destination.
+    expect(next.alivePlayers.sort()).toEqual(["e", "s"])
+    expect(next.playerPieces.b).toBeUndefined()
+    expect(next.moves.b).toBe(at(4, 4))
+    expect(next.paths?.b).toEqual([at(3, 3), at(4, 4)])
+
+    const clash = next.clashes.find((c) => c.playerIDs.includes("b"))
+    expect(clash).toBeDefined()
+    expect(clash!.index).toBe(at(4, 4))
+    expect(clash!.subStep).toBe(2)
+    expect(clash!.reason).toBe("Collided with another snake's body")
+
+    // It never reaches the food: no eat, no weight, no health restore.
+    expect(next.food).toContain(at(6, 6))
+    expect(next.playerHealth.b).toBeUndefined()
+    expect(next.scores.b).toBe(0) // dead: weight never grew
+  })
+
+  it("the same holds deep into a long ray, several sub-steps after the ally moved", () => {
+    const players = [
+      gp("r", "t1", "A", "rook"),
+      gp("s", "t1", "B", "snake"),
+      gp("e", "t2", "A", "king"),
+    ]
+    // Rook (1,5) -> (9,5) with food on (9,5). The ally snake runs down column
+    // 6 and its post-move body still covers (6,5), reached at sub-step 5.
+    const next = run(
+      players,
+      { r: [at(1, 5)], s: [at(6, 4), at(6, 5), at(6, 6), at(6, 7)], e: [at(9, 9)] },
+      [mv("r", at(9, 5)), mv("s", at(6, 3))],
+      { food: [at(9, 5)] }
+    )
+
+    expect(next.playerPieces.r).toBeUndefined()
+    expect(next.moves.r).toBe(at(6, 5))
+    expect(next.paths?.r).toEqual([at(2, 5), at(3, 5), at(4, 5), at(5, 5), at(6, 5)])
+    const clash = next.clashes.find((c) => c.playerIDs.includes("r"))
+    expect(clash!.index).toBe(at(6, 5))
+    expect(clash!.subStep).toBe(5)
+    expect(next.food).toContain(at(9, 5))
+  })
+
+  it("the enemy-body case behaves identically — no friendly/hostile distinction", () => {
+    const players = [
+      gp("b", "t1", "A", "bishop"),
+      gp("s", "t2", "A", "snake"),
+      gp("e", "t2", "B", "king"),
+    ]
+    const next = run(players, allyWall.pieces, allyWall.moves, {
+      food: [at(6, 6)],
+    })
+
+    expect(next.playerPieces.b).toBeUndefined()
+    expect(next.moves.b).toBe(at(4, 4))
+    expect(next.paths?.b).toEqual([at(3, 3), at(4, 4)])
+    expect(next.food).toContain(at(6, 6))
+  })
+
+  it("a strictly higher tier severs an ALLY's body and capture-stops there, short of the food", () => {
+    const next = run(allyWall.players, allyWall.pieces, allyWall.moves, {
+      food: [at(6, 6)],
+      playerInvulnerabilityLevel: { b: 1, s: 0, e: 0 },
+    })
+
+    expect(next.alivePlayers.sort()).toEqual(["b", "e", "s"])
+    // Post-move ally body is [(4,2),(4,3),(4,4)]; the (4,4) segment is severed.
+    expect(next.playerPieces.s).toEqual([at(4, 2), at(4, 3)])
+    expect(next.playerPieces.b).toEqual([at(4, 4)]) // weight 1: it did NOT eat
+    expect(next.moves.b).toBe(at(4, 4))
+    expect(next.paths?.b).toEqual([at(3, 3), at(4, 4)])
+    expect(next.food).toContain(at(6, 6))
+    expect(next.playerHealth.b).toBe(98) // 2 squares traversed, no restore
+    expect(
+      next.clashes.some((c) => c.reason === "Body severed by invulnerable snake")
+    ).toBe(true)
+  })
+
+  it("a body segment that VACATES before the slider arrives lets it through — the legitimate crossing", () => {
+    const players = [
+      gp("b", "t1", "A", "bishop"),
+      gp("s", "t1", "B", "snake"),
+      gp("e", "t2", "A", "king"),
+    ]
+    // Ally snake [head (3,4), tail (4,4)] steps to (2,4): its post-move body
+    // is [(2,4),(3,4)], so (4,4) is empty by the time the bishop gets there
+    // at sub-step 2. Simultaneous movement — the bishop rightly survives.
+    const next = run(
+      players,
+      { b: [at(2, 2)], s: [at(3, 4), at(4, 4)], e: [at(9, 9)] },
+      [mv("b", at(6, 6)), mv("s", at(2, 4))],
+      { food: [at(6, 6)] }
+    )
+
+    expect(next.alivePlayers.sort()).toEqual(["b", "e", "s"])
+    expect(next.moves.b).toBe(at(6, 6))
+    expect(next.paths?.b).toEqual([at(3, 3), at(4, 4), at(5, 5), at(6, 6)])
+    expect(next.playerPieces.b).toEqual([at(6, 6), at(6, 6)]) // ate: weight 2
+    expect(next.playerHealth.b).toBe(100) // eating restores in full
+    expect(next.food).not.toContain(at(6, 6))
+  })
+
+  it("a slider that dies on a body never eats food sitting on the death square itself", () => {
+    // Food on (4,4) too: the bishop dies there and must not consume it.
+    const next = run(allyWall.players, allyWall.pieces, allyWall.moves, {
+      food: [at(4, 4), at(6, 6)],
+    })
+
+    expect(next.playerPieces.b).toBeUndefined()
+    expect(next.food.sort((a, z) => a - z)).toEqual([at(4, 4), at(6, 6)])
+  })
+})
