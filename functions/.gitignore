@@ -7,8 +7,8 @@ typings/
 # Node.js dependency directory
 node_modules/
 
-# Per-deployment config is NEVER committed -- the repo is deployment agnostic.
-# Each deploy target needs a local .env.<projectId>; see .env.example.
+# Deployment config is environment variables only -- this codebase reads no
+# .env file and nothing generates one. Any that shows up is a local accident
+# and must not be committed (the repo is deployment agnostic).
 .env
 .env.*
-!.env.example

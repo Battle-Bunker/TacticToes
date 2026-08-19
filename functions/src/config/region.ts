@@ -1,6 +1,3 @@
-import { readFileSync } from "fs"
-import { join } from "path"
-
 /**
  * Deployment region for all Cloud Functions in this codebase.
  *
@@ -10,67 +7,36 @@ import { join } from "path"
  * "unsupported Cloud Firestore region <region>: invalid argument".
  *
  * There is deliberately NO default value. Source code is deployment agnostic:
- * every deployment provides VITE_FIREBASE_FUNCTIONS_REGION explicitly via a
- * local, gitignored functions/.env.<projectId> file (see
- * functions/.env.example) or the process environment. A silent fallback has
- * caused wrong-region deploys before, so a missing value throws at module
- * load instead.
+ * every deployment supplies VITE_FIREBASE_FUNCTIONS_REGION as an ORDINARY
+ * ENVIRONMENT VARIABLE -- a Replit Secret, a CI variable, an `export` in a
+ * shell. No config file, anywhere, ever. A silent fallback has caused
+ * wrong-region deploys before, so a missing value throws at module load.
  *
- * The per-project file is loaded HERE, by this module, not by firebase-tools:
- * the CLI's function-discovery subprocess strips the deploy shell's
- * environment and (at least through firebase-tools 15.x with this
- * firebase-functions major) does not feed .env files into discovery either --
- * which is how the old "override via env var" comment never actually worked
- * and the old default silently won on every deploy. GCLOUD_PROJECT is set by
- * the CLI in discovery, by the emulators, and by the deployed runtime (where
- * the .env.<projectId> file is part of the uploaded source), so self-loading
- * covers all three. An already-set process env var always wins.
+ * Why the build stamps the value in as well (functions/tools/build-entry.mjs):
+ * firebase-tools does not hand the ambient environment to the processes it
+ * spawns. It rebuilds one from scratch -- see spawnFunctionsProcess() in
+ * firebase-tools/lib/deploy/functions/runtimes/node/index.js -- so function
+ * discovery, the emulated runtime and the deployed runtime see only
+ * FIREBASE_CONFIG, GCLOUD_PROJECT, GOOGLE_CLOUD_QUOTA_PROJECT, PORT,
+ * FUNCTIONS_CONTROL_API, HOME and PATH, however the deploy shell was set up.
+ * The build DOES run in the deploy shell (firebase.json's predeploy hook), so
+ * that is where the value is read and stamped into the generated entrypoint,
+ * exactly as Vite bakes the frontend's VITE_ vars into its bundle. An
+ * environment that really does carry the variable always wins over the stamp.
  *
  * The VITE_ prefix reads oddly here, but it is deliberate: the client needs
  * this value too, Vite only exposes VITE_-prefixed vars to the browser, and
  * Node can read any name. One variable cannot drift out of sync with itself,
  * and it stays in the VITE_FIREBASE_* family the bootstrap script prints.
  */
-const loadPerProjectEnvFile = (): void => {
-  if (process.env.VITE_FIREBASE_FUNCTIONS_REGION) return
-  const projectId =
-    process.env.GCLOUD_PROJECT ??
-    (() => {
-      try {
-        return JSON.parse(process.env.FIREBASE_CONFIG ?? "{}").projectId
-      } catch {
-        return undefined
-      }
-    })()
-  if (!projectId) return
-  // cwd is the functions package root in discovery (CLI spawns node there),
-  // in the emulators, and in the deployed runtime (/workspace).
-  const path = join(process.cwd(), `.env.${projectId}`)
-  let raw: string
-  try {
-    raw = readFileSync(path, "utf8")
-  } catch {
-    return
-  }
-  for (const line of raw.split("\n")) {
-    const trimmed = line.trim()
-    if (!trimmed || trimmed.startsWith("#")) continue
-    const eq = trimmed.indexOf("=")
-    if (eq <= 0) continue
-    const key = trimmed.slice(0, eq).trim()
-    const value = trimmed.slice(eq + 1).trim()
-    if (!(key in process.env)) process.env[key] = value
-  }
-}
-
-loadPerProjectEnvFile()
-
 const region = process.env.VITE_FIREBASE_FUNCTIONS_REGION
 if (!region) {
   throw new Error(
-    "VITE_FIREBASE_FUNCTIONS_REGION is required: provide it via " +
-      "functions/.env.<projectId> (see functions/.env.example) or the " +
-      "process environment; it must match the project's Firestore region"
+    "VITE_FIREBASE_FUNCTIONS_REGION is required and has no default: set it " +
+      "in the environment of whatever builds or runs this codebase (Replit " +
+      "Secrets, CI variables, your shell). It must match the project's " +
+      "Firestore region. If a deploy reaches this line, the functions build " +
+      "ran without the variable set -- rebuild with it in the environment."
   )
 }
 

@@ -28,7 +28,8 @@ TIMEOUT_SECS="${1:-${EMULATOR_TIMEOUT_SECS:-1800}}"
 
 # Region is required, no default: functions/src/config/region.ts throws at
 # load without it, which would kill the functions emulator at discovery time.
-# A dummy value is fine locally as long as clients use the same one.
+# A dummy value is fine locally as long as clients use the same one. It is an
+# ordinary environment variable -- there is no config file to write.
 export VITE_FIREBASE_FUNCTIONS_REGION="${VITE_FIREBASE_FUNCTIONS_REGION:-${FUNCTIONS_REGION:-}}"
 : "${VITE_FIREBASE_FUNCTIONS_REGION:?set FUNCTIONS_REGION (or VITE_FIREBASE_FUNCTIONS_REGION) -- no default; any value works for the emulators, e.g. local-region-1}"
 
@@ -42,10 +43,15 @@ fi
 # The functions emulator serves the COMPILED output (functions/lib). Rebuild
 # immediately before every boot so lib/ matches src/ — a stale or missing
 # build makes the suite come up with old (or zero) trigger definitions.
-echo "[run-emulators] building functions (tsc)..."
-(cd functions && ./node_modules/.bin/tsc)
-if [ ! -f functions/lib/functions/src/index.js ]; then
-  echo "functions build did not produce functions/lib/functions/src/index.js" >&2
+#
+# `npm run build`, not bare tsc: the build also stamps the region exported
+# above into the generated entrypoint. The emulators spawn their runtimes with
+# an environment firebase-tools builds from scratch, so a variable exported
+# here never reaches them on its own (see functions/tools/build-entry.mjs).
+echo "[run-emulators] building functions (tsc + entrypoint)..."
+(cd functions && npm run --silent build)
+if [ ! -f functions/lib/entry.js ]; then
+  echo "functions build did not produce functions/lib/entry.js" >&2
   exit 1
 fi
 

@@ -3,11 +3,11 @@
 This project runs on **Firebase Functions** and uses **Google Cloud Tasks** for background jobs.  
 The source code is deployment agnostic: **there is no default region anywhere
 in the repo**. Every deployment sets `VITE_FIREBASE_FUNCTIONS_REGION`
-explicitly: in the deploy shell / Replit Secrets, plus a local, gitignored
-`functions/.env.<projectId>` file for the CLI's function discovery (see
-`functions/.env.example` — per-deployment config is never committed). It must
-match that project's Firestore region. Anything region-dependent throws or
-fails fast when it is unset.
+explicitly, as an ordinary environment variable — a Replit Secret, a CI
+variable, an `export` in your shell. There are no config files to create: the
+frontend build (Vite) and the functions build both read it from the
+environment. It must match that project's Firestore region. Anything
+region-dependent throws or fails fast when it is unset.
 As a fact about one specific deployment: production runs on the
 **`team-snek`** project, with Firestore and all Cloud Functions in
 `australia-southeast1` (Sydney).
@@ -37,7 +37,12 @@ As a fact about one specific deployment: production runs on the
 
 ## ⚙️ 1) Environment Variables
 
-We keep env files **separate** per workspace to avoid leaking server secrets into the browser and to match tooling expectations.
+All configuration is read from **ordinary environment variables** — Replit
+Secrets, CI variables, an `export` in your shell — so a fresh workspace needs
+no files. The frontend additionally accepts a local `frontend/.env` because
+Vite reads one and it is convenient for local work; the functions codebase
+reads no files at all. Keep the two workspaces' variables separate so server
+secrets never reach the browser bundle.
 
 ### 1.1 Frontend (`/frontend/.env`)
 
@@ -85,26 +90,31 @@ project.
 
 > 🔐 Never commit real `.env` files.
 
-### 1.2 Functions (`functions/.env.<projectId>`)
+### 1.2 Functions (environment only — no files)
 
-Per-deployment functions config is **never committed**; the repo carries only
-`functions/.env.example`. For each deploy target, copy the template to a
-local, gitignored file named after the project and fill in the region:
+Functions config is **environment variables, nothing else**. Set the region in
+the same place as every other deployment secret and deploy:
 
 ```bash
-cp functions/.env.example functions/.env.<projectId>
+export VITE_FIREBASE_FUNCTIONS_REGION=<region>   # must match that project's Firestore region
+bash scripts/deploy.sh functions
 ```
 
-```env
-VITE_FIREBASE_FUNCTIONS_REGION=   # REQUIRED: must match that project's Firestore region
-```
+There is no default and no config file: `functions/src/config/region.ts` throws
+at module load if the value is missing, and `scripts/deploy.sh` refuses to run
+without it.
 
-firebase-tools loads it at deploy time (function discovery + runtime env).
-There is no default: `functions/src/config/region.ts` throws at module load
-if the value is missing, and `scripts/deploy.sh` refuses to run without the
-matching shell var.
-
-> Keep server secrets here or use `firebase functions:config:set` (not shown here).
+How the value gets from your shell into the deployed functions is worth
+knowing, because it is not obvious. firebase-tools does not pass the ambient
+environment to the processes it spawns — function discovery, the emulated
+runtime and the deployed runtime each get an environment it constructs itself
+(`FIREBASE_CONFIG`, `GCLOUD_PROJECT`, `GOOGLE_CLOUD_QUOTA_PROJECT`, `PORT`,
+`FUNCTIONS_CONTROL_API`, `HOME`, `PATH`), and `.env` files reach only the
+deployed runtime, never discovery. The functions **build** does run in your
+shell, though (it is the `predeploy` hook), so that is where the environment is
+read: `functions/tools/build-entry.mjs` stamps the config into the generated
+entrypoint `functions/lib/entry.js`, exactly as Vite bakes `VITE_` vars into
+the frontend bundle. A real environment variable always wins over the stamp.
 
 ### 1.3 (Optional) Root Shared Env
 

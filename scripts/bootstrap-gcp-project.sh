@@ -23,7 +23,7 @@ set -euo pipefail
 #
 # REGION is REQUIRED -- there is no default by design. It must match BOTH the
 # Firestore location and the VITE_FIREBASE_FUNCTIONS_REGION every deploy sets
-# (see functions/src/config/region.ts and functions/.env.<projectId>).
+# (see functions/src/config/region.ts; it is a plain environment variable).
 # =============================================================================
 
 if [ -z "${1:-}" ] || [ -z "${2:-}" ]; then

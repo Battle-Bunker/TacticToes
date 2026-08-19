@@ -92,8 +92,10 @@ Firebase project aliases (`.firebaserc`): `production` = team-snek (australia-so
 
 # Conventions
 - Source code is deployment agnostic: no hardcoded region defaults anywhere.
-  `VITE_FIREBASE_FUNCTIONS_REGION` is required config (deploy shell +
-  gitignored `functions/.env.<projectId>`, see `functions/.env.example`) and
+  `VITE_FIREBASE_FUNCTIONS_REGION` is required config, supplied as a plain
+  environment variable (Replit Secrets / deploy shell) with no config file
+  anywhere; the functions build stamps it into the generated entrypoint for
+  the processes firebase-tools spawns (`functions/tools/build-entry.mjs`). It
   must match the target project's Firestore region; missing values throw.
 - Never assign `undefined` to a field bound for Firestore — omit the key
   (conditional spread) or use `null`.
