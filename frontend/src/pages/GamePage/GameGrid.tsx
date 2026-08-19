@@ -1,10 +1,12 @@
 import { Box, IconButton, Typography, Slider } from "@mui/material"
-import { Clash, GamePlayer } from "@shared/types/Game"
 import React, { useEffect, useMemo, useState } from "react"
 import { useGameStateContext } from "../../context/GameStateContext"
 import BoardCanvas from "../../board/BoardCanvas"
+import { clashesAtCell } from "../../board/clashes"
+import { Cell } from "../../board/renderer"
 import { turnToBoard } from "../../board/turnToBoard"
 import ClashDialog from "./ClashDialog"
+import Scoreboard from "./Scoreboard"
 import {
   ArrowBack,
   ArrowForward,
@@ -18,9 +20,7 @@ const GameGrid: React.FC = () => {
   const [selectedTurnIndex, setSelectedTurnIndex] = useState<number>(-1)
   const [turnCount, setTurnCount] = useState<number>(0)
 
-  const [clashReason, setClashReason] = useState<string>("")
-  const [openClashDialog, setOpenClashDialog] = useState(false)
-  const [clashPlayersList, setClashPlayersList] = useState<GamePlayer[]>([])
+  const [inspectedClashCell, setInspectedClashCell] = useState<Cell | null>(null)
 
   // Follow the latest turn as new turns arrive
   useEffect(() => {
@@ -46,28 +46,13 @@ const GameGrid: React.FC = () => {
     [gameState, viewedTurnIndex],
   )
 
-  // Clash squares stay clickable whether or not a marker is drawn on them: the
-  // dialog explains what happened there, and a survivor standing on the square
-  // is exactly when that explanation is worth reading.
-  const clashesAtIndex = useMemo(() => {
-    const map: { [index: number]: Clash } = {}
-    gameState?.turns[viewedTurnIndex]?.clashes?.forEach((clash) => {
-      map[clash.index] = clash
-    })
-    return map
-  }, [gameState, viewedTurnIndex])
-
-  const handleSquareClick = (index: number) => {
-    if (!gameState) return
-    const clash = clashesAtIndex[index]
-    if (!clash) return
-
-    const playersInvolved = gameState.setup.gamePlayers.filter((player) =>
-      clash.playerIDs.includes(player.id),
-    )
-    setClashReason(clash.reason)
-    setClashPlayersList(playersInvolved)
-    setOpenClashDialog(true)
+  // Clash squares stay clickable whether or not a death marker is drawn on
+  // them: the panel explains what happened there, and a survivor standing on
+  // the square is exactly when that explanation is worth reading. Every record
+  // the square carries is kept — one square can hold several collisions.
+  const handleSquareClick = (cell: Cell) => {
+    if (!board || clashesAtCell(board, cell).length === 0) return
+    setInspectedClashCell(cell)
   }
 
   // Navigation handlers
@@ -160,12 +145,13 @@ const GameGrid: React.FC = () => {
         </Box>
       </Box>
 
+      <Scoreboard board={board} />
+
       <ClashDialog
-        open={openClashDialog}
-        onClose={() => setOpenClashDialog(false)}
-        clashReason={clashReason}
-        clashPlayersList={clashPlayersList}
-        teams={gameState?.setup.teams || []}
+        open={inspectedClashCell !== null}
+        onClose={() => setInspectedClashCell(null)}
+        cell={inspectedClashCell}
+        board={board}
       />
     </>
   )

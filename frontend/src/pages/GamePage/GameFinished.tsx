@@ -12,7 +12,7 @@ import {
 import React from "react"
 import { useNavigate } from "react-router-dom"
 import { useGameStateContext } from "../../context/GameStateContext"
-import { unitLabel } from "../../utils/snakeLabel"
+import { pieceGlyph } from "../../utils/unitGlyphs"
 
 interface TeamResult {
   teamID: string
@@ -38,14 +38,26 @@ const GameFinished: React.FC = () => {
   // Every team gets a results row; winners additionally carry MMR updates.
   const teamResults: TeamResult[] = teams.map((team) => {
     const winner = winners.find((w) => w.teamID === team.id)
+    const teamUnits = gamePlayers.filter((gp) => gp.teamID === team.id)
     return {
       teamID: team.id,
       teamName: team.name,
       teamColor: team.color,
-      teamScore: winner?.teamScore ?? latestTurn.teamScores?.[team.id] ?? 0,
-      unitNames: gamePlayers
-        .filter((gp) => gp.teamID === team.id)
-        .map((gp) => unitLabel(team, gp, latestTurn.unitTypes?.[gp.id])),
+      // Scored off the final board, exactly as the engine scores
+      // (TeamSnekProcessor.getTeamScore) and exactly as the live scoreboard
+      // does: the summed weight of the team's surviving units. Reading it from
+      // the board rather than from a stored summary is what makes an old log
+      // — written before teamScores existed — score correctly too.
+      teamScore: teamUnits.reduce(
+        (total, gp) => total + (latestTurn.playerPieces[gp.id]?.length ?? 0),
+        0,
+      ),
+      // The row already names the team, so a unit is its LETTER, with its type
+      // glyph — the same division of labour the scoreboard's team groups use.
+      unitNames: teamUnits.map((gp) => {
+        const glyph = pieceGlyph(latestTurn.unitTypes?.[gp.id] ?? gp.unitType)
+        return `${glyph ? `${glyph} ` : ""}${gp.letter}`
+      }),
       mmr: winner?.newMMR,
       mmrChange: winner?.mmrChange,
     }

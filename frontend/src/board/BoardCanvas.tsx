@@ -6,19 +6,20 @@ import React, {
   useRef,
   useState,
 } from "react"
+import { clashesAtCell } from "./clashes"
 import {
   BoardModel,
+  Cell,
   getClickedCell,
   getTagAt,
   renderBoard,
   watchRenderScale,
 } from "./renderer"
-import { cellToIndex } from "./turnToBoard"
 
 interface BoardCanvasProps {
   board: BoardModel
-  /** Full-board index of the square a click landed on. */
-  onCellClick?: (index: number) => void
+  /** The square a click landed on, in the board model's own coordinates. */
+  onCellClick?: (cell: Cell) => void
 }
 
 // ── Board size ───────────────────────────────────────────────────────────────
@@ -117,11 +118,20 @@ const BoardCanvas: React.FC<BoardCanvasProps> = ({ board, onCellClick }) => {
   // as the board is resized, so a still pointer can end up over something else.
   const pointerRef = useRef<{ clientX: number; clientY: number } | null>(null)
 
+  // A clash cell can be clicked for the server's account of what happened
+  // there, so the pointer says so over one — the mark on the board is the
+  // affordance, and the cursor is what confirms it before the click.
+  const [overClashCell, setOverClashCell] = useState(false)
+
   const syncHover = useCallback(() => {
     const canvas = canvasRef.current
     const pos = pointerRef.current
     const next = canvas && pos ? getTagAt(canvas, pos) : null
     setTagHoverUnitId((prev) => (prev === next ? prev : next))
+    const cell =
+      canvas && pos ? getClickedCell(canvas, boardRef.current, pos) : null
+    const onClash = !!cell && clashesAtCell(boardRef.current, cell).length > 0
+    setOverClashCell((prev) => (prev === onClash ? prev : onClash))
   }, [])
 
   const draw = useCallback(() => {
@@ -175,7 +185,7 @@ const BoardCanvas: React.FC<BoardCanvasProps> = ({ board, onCellClick }) => {
     const canvas = canvasRef.current
     if (!canvas || !onCellClick) return
     const cell = getClickedCell(canvas, board, event)
-    if (cell) onCellClick(cellToIndex(cell, board.width, board.height))
+    if (cell) onCellClick(cell)
   }
 
   // ── The grip ───────────────────────────────────────────────────────────────
@@ -272,7 +282,12 @@ const BoardCanvas: React.FC<BoardCanvasProps> = ({ board, onCellClick }) => {
         <canvas
           ref={canvasRef}
           onClick={handleClick}
-          style={{ display: "block", width: "100%", height: "100%" }}
+          style={{
+            display: "block",
+            width: "100%",
+            height: "100%",
+            cursor: onCellClick && overClashCell ? "pointer" : "default",
+          }}
         />
         <Box
           role="separator"

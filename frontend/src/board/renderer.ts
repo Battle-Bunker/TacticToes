@@ -2,6 +2,8 @@
 // board, drawn in CSS pixels onto a bitmap backed at the display's own
 // resolution.
 
+import { CLASH_RING_COLOR, clashCellKeys } from "./clashes"
+
 export interface Cell {
   x: number
   y: number
@@ -25,6 +27,9 @@ export type UnitIconKey =
 export interface BoardUnit {
   id: string
   letter: string
+  /** The team this unit belongs to, and that team's display name. */
+  teamID: string
+  teamName: string
   color: string
   unitType: UnitIconKey
   /** Head first. A piece occupies exactly one cell. */
@@ -45,6 +50,47 @@ export interface DeathMark {
   color: string
 }
 
+/**
+ * One team in the game, in the order the setup lists them. The scoreboard reads
+ * its groups from here so a team stays put as units of it live and die.
+ */
+export interface BoardTeam {
+  id: string
+  name: string
+  color: string
+}
+
+/**
+ * One collision the game server resolved this turn, in RENDERER coordinates:
+ * where it happened, who took part, why someone died, and — for pieces, which
+ * walk their path one square at a time — which within-turn sub-step it happened
+ * on. It says nothing about who died: the server records PARTICIPANTS, and a
+ * participant missing from `units` is one that did not walk away.
+ */
+export interface BoardClash {
+  cell: Cell
+  playerIDs: string[]
+  reason: string
+  subStep?: number
+}
+
+/**
+ * A unit the board has dropped — dead — at its LAST-KNOWN state. It has no
+ * body and no health, but it keeps its identity and the weight it died with, so
+ * a scoreboard can list it (struck through, scoring nothing) instead of letting
+ * it silently vanish from its team.
+ */
+export interface RosterUnit {
+  id: string
+  letter: string
+  teamID: string
+  teamName: string
+  color: string
+  unitType: UnitIconKey
+  /** Weight on the last turn it was seen alive. */
+  weight: number
+}
+
 export interface BoardModel {
   width: number
   height: number
@@ -56,8 +102,13 @@ export interface BoardModel {
   winningSquares: Cell[]
   food: Cell[]
   invulnerabilityPotions: Cell[]
+  teams: BoardTeam[]
   units: BoardUnit[]
   deaths: DeathMark[]
+  /** Every collision this turn, for the rings on the board and the inspector. */
+  clashes: BoardClash[]
+  /** Units that are no longer on the board, at their last-known state. */
+  deadUnits: RosterUnit[]
 }
 
 let potionImage: HTMLImageElement | null = null
@@ -369,13 +420,13 @@ function drawOrientationEye(
 // ORIENTATION: icons draw UPRIGHT everywhere. Facing is carried by the
 // orientation eye on the cell edge (drawOrientationEye), which reads as a
 // direction at a glance where a rotated 2D icon does not.
-const ICON_COLORS: Record<string, string> = {
+export const ICON_COLORS: Record<string, string> = {
   base: "#ffffff",
   line: "rgba(0, 0, 0, 0.8)",
   accent: "#e53935",
 }
 
-interface IconLayer {
+export interface IconLayer {
   d: string
   op: "fill" | "stroke"
   color: string
@@ -414,7 +465,7 @@ function spiralPath(
 // top, then a neck rising to the head at the upper right.
 const SNAKE_COIL = `${spiralPath(9.4, 14.2, 0.2, 3.8, 1.3, -Math.PI / 2)} C10.6 7.6 11.6 6.6 13.4 6.2`
 
-const UNIT_ICONS: Record<UnitIconKey, IconLayer[]> = {
+export const UNIT_ICONS: Record<UnitIconKey, IconLayer[]> = {
   pawn: [
     {
       // Plain pawn: a round ball head over a flared body on a wide foot.
@@ -598,7 +649,7 @@ function drawHeadGlyph(
 // stand-in or tofu), and weight wants a heavy, monochrome silhouette rather than
 // a colour picture — hence the hand-drawn path. `w`/`h` are its box, so callers
 // can scale it to a text line without guessing its aspect.
-const ANVIL_ICON = {
+export const ANVIL_ICON = {
   w: 24,
   h: 20,
   // Pointed horn on the left, long flat face across the top overhanging a
@@ -612,7 +663,7 @@ const ANVIL_ICON = {
   // sized and centred by the ink the eye sees.
   ink: { x: 0.5, y: 3, w: 22.5, h: 16.5 },
 }
-const ANVIL_COLORS = {
+export const ANVIL_COLORS = {
   fill: "#c2c7cd", // silver
   line: "rgba(20, 24, 30, 0.75)", // the rim that keeps it legible on white
 }
@@ -644,7 +695,7 @@ function drawAnvilIcon(
 // most, and a picture rather than a symbol), which reads as decoration next to
 // the board's red hazard lattice instead of as the same danger. One path, one
 // red, every surface.
-const HAZARD_ICON = {
+export const HAZARD_ICON = {
   w: 24,
   h: 21,
   // ONE path: the rounded triangle, then the exclamation's bar and dot as
@@ -662,7 +713,7 @@ const HAZARD_ICON = {
   // The triangle's own extent inside that box, apex to base.
   ink: { x: 0.9, y: 1.4, w: 22.2, h: 18.4 },
 }
-const HAZARD_COLORS = {
+export const HAZARD_COLORS = {
   fill: "#d81b1b", // the hazard lattice's red, at full strength
   inner: "#ffffff", // the exclamation, backing the even-odd holes
 }
@@ -689,12 +740,12 @@ function drawHazardIcon(
 // always reads as one symbol wherever it appears. Weight (the anvil) and
 // extra-vulnerability (the hazard triangle) are drawn paths rather than
 // characters, so neither carries an entry here.
-const STAT_ICON = {
+export const STAT_ICON = {
   health: "\u2665", // heart, tinted by healthBarColor
   invulnerable: "\u{1F6E1}\uFE0F", // shield (positive level)
 }
 
-type MarkName = "anvil" | "hazard"
+export type MarkName = "anvil" | "hazard"
 
 interface DrawnMark {
   icon: { w: number; h: number; d: string; ink: { x: number; y: number; w: number; h: number } }
@@ -740,7 +791,7 @@ const HEALTH_BAR_CELL_TRACK = "#000000"
 
 // The invulnerability mark for a level: the shield GLYPH when protected, the
 // drawn red hazard MARK when the level is negative (extra-vulnerable).
-function invulnerabilityMark(level: number): { icon?: string; mark?: MarkName } {
+export function invulnerabilityMark(level: number): { icon?: string; mark?: MarkName } {
   return level > 0 ? { icon: STAT_ICON.invulnerable } : { mark: "hazard" }
 }
 
@@ -749,7 +800,7 @@ function invulnerabilityMark(level: number): { icon?: string; mark?: MarkName } 
 // wire carries no expiry, or when the level has already lapsed at that turn — so
 // the board's plates and its tags can never disagree about how long a buff has
 // to run.
-function invulnerabilityTurnsRemaining(
+export function invulnerabilityTurnsRemaining(
   unit: BoardUnit,
   currentTurn: number,
 ): number | null {
@@ -762,14 +813,14 @@ function invulnerabilityTurnsRemaining(
 // Health-bar fill colour by remaining fraction: red when nearly starved, orange
 // when low, green otherwise. Shared by the board bar and the stat plates so the
 // two readouts always agree.
-function healthBarColor(frac: number): string {
+export function healthBarColor(frac: number): string {
   if (frac < 0.1) return "#e53935"
   if (frac < 0.25) return "#fb8c00"
   return "#43a047"
 }
 
 // Health fraction: health over the unit's configured per-type max, clamped.
-function healthFraction(unit: BoardUnit): number {
+export function healthFraction(unit: BoardUnit): number {
   const max = unit.maxHealth ?? 100
   if (!(max > 0)) return 0
   return Math.max(0, Math.min(1, (unit.health ?? 0) / max))
@@ -1593,6 +1644,66 @@ function renderUnitBody(
   }
 }
 
+// The mark that says "something collided here, and the board can tell you what".
+// Drawn on every cell this turn's clash records name — including the ones a
+// SURVIVOR is standing on, which is exactly where no death marker is drawn and
+// exactly where the explanation is worth most.
+//
+// It comes in two shapes for one reason: a clash mark must never bury the unit
+// standing on it, and it must never be buried BY it either.
+//   - Nobody home: the quiet dashed ring inside the cell, the same mark the
+//     centaur draws. It shares the cell with a death marker, which keeps the
+//     middle.
+//   - A survivor standing there: the ring would be drawn over by the body that
+//     owns the cell (bodies inset ~15%, so a ring at 0.44 disappears behind
+//     one), so the mark moves OUT to a dashed square hugging the cell's edge —
+//     outside any body, its buff outline and its plates. The survivor draws on
+//     top of it, which is the point: the living unit is the subject, and the
+//     dashes around it are the handle.
+// Either way it is deliberately quiet and unmistakably an outline — an
+// affordance, not a second death marker competing with the real one.
+function drawClashMarker(
+  ctx: CanvasRenderingContext2D,
+  cell: Cell,
+  boardHeight: number,
+  cellSize: number,
+  occupied: boolean,
+) {
+  if (!cell) return
+  const x = cell.x * cellSize
+  const y = (boardHeight - 1 - cell.y) * cellSize
+  const width = Math.max(1, cellSize * 0.05)
+  const path = () => {
+    ctx.beginPath()
+    if (occupied) {
+      // Hard against the cell's edge: a unit's body is inset ~15%, and a
+      // buffed one wears an outline ~9% in, so this is the one band nothing
+      // standing on the cell can cover.
+      const inset = Math.max(1, cellSize * 0.02)
+      ctx.rect(x + inset, y + inset, cellSize - inset * 2, cellSize - inset * 2)
+    } else {
+      ctx.arc(x + cellSize / 2, y + cellSize / 2, cellSize * 0.44, 0, Math.PI * 2)
+    }
+  }
+  ctx.save()
+  ctx.lineJoin = "round"
+  ctx.setLineDash([Math.max(2, cellSize * 0.12), Math.max(2, cellSize * 0.1)])
+  // A dark halo under the amber, because this board is a LIGHT one: amber dashes
+  // on a yellow fertile tile are dashes nobody can see, and an affordance that
+  // shows on some terrain and not others is not an affordance.
+  ctx.globalAlpha = 0.45
+  ctx.lineWidth = width * 2.2
+  ctx.strokeStyle = "#000000"
+  path()
+  ctx.stroke()
+  ctx.globalAlpha = 0.95
+  ctx.lineWidth = width
+  ctx.strokeStyle = CLASH_RING_COLOR
+  path()
+  ctx.stroke()
+  ctx.restore()
+}
+
 // A death marker at a board cell: a filled disc in the fallen unit's colour with
 // a white ✗, drawn last so it sits on top of everything the cell holds.
 function drawDeathMarker(
@@ -2136,6 +2247,26 @@ export function renderBoard(
       ctx.fillText("\u{1F9EA}", x + cellSize / 2, y + cellSize / 2)
     }
     ctx.restore()
+  })
+
+  // Clash marks go down BEFORE the units, so a unit that survived a collision
+  // is drawn on top of the mark rather than under it: the survivor is the
+  // subject of its cell, and the dashes are what say the cell has a story to
+  // tell. Death markers come last of all, for the cells nobody walked away
+  // from.
+  const occupiedCells = new Set<string>()
+  board.units.forEach((unit) => {
+    unit.body.forEach((cell) => occupiedCells.add(`${cell.x},${cell.y}`))
+  })
+  clashCellKeys(board).forEach((key) => {
+    const [x, y] = key.split(",")
+    drawClashMarker(
+      ctx,
+      { x: Number(x), y: Number(y) },
+      board.height,
+      cellSize,
+      occupiedCells.has(key),
+    )
   })
 
   board.units.forEach((unit) => {
