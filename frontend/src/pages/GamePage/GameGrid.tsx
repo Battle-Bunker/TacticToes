@@ -1,6 +1,6 @@
 import { Box, IconButton, Typography, Slider } from "@mui/material"
-import { GamePlayer, GameState } from "@shared/types/Game"
-import React, { useEffect, useLayoutEffect, useRef, useState } from "react"
+import { Clash, GamePlayer, GameState } from "@shared/types/Game"
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { useGameStateContext } from "../../context/GameStateContext"
 import ClashDialog from "./ClashDialog"
 import GridCell from "./GridCell"
@@ -18,15 +18,10 @@ export interface GameLogicProps {
   selectedTurnIndex: number
 }
 
-export interface ClashInfo {
-  reason: string
-  playerIDs: string[]
-}
-
 export interface GameLogicReturn {
   cellContentMap: { [index: number]: JSX.Element }
   cellBackgroundMap: { [index: number]: string }
-  clashesAtPosition: { [index: number]: ClashInfo }
+  clashesAtPosition: { [index: number]: Clash }
 }
 
 const GameGrid: React.FC = () => {
@@ -46,9 +41,6 @@ const GameGrid: React.FC = () => {
   const [clashReason, setClashReason] = useState<string>("")
   const [openClashDialog, setOpenClashDialog] = useState(false)
   const [clashPlayersList, setClashPlayersList] = useState<GamePlayer[]>([])
-  const [gameLogicReturn, setGameLogicReturn] = useState<
-    GameLogicReturn | undefined
-  >()
   const gridRef = useRef<HTMLDivElement>(null)
   const [containerWidth, setContainerWidth] = useState<number>(0)
 
@@ -93,17 +85,17 @@ const GameGrid: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gameState?.turns?.length])
 
-  useEffect(() => {
-    if (gameState) {
-      setGameLogicReturn(
-        SnakeGameLogic({
-          gameState,
-          cellSize,
-          selectedTurnIndex: selectedTurnIndex >= 0 ? selectedTurnIndex : 0,
-        }),
-      )
-    }
-  }, [gameState, cellSize, selectedTurnIndex])
+  const gameLogicReturn: GameLogicReturn | undefined = useMemo(
+    () =>
+      gameState
+        ? SnakeGameLogic({
+            gameState,
+            cellSize,
+            selectedTurnIndex: selectedTurnIndex >= 0 ? selectedTurnIndex : 0,
+          })
+        : undefined,
+    [gameState, cellSize, selectedTurnIndex],
+  )
 
   // Navigation handlers
   const handlePrevTurn = () => {

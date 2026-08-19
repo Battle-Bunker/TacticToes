@@ -1,4 +1,4 @@
-import { Box, CircularProgress, Typography } from "@mui/material"
+import { Typography } from "@mui/material"
 import {
   Centaur,
   GameSetup,
@@ -10,13 +10,10 @@ import {
 import {
   collection,
   doc,
-  DocumentSnapshot,
   limit,
-  onSnapshot,
   or,
   orderBy,
   query,
-  QuerySnapshot,
   Timestamp,
   where,
 } from "firebase/firestore"
@@ -27,7 +24,9 @@ import React, {
   useRef,
   useState,
 } from "react"
+import { CenteredLoader } from "../components/CenteredLoader"
 import { db } from "../firebaseConfig"
+import { useFirestoreSubscription } from "../hooks/useFirestoreSubscription"
 import { useUser } from "./UserContext"
 
 interface GameStateContextType {
@@ -49,8 +48,6 @@ interface GameStateContextType {
 const GameStateContext = createContext<GameStateContextType | undefined>(
   undefined,
 )
-
-const queryMaxDuration = 2000
 
 export const GameStateProvider: React.FC<{
   children: React.ReactNode
@@ -74,296 +71,121 @@ export const GameStateProvider: React.FC<{
   const intervalIdRef = useRef<NodeJS.Timeout | null>(null)
   const initialGameIDRef = useRef(gameID)
 
-  // Helper function to update connectivity status based on snapshot metadata
-  const updateConnectivityStatus = (snapshot: DocumentSnapshot | QuerySnapshot) => {
-    const isConnected = !snapshot.metadata.fromCache
-    setConnectivityStatus(isConnected ? 'connected' : 'disconnected')
-  }
-
-  // Subscribe to game document
-  useEffect(() => {
-    const gameDocRef = doc(db, `sessions/${sessionName}/games`, gameID)
-    let timeoutId: NodeJS.Timeout | null = null
-
-    const startQueryTimeout = () => {
-      timeoutId = setTimeout(() => {
-        setQueryTimedOut(true)
-        setError("Loading game data is taking longer than usual.")
-      }, queryMaxDuration)
-    }
-
-    const clearQueryTimeout = () => {
-      if (timeoutId) {
-        clearTimeout(timeoutId)
-        timeoutId = null
+  // Subscribe to game document. This is the one subscription that drives the
+  // connectivity banner: it is the realtime feed the player is actually
+  // playing off, so its cache/server state is what "connected" means here.
+  // (Previously all five subscriptions raced last-writer-wins over the same
+  // connectivity flag.)
+  useFirestoreSubscription({
+    buildTarget: () => doc(db, `sessions/${sessionName}/games`, gameID),
+    deps: [gameID, sessionName],
+    logLabel: "game",
+    timeoutMessage: "Loading game data is taking longer than usual.",
+    errorMessage: "An error occurred while fetching game updates.",
+    onError: setError,
+    onQueryTimeoutChange: setQueryTimedOut,
+    onConnectivityChange: (connected) =>
+      setConnectivityStatus(connected ? 'connected' : 'disconnected'),
+    onSnapshot: (docSnapshot) => {
+      if (!docSnapshot.exists()) {
+        // The game document only exists once the game has started.
+        return
       }
-    }
 
-    startQueryTimeout()
+      const gameData = docSnapshot.data() as GameState
+      const safeTurns = Array.isArray(gameData.turns) ? gameData.turns : []
+      const latestTurnData = safeTurns.length ? safeTurns[safeTurns.length - 1] : null
 
-    const unsubscribe = onSnapshot(
-      gameDocRef,
-      { includeMetadataChanges: true },
-      (docSnapshot) => {
-        updateConnectivityStatus(docSnapshot)
-
-        if (!docSnapshot.exists()) {
-          // The game document only exists once the game has started.
-          if (!docSnapshot.metadata.fromCache) {
-            clearQueryTimeout()
-            setQueryTimedOut(false)
-          }
-          return
-        }
-
-        const gameData = docSnapshot.data() as GameState
-        const safeTurns = Array.isArray(gameData.turns) ? gameData.turns : []
-        const latestTurnData = safeTurns.length ? safeTurns[safeTurns.length - 1] : null
-
-        setGameState({ ...gameData, turns: safeTurns })
-        setLatestTurn(latestTurnData)
-
-        if (!docSnapshot.metadata.fromCache) {
-          clearQueryTimeout()
-          setQueryTimedOut(false)
-        }
-      },
-      (error) => {
-        console.error("Error in game subscription:", error)
-        setError("An error occurred while fetching game updates.")
-        clearQueryTimeout()
-      }
-    )
-    return () => {
-      unsubscribe()
-      clearQueryTimeout()
-    }
-  }, [gameID, sessionName])
+      setGameState({ ...gameData, turns: safeTurns })
+      setLatestTurn(latestTurnData)
+    },
+  })
 
   // Subscribe to session document
-  useEffect(() => {
-    const sessionDocRef = doc(db, `sessions/${sessionName}`)
-    let timeoutId: NodeJS.Timeout | null = null
-
-    const startQueryTimeout = () => {
-      timeoutId = setTimeout(() => {
-        setQueryTimedOut(true)
-        setError("Loading session data is taking longer than usual.")
-      }, queryMaxDuration)
-    }
-
-    const clearQueryTimeout = () => {
-      if (timeoutId) {
-        clearTimeout(timeoutId)
-        timeoutId = null
+  useFirestoreSubscription({
+    buildTarget: () => doc(db, `sessions/${sessionName}`),
+    deps: [sessionName],
+    logLabel: "session",
+    timeoutMessage: "Loading session data is taking longer than usual.",
+    errorMessage: "An error occurred while fetching session updates.",
+    onError: setError,
+    onQueryTimeoutChange: setQueryTimedOut,
+    onSnapshot: (docSnapshot) => {
+      if (!docSnapshot.exists()) {
+        setError("Session not found.")
+        return "keep-waiting"
       }
-    }
 
-    startQueryTimeout()
-
-    const unsubscribe = onSnapshot(
-      sessionDocRef,
-      { includeMetadataChanges: true },
-      (docSnapshot) => {
-        updateConnectivityStatus(docSnapshot)
-
-        if (!docSnapshot.exists()) {
-          setError("Session not found.")
-          return
-        }
-
-        const sessionData = docSnapshot.data() as Session
-        setSession(sessionData)
-
-        if (!docSnapshot.metadata.fromCache) {
-          clearQueryTimeout()
-          setQueryTimedOut(false)
-        }
-      },
-      (error) => {
-        console.error("Error in session subscription:", error)
-        setError("An error occurred while fetching session updates.")
-        clearQueryTimeout()
-      }
-    )
-    return () => {
-      unsubscribe()
-      clearQueryTimeout()
-    }
-  }, [sessionName])
+      setSession(docSnapshot.data() as Session)
+    },
+  })
 
   // Subscribe to game setup
-  useEffect(() => {
-    if (!gameID) return
-    const gameDocRef = doc(db, `sessions/${sessionName}/setups`, gameID)
-    let timeoutId: NodeJS.Timeout | null = null
-
-    const startQueryTimeout = () => {
-      timeoutId = setTimeout(() => {
-        setQueryTimedOut(true)
-        setError("Loading game setup is taking longer than usual.")
-      }, queryMaxDuration)
-    }
-
-    const clearQueryTimeout = () => {
-      if (timeoutId) {
-        clearTimeout(timeoutId)
-        timeoutId = null
+  useFirestoreSubscription({
+    buildTarget: () =>
+      gameID ? doc(db, `sessions/${sessionName}/setups`, gameID) : null,
+    deps: [gameID, sessionName],
+    logLabel: "game setup",
+    timeoutMessage: "Loading game setup is taking longer than usual.",
+    errorMessage: "An error occurred while fetching game setup.",
+    onError: setError,
+    onQueryTimeoutChange: setQueryTimedOut,
+    onSnapshot: (docSnapshot) => {
+      if (!docSnapshot.exists()) {
+        setError("Game setup not found.")
+        return "keep-waiting"
       }
-    }
 
-    startQueryTimeout()
-
-    const unsubscribe = onSnapshot(
-      gameDocRef,
-      { includeMetadataChanges: true },
-      (docSnapshot) => {
-        updateConnectivityStatus(docSnapshot)
-
-        if (!docSnapshot.exists()) {
-          setError("Game setup not found.")
-          return
-        }
-
-        const gameData = docSnapshot.data() as GameSetup
-        setGameSetup(gameData)
-
-        if (!docSnapshot.metadata.fromCache) {
-          clearQueryTimeout()
-          setQueryTimedOut(false)
-        }
-      },
-      (error) => {
-        console.error("Error in game setup subscription:", error)
-        setError("An error occurred while fetching game setup.")
-        clearQueryTimeout()
-      }
-    )
-    return () => {
-      unsubscribe()
-      clearQueryTimeout()
-    }
-  }, [gameID, sessionName])
+      setGameSetup(docSnapshot.data() as GameSetup)
+    },
+  })
 
   // Subscribe to the "centaurs" collection: everything public plus the
   // current user's own private centaurs.
-  useEffect(() => {
-    if (userID === "") return
-    const centaursQuery = query(
-      collection(db, "centaurs"),
-      or(
-        where("public", "==", true),
-        where("owner", "==", userID)
-      )
-    )
-    let timeoutId: NodeJS.Timeout | null = null
-
-    const startQueryTimeout = () => {
-      timeoutId = setTimeout(() => {
-        setQueryTimedOut(true)
-        setError("Loading centaurs data is taking longer than usual.")
-      }, queryMaxDuration)
-    }
-
-    const clearQueryTimeout = () => {
-      if (timeoutId) {
-        clearTimeout(timeoutId)
-        timeoutId = null
-      }
-    }
-
-    startQueryTimeout()
-
-    const unsubscribe = onSnapshot(
-      centaursQuery,
-      { includeMetadataChanges: true },
-      (snapshot) => {
-        updateConnectivityStatus(snapshot)
-
-        const centaursData = snapshot.docs.map((doc) => doc.data() as Centaur)
-        setCentaurs(centaursData)
-
-        if (!snapshot.metadata.fromCache) {
-          clearQueryTimeout()
-          setQueryTimedOut(false)
-        }
-      },
-      (error) => {
-        console.error("Error in centaurs subscription:", error)
-        setError("An error occurred while fetching centaurs data.")
-        clearQueryTimeout()
-      }
-    )
-    return () => {
-      unsubscribe()
-      clearQueryTimeout()
-    }
-  }, [userID])
+  useFirestoreSubscription({
+    buildTarget: () =>
+      userID === ""
+        ? null
+        : query(
+            collection(db, "centaurs"),
+            or(
+              where("public", "==", true),
+              where("owner", "==", userID)
+            )
+          ),
+    deps: [userID],
+    logLabel: "centaurs",
+    timeoutMessage: "Loading centaurs data is taking longer than usual.",
+    errorMessage: "An error occurred while fetching centaurs data.",
+    onError: setError,
+    onQueryTimeoutChange: setQueryTimedOut,
+    onSnapshot: (snapshot) => {
+      setCentaurs(snapshot.docs.map((doc) => doc.data() as Centaur))
+    },
+  })
 
   // Subscribe to moveStatuses collection
-  useEffect(() => {
-    if (!gameID) return
-
-    const moveStatusesRef = collection(
-      db,
-      "sessions",
-      sessionName,
-      "games",
-      gameID,
-      "moveStatuses",
-    )
-
-    const moveStatusesQuery = query(
-      moveStatusesRef,
-      orderBy("moveNumber", "desc"),
-      limit(1),
-    )
-    let timeoutId: NodeJS.Timeout | null = null
-
-    const startQueryTimeout = () => {
-      timeoutId = setTimeout(() => {
-        setQueryTimedOut(true)
-        setError("Loading move status data is taking longer than usual.")
-      }, queryMaxDuration)
-    }
-
-    const clearQueryTimeout = () => {
-      if (timeoutId) {
-        clearTimeout(timeoutId)
-        timeoutId = null
+  useFirestoreSubscription({
+    buildTarget: () =>
+      gameID
+        ? query(
+            collection(db, "sessions", sessionName, "games", gameID, "moveStatuses"),
+            orderBy("moveNumber", "desc"),
+            limit(1),
+          )
+        : null,
+    deps: [gameID, sessionName],
+    logLabel: "move status",
+    timeoutMessage: "Loading move status data is taking longer than usual.",
+    errorMessage: "An error occurred while fetching move updates.",
+    onError: setError,
+    onQueryTimeoutChange: setQueryTimedOut,
+    onSnapshot: (querySnapshot) => {
+      if (!querySnapshot.empty) {
+        setLatestMoveStatus(querySnapshot.docs[0].data() as MoveStatus)
       }
-    }
-
-    startQueryTimeout()
-
-    const unsubscribe = onSnapshot(
-      moveStatusesQuery,
-      { includeMetadataChanges: true },
-      (querySnapshot) => {
-        updateConnectivityStatus(querySnapshot)
-
-        if (!querySnapshot.empty) {
-          const highestMoveStatus = querySnapshot.docs[0].data() as MoveStatus
-          setLatestMoveStatus(highestMoveStatus)
-        }
-
-        if (!querySnapshot.metadata.fromCache) {
-          clearQueryTimeout()
-          setQueryTimedOut(false)
-        }
-      },
-      (error) => {
-        console.error("Error in move status subscription:", error)
-        setError("An error occurred while fetching move updates.")
-        clearQueryTimeout()
-      }
-    )
-
-    return () => {
-      unsubscribe()
-      clearQueryTimeout()
-    }
-  }, [gameID, sessionName])
+    },
+  })
 
   // Timer effect
   useEffect(() => {
@@ -435,17 +257,12 @@ export const GameStateProvider: React.FC<{
     <GameStateContext.Provider value={providerValue}>
       {gameSetup ? (
         children
+      ) : error ? (
+        <CenteredLoader>
+          <Typography color="error">{error}</Typography>
+        </CenteredLoader>
       ) : (
-        <Box
-          sx={{
-            display: "flex",
-            justifyContent: "center",
-            alignItems: "center",
-            height: "100vh",
-          }}
-        >
-          {error ? <Typography color="error">{error}</Typography> : <CircularProgress />}
-        </Box>
+        <CenteredLoader />
       )}
     </GameStateContext.Provider>
   )

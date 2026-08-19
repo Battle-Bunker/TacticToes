@@ -11,6 +11,7 @@ import {
 } from "@mui/material"
 import { GamePlayer, Team } from "@shared/types/Game"
 import React from "react"
+import { snakeLabel } from "../../utils/snakeLabel"
 
 interface ClashDialogProps {
   open: boolean
@@ -38,7 +39,7 @@ const ClashDialog: React.FC<ClashDialogProps> = ({
             if (!team) return null
             return (
               <ListItem key={gamePlayer.id}>
-                <ListItemText primary={`${team.name} ${gamePlayer.letter}`} />
+                <ListItemText primary={snakeLabel(team, gamePlayer)} />
               </ListItem>
             )
           })}

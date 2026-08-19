@@ -1,4 +1,4 @@
-import { Box, CircularProgress, Stack } from "@mui/material"
+import { Stack } from "@mui/material"
 import { Session } from "@shared/types/Game"
 import {
   doc,
@@ -8,6 +8,7 @@ import {
 } from "firebase/firestore"
 import React, { useEffect, useState, useRef } from "react"
 import { useNavigate, useParams, useLocation } from "react-router-dom"
+import { CenteredLoader } from "../components/CenteredLoader"
 import { db } from "../firebaseConfig"
 import { useUser } from "../context/UserContext"
 
@@ -20,6 +21,13 @@ const Sessionpage: React.FC = () => {
   const { userID } = useUser()
 
   useEffect(() => {
+    // The unsubscribe is assigned from inside the async body below; the
+    // effect's cleanup (returned synchronously) is what React actually calls.
+    // Previously the unsubscribe was returned from the async function itself,
+    // so cleanup never ran and the listener leaked.
+    let unsubscribe: (() => void) | null = null
+    let cancelled = false
+
     const createAndSubscribeToSession = async () => {
       if (!sessionName) {
         return
@@ -47,17 +55,30 @@ const Sessionpage: React.FC = () => {
         console.log("Error creating session or transaction failed: ", error)
       }
 
-      const unsubscribe = onSnapshot(sessionDocRef, (docSnapshot) => {
+      unsubscribe = onSnapshot(sessionDocRef, (docSnapshot) => {
         if (!docSnapshot.exists()) return
 
         const sessionData = docSnapshot.data() as Session
         setSession(sessionData)
       })
 
-      return () => unsubscribe()
+      // If the effect was cleaned up while the transaction above was still
+      // in flight, drop the just-created listener immediately.
+      if (cancelled) {
+        unsubscribe()
+        unsubscribe = null
+      }
     }
 
     createAndSubscribeToSession()
+
+    return () => {
+      cancelled = true
+      if (unsubscribe) {
+        unsubscribe()
+        unsubscribe = null
+      }
+    }
   }, [sessionName, userID])
 
   // Modified navigation effect
@@ -80,16 +101,7 @@ const Sessionpage: React.FC = () => {
       justifyContent="center"
       sx={{ height: "100vh" }}
     >
-      <Box
-        sx={{
-          display: "flex",
-          justifyContent: "center",
-          alignItems: "center",
-          height: "100vh",
-        }}
-      >
-        <CircularProgress />
-      </Box>
+      <CenteredLoader />
     </Stack>
   )
 }

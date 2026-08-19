@@ -235,7 +235,15 @@ service cloud.firestore {
 
     // =========== CENTAURS COLLECTION ===========
     match /centaurs/{centaurId} {
-      allow read: if isAuthenticated();
+      // Public GETs only: signed-out visitors (e.g. /ladder) resolve centaur
+      // names by id — ids are already public via /rankings. LISTs require
+      // auth so anonymous visitors cannot enumerate the collection (which
+      // would expose public == false centaurs and their owner uids).
+      // Client queries against this collection — including
+      // where('__name__', 'in', ...) — are list operations; only direct
+      // document reads count as gets.
+      allow get: if true;
+      allow list: if isAuthenticated();
       allow create: if isAuthenticated() &&
                        request.resource.data.owner == request.auth.uid &&
                        isValidCentaurData(request.resource.data, centaurId) &&

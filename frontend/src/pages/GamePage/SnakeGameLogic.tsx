@@ -1,6 +1,9 @@
 import { Box, SxProps, Theme } from "@mui/material"
+import { Clash } from "@shared/types/Game"
 import React from "react"
 import { GameLogicProps, GameLogicReturn } from "./GameGrid"
+import { teamColorMap } from "../../hooks/useTeamColors"
+import { getFertileTileColor } from "../../utils/fertileTileColor"
 
 const BORDER_WIDTH = 4 // Width of the outline border and corner size
 
@@ -66,12 +69,6 @@ const Cell: React.FC<CellProps> = ({ children, sx, onClick, cornerColor = "white
   </Box>
 )
 
-interface ClashInfo {
-  index: number
-  playerIDs: string[]
-  reason: string
-}
-
 interface SnakeSegmentInfo {
   hasHead: boolean
   hasTail: boolean
@@ -91,7 +88,7 @@ const GameLogic = ({
 }: GameLogicProps): GameLogicReturn => {
   const cellContentMap: { [index: number]: JSX.Element } = {}
   const cellBackgroundMap: { [index: number]: string } = {}
-  const clashesAtPosition: { [index: number]: ClashInfo } = {}
+  const clashesAtPosition: { [index: number]: Clash } = {}
   const selectedTurn = gameState.turns[selectedTurnIndex]
 
   if (!selectedTurn) {
@@ -102,8 +99,10 @@ const GameLogic = ({
     }
   }
 
-  const { playerPieces, clashes, food, hazards, walls, fertileTiles, invulnerabilityPotions, playerInvulnerabilityLevel } =
+  const { playerPieces, clashes, food, hazards, fertileTiles, invulnerabilityPotions, playerInvulnerabilityLevel } =
     selectedTurn
+  // Walls are static for the whole game and live on the game doc, not the turn.
+  const walls = gameState.walls
 
   // Map clashes to positions
   if (clashes) {
@@ -117,10 +116,11 @@ const GameLogic = ({
   const getGamePlayer = (playerID: string) =>
     gameState.setup.gamePlayers.find((gp) => gp.id === playerID)
 
+  const teamColors = teamColorMap(gameState.setup.teams)
+
   const getSnakeColor = (playerID: string): string => {
     const teamID = getGamePlayer(playerID)?.teamID
-    const team = gameState.setup.teams.find((t) => t.id === teamID)
-    return team?.color ?? "white"
+    return (teamID !== undefined ? teamColors.get(teamID) : undefined) ?? "white"
   }
 
   const getOutlineColor = (playerID: string): string => {
@@ -324,23 +324,7 @@ const GameLogic = ({
     const boardWidth = gameState.setup.boardWidth
     fertileTiles.forEach((position) => {
       if (!cellBackgroundMap[position]) {
-        const px = position % boardWidth
-        const py = Math.floor(position / boardWidth)
-        const adjacentCount = [
-          fertileSet.has(position - 1),
-          fertileSet.has(position + 1),
-          fertileSet.has(position - boardWidth),
-          fertileSet.has(position + boardWidth),
-          fertileSet.has(position - boardWidth - 1),
-          fertileSet.has(position - boardWidth + 1),
-          fertileSet.has(position + boardWidth - 1),
-          fertileSet.has(position + boardWidth + 1),
-        ].filter(Boolean).length
-        const noise = ((px * 7 + py * 13) % 5)
-        const lightness = adjacentCount >= 6 ? 78 + noise : adjacentCount >= 3 ? 82 + noise : 86 + noise
-        const saturation = adjacentCount >= 6 ? 60 : adjacentCount >= 3 ? 50 : 40
-        const hue = 42 + (noise - 2)
-        cellBackgroundMap[position] = `hsl(${hue}, ${saturation}%, ${lightness}%)`
+        cellBackgroundMap[position] = getFertileTileColor(position, boardWidth, fertileSet)
       }
     })
   }
@@ -372,7 +356,7 @@ const GameLogic = ({
   })
 
   // Place walls
-  walls?.forEach((position) => {
+  walls.forEach((position) => {
     cellContentMap[position] = (
       <Box key={`wall-${position}`} sx={commonCellStyle}>
         🧱

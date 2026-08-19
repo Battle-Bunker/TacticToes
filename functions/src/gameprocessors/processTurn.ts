@@ -333,7 +333,13 @@ export async function processTurn(
         .firestore()
         .collection(`sessions/${sessionID}/games/${gameID}/moveStatuses`)
         .doc(`${newTurnNumber}`)
-      transaction.set(moveStatusRef, {
+      // create(), not set(): this doc is only ever written here, atomically
+      // with the arrayUnion above, and the latestTurnNumber guard bails out of
+      // any re-run once that commit lands — so an existing doc means data
+      // surgery or a logic bug, and failing loudly beats silently resetting a
+      // moveStatus players may already be writing to. Mirrors startGame's
+      // create() discipline for the game doc.
+      transaction.create(moveStatusRef, {
         moveNumber: newTurnNumber,
         alivePlayerIDs: nextTurn.alivePlayers,
         movedPlayerIDs: [],
@@ -412,7 +418,7 @@ export const calculateMMRChanges = (
     const K = calculateKFactor(player.gamesPlayed)
 
     // MMR change
-    let mmrChange = K * (actualScore - expectedScore)
+    const mmrChange = K * (actualScore - expectedScore)
     mmrChanges.push(mmrChange)
   })
 

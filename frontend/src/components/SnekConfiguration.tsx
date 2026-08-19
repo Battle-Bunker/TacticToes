@@ -1,8 +1,10 @@
 import React, { useMemo } from "react"
 import { Checkbox, FormControl, FormControlLabel, IconButton, Slider, TextField, Typography, Box } from "@mui/material"
 import { RefreshCw } from "lucide-react"
-import { Team } from "../../../shared/types/Game"
+import { Team } from "@shared/types/Game"
+import { useTeamColors } from "../hooks/useTeamColors"
 import { expandTeams } from "../utils/expandTeams"
+import { getFertileTileColor } from "../utils/fertileTileColor"
 
 export interface BoardPresetData {
   fertileTiles: number[]
@@ -37,22 +39,6 @@ interface SnekConfigurationProps {
   snakesPerTeam: number
 }
 
-function getFertileTileColor(index: number, w: number, fertileSet: Set<number>): string {
-  const px = index % w
-  const py = Math.floor(index / w)
-  const adjacentCount = [
-    fertileSet.has(index - 1), fertileSet.has(index + 1),
-    fertileSet.has(index - w), fertileSet.has(index + w),
-    fertileSet.has(index - w - 1), fertileSet.has(index - w + 1),
-    fertileSet.has(index + w - 1), fertileSet.has(index + w + 1),
-  ].filter(Boolean).length
-  const noise = ((px * 7 + py * 13) % 5)
-  const lightness = adjacentCount >= 6 ? 78 + noise : adjacentCount >= 3 ? 82 + noise : 86 + noise
-  const saturation = adjacentCount >= 6 ? 60 : adjacentCount >= 3 ? 50 : 40
-  const hue = 42 + (noise - 2)
-  return `hsl(${hue}, ${saturation}%, ${lightness}%)`
-}
-
 export const SnekConfiguration: React.FC<SnekConfigurationProps> = ({
   maxTurns, maxTurnsEnabled, onMaxTurnsToggle, onMaxTurnsChange,
   hazardPercentage, onHazardPercentageChange,
@@ -71,11 +57,7 @@ export const SnekConfiguration: React.FC<SnekConfigurationProps> = ({
     [teams, snakesPerTeam],
   )
 
-  const teamColorByID = useMemo(() => {
-    const map = new Map<string, string>()
-    teams.forEach((team) => map.set(team.id, team.color))
-    return map
-  }, [teams])
+  const teamColorByID = useTeamColors(teams)
 
   const displayData = useMemo(() => {
     if (!syncedPreviewData) return null

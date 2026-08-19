@@ -1,3 +1,8 @@
+// Manually-runnable MMR simulation, NOT a test: it has no assertions and
+// writes mmr_progression_new_players.html into the functions/ directory when
+// run. Renamed to .sim.ts so jest's default *.test.ts matcher skips it.
+// To run it manually:
+//   cd functions && npx jest --testMatch "**/simulateMMRJoining.sim.ts"
 import { calculateMMRChanges } from "./processTurn"
 import * as fs from "fs"
 
@@ -35,7 +40,7 @@ describe('MMR System Simulation with New Players', () => {
             const remainingPlayers = shuffledPlayers.length - index
 
             // Determine group size (minimum 2, maximum 4)
-            let groupSize = Math.min(4, remainingPlayers)
+            const groupSize = Math.min(4, remainingPlayers)
 
             // Ensure group size is at least 2
             if (remainingPlayers === 1 && groups.length > 0) {

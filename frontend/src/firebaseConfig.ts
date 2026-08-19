@@ -44,7 +44,9 @@ export const firebaseConfig = {
 const app = initializeApp(firebaseConfig)
 export const db = getFirestore(app)
 export const functions = getFunctions(app, functionsRegion)
-export const analytics = getAnalytics(app)
+// Nothing imports the Analytics instance, but getAnalytics(app) initializes
+// Firebase Analytics collection as a side effect, so the call stays.
+getAnalytics(app)
 export const auth = getAuth(app)
 
 export const provider = new GoogleAuthProvider()

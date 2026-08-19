@@ -86,6 +86,29 @@ async function startCentaurClient(centaur) {
   return { app, db: getFirestore(app) }
 }
 
+// Random legal-ish move: any cell orthogonally adjacent to the head,
+// preferring cells that aren't perimeter walls or snake bodies so the random
+// walk survives long enough to exercise the whole lifecycle.
+function pickMove(game, turn, headIndex) {
+  const w = game.setup.boardWidth
+  const h = game.setup.boardHeight
+  const x = headIndex % w
+  const y = Math.floor(headIndex / w)
+  const adjacent = [
+    x > 0 ? headIndex - 1 : null,
+    x < w - 1 ? headIndex + 1 : null,
+    y > 0 ? headIndex - w : null,
+    y < h - 1 ? headIndex + w : null,
+  ].filter((i) => i !== null)
+  const blocked = new Set()
+  for (let cx = 0; cx < w; cx++) { blocked.add(cx); blocked.add((h - 1) * w + cx) }
+  for (let cy = 0; cy < h; cy++) { blocked.add(cy * w); blocked.add(cy * w + w - 1) }
+  Object.values(turn.playerPieces).forEach((body) => body.forEach((p) => blocked.add(p)))
+  const safe = adjacent.filter((i) => !blocked.has(i))
+  const pool = safe.length > 0 ? safe : adjacent
+  return pool[Math.floor(Math.random() * pool.length)]
+}
+
 function driveCentaur(client, centaur, sessionID, gameID, state) {
   const gameRef = doc(client.db, `sessions/${sessionID}/games/${gameID}`)
   const handled = new Set()
@@ -105,9 +128,10 @@ function driveCentaur(client, centaur, sessionID, gameID, state) {
       (gp) => gp.teamID === centaur.id && turn.alivePlayers.includes(gp.id)
     )
     for (const snake of mySnakes) {
-      const allowed = turn.allowedMoves[snake.id] || []
-      if (allowed.length === 0) continue
-      const move = allowed[Math.floor(Math.random() * allowed.length)]
+      const head = turn.playerPieces[snake.id]?.[0]
+      if (head === undefined) continue
+      const move = pickMove(game, turn, head)
+      if (move === undefined) continue
       await addDoc(collection(client.db, `sessions/${sessionID}/games/${gameID}/privateMoves`), {
         gameID, moveNumber: turnNumber, playerID: snake.id, move,
         timestamp: serverTimestamp(),
@@ -185,7 +209,7 @@ async function main() {
   await adb.doc(`sessions/${sessionID}/setups/${gameID}`).update({ startRequested: true })
   log("start requested")
 
-  // Wait for the game to finish (allowedMoves random walk + turn expiry).
+  // Wait for the game to finish (adjacency random walk + turn expiry).
   const deadline = Date.now() + 8 * 60 * 1000
   while (!state.winners && Date.now() < deadline) await sleep(2000)
   unsubA(); unsubB()

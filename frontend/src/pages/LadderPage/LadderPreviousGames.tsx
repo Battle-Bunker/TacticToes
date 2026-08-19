@@ -14,7 +14,7 @@ import {
 } from '@mui/material'
 import { GameResult } from '@shared/types/Game'
 import React from 'react'
-import { useNavigate } from 'react-router-dom'
+import { CentaurLink } from '../../components/CentaurLink'
 import { useLadder } from './LadderContext'
 import { usePlayerInfo } from './usePlayerInfo'
 import { baseCentaurId, formatCentaurName, ordinalSuffix } from './utils'
@@ -26,7 +26,6 @@ const formatDate = (date: Date) => {
 }
 
 export const LadderPreviousGames: React.FC = () => {
-    const navigate = useNavigate()
     const { selectedRanking, loadingSelected } = useLadder()
     const gameHistory = [...(selectedRanking?.gameHistory ?? [])]
         .reverse()
@@ -100,22 +99,16 @@ export const LadderPreviousGames: React.FC = () => {
                                                 {game.opponents.map((opp) => {
                                                     const opponentId = baseCentaurId(opp.playerID)
                                                     return (
-                                                        <Box
+                                                        <CentaurLink
                                                             key={opp.playerID}
-                                                            onClick={() => navigate(`/ladder/${opponentId}`)}
-                                                            sx={{
-                                                                cursor: 'pointer',
-                                                                '&:hover': {
-                                                                    opacity: 0.7,
-                                                                },
-                                                                display: 'inline-block',
-                                                            }}
+                                                            centaurId={opponentId}
+                                                            style={{ display: 'inline-block' }}
                                                         >
                                                             {formatCentaurName(
                                                                 centaurs[opponentId],
                                                                 opp.playerID
                                                             )}
-                                                        </Box>
+                                                        </CentaurLink>
                                                     )
                                                 })}
                                             </Stack>

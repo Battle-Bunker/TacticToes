@@ -6,7 +6,6 @@ import {
   deleteField,
   doc,
   getDocs,
-  onSnapshot,
   query,
   Timestamp,
   updateDoc,
@@ -14,9 +13,10 @@ import {
 } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { CentaurLink } from "../../components/CentaurLink";
 import { useUser } from "../../context/UserContext";
 import { db, functions } from "../../firebaseConfig";
+import { useFirestoreSubscription } from "../../hooks/useFirestoreSubscription";
 import { SnekConfiguration } from "../../components/SnekConfiguration";
 import { TeamList } from "../../components/TeamList";
 import { TeamSnekRules } from "../../constants/Rules";
@@ -36,7 +36,9 @@ import {
   SelectChangeEvent,
   Slider,
   Stack,
+  SxProps,
   TextField,
+  Theme,
   Typography,
 } from "@mui/material";
 import { Centaur, Team } from "@shared/types/Game";
@@ -77,36 +79,33 @@ const useCentaurStatuses = (
   );
   const ackedIDsRef = useRef<string[]>([]);
 
+  // Reset the tracked acks whenever the setup being watched changes; the
+  // subscription below re-populates them.
   useEffect(() => {
     if (!gameID) return;
     setStatuses({});
     ackedIDsRef.current = [];
-    const statusesRef = collection(
-      db,
-      "sessions",
-      sessionName,
-      "setups",
-      gameID,
-      "centaurStatus",
-    );
-    const unsubscribe = onSnapshot(
-      statusesRef,
-      (snapshot) => {
-        const next: { [centaurId: string]: boolean } = {};
-        const acked: string[] = [];
-        snapshot.forEach((docSnap) => {
-          next[docSnap.id] = docSnap.data().ready === true;
-          acked.push(docSnap.id);
-        });
-        setStatuses(next);
-        ackedIDsRef.current = acked;
-      },
-      (error) => {
-        console.error("Error in centaurStatus subscription:", error);
-      },
-    );
-    return unsubscribe;
   }, [sessionName, gameID]);
+
+  useFirestoreSubscription({
+    buildTarget: () =>
+      gameID
+        ? collection(db, "sessions", sessionName, "setups", gameID, "centaurStatus")
+        : null,
+    deps: [sessionName, gameID],
+    logLabel: "centaurStatus",
+    includeMetadataChanges: false,
+    onSnapshot: (snapshot) => {
+      const next: { [centaurId: string]: boolean } = {};
+      const acked: string[] = [];
+      snapshot.forEach((docSnap) => {
+        next[docSnap.id] = docSnap.data().ready === true;
+        acked.push(docSnap.id);
+      });
+      setStatuses(next);
+      ackedIDsRef.current = acked;
+    },
+  });
 
   const recheck = useCallback(async () => {
     // Only existing ack docs can go stale; absent docs already read as
@@ -124,6 +123,169 @@ const useCentaurStatuses = (
   }, [sessionName, gameID]);
 
   return { statuses, recheck };
+};
+
+// The bordered settings panel every section of the setup page sits in: an
+// outlined FormControl whose shrunk label floats over a 2px-bordered box.
+// Per-panel styling (padding, flex layout, the centaur list's label zIndex)
+// comes in via labelSx/contentSx so each panel keeps its exact look.
+const SettingsPanel: React.FC<{
+  label: string;
+  labelSx?: SxProps<Theme>;
+  contentSx?: SxProps<Theme>;
+  children: React.ReactNode;
+}> = ({ label, labelSx, contentSx, children }) => (
+  <FormControl fullWidth variant="outlined" sx={{ mt: 2 }}>
+    <InputLabel
+      shrink
+      sx={[
+        { backgroundColor: "white", px: 1 },
+        ...(Array.isArray(labelSx) ? labelSx : [labelSx]),
+      ]}
+    >
+      {label}
+    </InputLabel>
+    <Box
+      sx={[
+        {
+          border: "2px solid black",
+          borderRadius: "0px",
+          minHeight: "56px",
+        },
+        ...(Array.isArray(contentSx) ? contentSx : [contentSx]),
+      ]}
+    >
+      {children}
+    </Box>
+  </FormControl>
+);
+
+// The searchable centaur list body: centaurs filtered by the search query,
+// grouped by owner (current user first), each row linking to the ladder with
+// an Add button.
+const CentaurPicker: React.FC<{
+  centaurs: Centaur[];
+  searchQuery: string;
+  userID: string;
+  ownerNames: Record<string, string>;
+  teams: Team[];
+  started: boolean;
+  isConfigDisabled: boolean;
+  addingCentaur: boolean;
+  onAddCentaur: (centaur: Centaur) => void;
+}> = ({
+  centaurs,
+  searchQuery,
+  userID,
+  ownerNames,
+  teams,
+  started,
+  isConfigDisabled,
+  addingCentaur,
+  onAddCentaur,
+}) => {
+  const searchLower = searchQuery.toLowerCase();
+  const filtered = searchQuery
+    ? centaurs.filter((centaur) => centaur.name.toLowerCase().includes(searchLower))
+    : centaurs;
+  const grouped: Record<string, typeof centaurs> = {};
+  filtered.forEach((centaur) => {
+    if (!grouped[centaur.owner]) grouped[centaur.owner] = [];
+    grouped[centaur.owner].push(centaur);
+  });
+  Object.values(grouped).forEach((group) =>
+    group.sort((a, b) => a.name.localeCompare(b.name)),
+  );
+  const ownerOrder = Object.keys(grouped).sort((a, b) => {
+    if (a === userID) return -1;
+    if (b === userID) return 1;
+    const nameA = ownerNames[a] || a;
+    const nameB = ownerNames[b] || b;
+    return nameA.localeCompare(nameB);
+  });
+
+  if (ownerOrder.length === 0 && searchQuery) {
+    return (
+      <Typography sx={{ px: 2, py: 2, color: "#999", fontSize: "0.9rem" }}>
+        No centaurs match "{searchQuery}"
+      </Typography>
+    );
+  }
+
+  return (
+    <>
+      {ownerOrder.map((ownerID) => (
+        <Box key={ownerID}>
+          <Box
+            sx={{
+              display: "flex",
+              alignItems: "center",
+              px: 2,
+              py: 1,
+              backgroundColor: "#f0f0f0",
+              borderBottom: "1px solid #ddd",
+              position: "sticky",
+              top: 0,
+              zIndex: 1,
+            }}
+          >
+            <Typography
+              sx={{ fontSize: "0.8rem", fontWeight: 600, color: "#555" }}
+            >
+              {ownerID === userID
+                ? `${ownerNames[ownerID] || "You"} (You)`
+                : ownerNames[ownerID] || ownerID}
+            </Typography>
+          </Box>
+          {grouped[ownerID].map((centaur) => {
+            const isInGame = teams.some((team) => team.id === centaur.id);
+
+            return (
+              <Box
+                key={centaur.id}
+                title={centaur.name}
+                sx={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 1,
+                  px: 2,
+                  py: 1,
+                  borderBottom: "1px solid #eee",
+                }}
+              >
+                <CentaurLink
+                  centaurId={centaur.id}
+                  style={{
+                    fontWeight: 500,
+                    flexGrow: 1,
+                    wordBreak: "break-word",
+                  }}
+                >
+                  {centaur.name}
+                  {isInGame && " (IN GAME)"}
+                </CentaurLink>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  disabled={
+                    isInGame ||
+                    started ||
+                    isConfigDisabled ||
+                    addingCentaur ||
+                    teams.length >= MAX_TEAMS
+                  }
+                  onClick={() => onAddCentaur(centaur)}
+                  sx={{ flexShrink: 0 }}
+                >
+                  Add
+                </Button>
+              </Box>
+            );
+          })}
+        </Box>
+      ))}
+    </>
+  );
 };
 
 const GameSetup: React.FC = () => {
@@ -231,14 +393,23 @@ const GameSetup: React.FC = () => {
     };
   }, [ownerIDs.join(",")]);
 
-  const gameDocRef = doc(db, "sessions", sessionName, "setups", gameID);
-  const sessionDocRef = doc(db, "sessions", sessionName);
+  const gameDocRef = useMemo(
+    () => doc(db, "sessions", sessionName, "setups", gameID),
+    [sessionName, gameID],
+  );
+  const sessionDocRef = useMemo(
+    () => doc(db, "sessions", sessionName),
+    [sessionName],
+  );
 
   const handleAbdicate = async () => {
     await updateDoc(sessionDocRef, { owner: null });
   };
 
-  const generatePreviewBoardFn = httpsCallable(functions, "generatePreviewBoard");
+  const generatePreviewBoardFn = useMemo(
+    () => httpsCallable(functions, "generatePreviewBoard"),
+    [],
+  );
   const [isGeneratingPreview, setIsGeneratingPreview] = useState(false);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const usePreviewBoardRef = useRef(usePreviewBoard);
@@ -262,7 +433,9 @@ const GameSetup: React.FC = () => {
         setIsGeneratingPreview(false);
       }
     }
-  }, [sessionName, gameID]);
+    // gameDocRef/generatePreviewBoardFn are memoized above, so listing them
+    // changes nothing about when this callback is recreated.
+  }, [sessionName, gameID, gameDocRef, generatePreviewBoardFn]);
 
   const debouncedRegeneratePreview = useCallback(() => {
     if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
@@ -428,7 +601,53 @@ const GameSetup: React.FC = () => {
     debouncedRegeneratePreview();
   };
 
-  // Handle max turns configuration
+  // Shared shape of the simple setup-field handlers: sanitize, mirror into
+  // local state, write the one field, optionally regenerate the preview.
+  // Plain factories (not hooks) so they can live beside the handlers below
+  // the early returns; handlers were recreated per render before too.
+  const setupNumberField = (
+    name: string,
+    {
+      min = -Infinity,
+      max = Infinity,
+      round = (v: number) => v,
+      regeneratesPreview = false,
+      setLocal,
+    }: {
+      min?: number;
+      max?: number;
+      round?: (value: number) => number;
+      regeneratesPreview?: boolean;
+      setLocal?: (value: number) => void;
+    },
+  ) => {
+    return async (raw: number) => {
+      const sanitizedValue = Math.max(min, Math.min(max, round(raw)));
+      setLocal?.(sanitizedValue);
+      await updateDoc(gameDocRef, { [name]: sanitizedValue });
+      if (regeneratesPreview) debouncedRegeneratePreview();
+    };
+  };
+
+  const setupToggleField = (
+    name: string,
+    {
+      regeneratesPreview = false,
+      setLocal,
+    }: {
+      regeneratesPreview?: boolean;
+      setLocal?: (value: boolean) => void;
+    } = {},
+  ) => {
+    return async (enabled: boolean) => {
+      setLocal?.(enabled);
+      await updateDoc(gameDocRef, { [name]: enabled });
+      if (regeneratesPreview) debouncedRegeneratePreview();
+    };
+  };
+
+  // Handle max turns configuration (writes only while the limit is enabled,
+  // so it stays hand-written)
   const handleMaxTurnsChange = async (newMaxTurns: number) => {
     const sanitizedValue = Math.min(1000, Math.max(1, newMaxTurns));
     setMaxTurns(sanitizedValue);
@@ -456,78 +675,60 @@ const GameSetup: React.FC = () => {
     }
   };
 
-  // Handle hazard percentage configuration
-  const handleHazardPercentageChange = async (newHazardPercentage: number) => {
-    const sanitizedValue = Math.max(0, Math.min(100, newHazardPercentage));
-    setHazardPercentage(sanitizedValue);
-    await updateDoc(gameDocRef, {
-      hazardPercentage: sanitizedValue,
-    });
-    debouncedRegeneratePreview();
-  };
+  const handleHazardPercentageChange = setupNumberField("hazardPercentage", {
+    min: 0,
+    max: 100,
+    regeneratesPreview: true,
+    setLocal: setHazardPercentage,
+  });
 
-  const handleFertileGroundToggle = async (enabled: boolean) => {
-    setFertileGroundEnabled(enabled);
-    await updateDoc(gameDocRef, {
-      fertileGroundEnabled: enabled,
-    });
-    debouncedRegeneratePreview();
-  };
+  const handleFertileGroundToggle = setupToggleField("fertileGroundEnabled", {
+    regeneratesPreview: true,
+    setLocal: setFertileGroundEnabled,
+  });
 
-  const handleFertileGroundDensityChange = async (newDensity: number) => {
-    const sanitizedValue = Math.max(5, Math.min(80, newDensity));
-    setFertileGroundDensity(sanitizedValue);
-    await updateDoc(gameDocRef, {
-      fertileGroundDensity: sanitizedValue,
-    });
-    debouncedRegeneratePreview();
-  };
+  const handleFertileGroundDensityChange = setupNumberField("fertileGroundDensity", {
+    min: 5,
+    max: 80,
+    regeneratesPreview: true,
+    setLocal: setFertileGroundDensity,
+  });
 
-  const handleFertileGroundClusteringChange = async (newClustering: number) => {
-    const sanitizedValue = Math.max(1, Math.min(20, newClustering));
-    setFertileGroundClustering(sanitizedValue);
-    await updateDoc(gameDocRef, {
-      fertileGroundClustering: sanitizedValue,
-    });
-    debouncedRegeneratePreview();
-  };
+  const handleFertileGroundClusteringChange = setupNumberField("fertileGroundClustering", {
+    min: 1,
+    max: 20,
+    regeneratesPreview: true,
+    setLocal: setFertileGroundClustering,
+  });
 
-  const handleUsePreviewBoardChange = async (enabled: boolean) => {
-    await updateDoc(gameDocRef, {
-      usePreviewBoard: enabled,
-    });
-  };
+  const handleUsePreviewBoardChange = setupToggleField("usePreviewBoard");
 
-  const handleFoodSpawnRateChange = async (newRate: number) => {
-    const sanitizedValue = Math.max(0, Math.min(5, Math.round(newRate * 4) / 4));
-    setFoodSpawnRate(sanitizedValue);
-    await updateDoc(gameDocRef, {
-      foodSpawnRate: sanitizedValue,
-    });
-  };
+  const handleFoodSpawnRateChange = setupNumberField("foodSpawnRate", {
+    min: 0,
+    max: 5,
+    round: (v) => Math.round(v * 4) / 4,
+    setLocal: setFoodSpawnRate,
+  });
 
-  const handleTeamClustersToggle = async (enabled: boolean) => {
-    setTeamClustersEnabled(enabled);
-    await updateDoc(gameDocRef, {
-      teamClustersEnabled: enabled,
-    });
-    debouncedRegeneratePreview();
-  };
+  const handleTeamClustersToggle = setupToggleField("teamClustersEnabled", {
+    regeneratesPreview: true,
+    setLocal: setTeamClustersEnabled,
+  });
 
-  const handleInvulnerabilityPotionToggle = async (enabled: boolean) => {
-    setInvulnerabilityPotionEnabled(enabled);
-    await updateDoc(gameDocRef, {
-      invulnerabilityPotionEnabled: enabled,
-    });
-  };
+  const handleInvulnerabilityPotionToggle = setupToggleField(
+    "invulnerabilityPotionEnabled",
+    { setLocal: setInvulnerabilityPotionEnabled },
+  );
 
-  const handleInvulnerabilityPotionSpawnRateChange = async (newRate: number) => {
-    const sanitizedValue = Math.max(0.01, Math.min(0.2, Math.round(newRate * 100) / 100));
-    setInvulnerabilityPotionSpawnRate(sanitizedValue);
-    await updateDoc(gameDocRef, {
-      invulnerabilityPotionSpawnRate: sanitizedValue,
-    });
-  };
+  const handleInvulnerabilityPotionSpawnRateChange = setupNumberField(
+    "invulnerabilityPotionSpawnRate",
+    {
+      min: 0.01,
+      max: 0.2,
+      round: (v) => Math.round(v * 100) / 100,
+      setLocal: setInvulnerabilityPotionSpawnRate,
+    },
+  );
 
   const handleTournamentModeToggle = async (enabled: boolean) => {
     setTournamentMode(enabled);
@@ -548,17 +749,17 @@ const GameSetup: React.FC = () => {
     }
   };
 
-  const handleRemainingRoundsChange = async (value: number) => {
-    const sanitized = Math.max(0, Math.round(value));
-    setRemainingRounds(sanitized);
-    await updateDoc(gameDocRef, { remainingRounds: sanitized });
-  };
+  const handleRemainingRoundsChange = setupNumberField("remainingRounds", {
+    min: 0,
+    round: Math.round,
+    setLocal: setRemainingRounds,
+  });
 
-  const handleInterludeDurationChange = async (value: number) => {
-    const sanitized = Math.max(0, Math.round(value));
-    setInterludeDuration(sanitized);
-    await updateDoc(gameDocRef, { interludeDuration: sanitized });
-  };
+  const handleInterludeDurationChange = setupNumberField("interludeDuration", {
+    min: 0,
+    round: Math.round,
+    setLocal: setInterludeDuration,
+  });
 
   const handleScheduledStartTimeSet = async () => {
     if (!scheduledStartInput) return;
@@ -573,14 +774,13 @@ const GameSetup: React.FC = () => {
     await updateDoc(gameDocRef, { scheduledStartTime: deleteField() });
   };
 
-  // Handle max turn time configuration
-  const handleSecondsPerTurnChange = async (newSeconds: number) => {
-    const sanitizedValue = Math.max(0.5, Math.min(300, newSeconds)); // Min 0.5s, max 5 minutes
-    setSecondsPerTurn(`${sanitizedValue}`);
-    await updateDoc(gameDocRef, {
-      maxTurnTime: sanitizedValue,
-    });
-  };
+  // Handle max turn time configuration (min 0.5s, max 5 minutes; the local
+  // mirror is the text-field string)
+  const handleSecondsPerTurnChange = setupNumberField("maxTurnTime", {
+    min: 0.5,
+    max: 300,
+    setLocal: (v) => setSecondsPerTurn(`${v}`),
+  });
 
   // Handler for selecting board size
   const handleBoardSizeChange = async (event: SelectChangeEvent<BoardSize>) => {
@@ -824,41 +1024,28 @@ const GameSetup: React.FC = () => {
       </Box>
 
       {/* Game rules */}
-      <FormControl fullWidth variant="outlined" sx={{ mt: 2 }}>
-        <InputLabel shrink sx={{ backgroundColor: "white", px: 1 }}>
-          Rules
-        </InputLabel>
-        <Box
-          sx={{
-            border: "2px solid black",
-            padding: 2,
-            borderRadius: "0px",
-            minHeight: "56px",
-            display: "flex",
-            alignItems: "start",
-            flexDirection: "column",
-            fontFamily: "monospace",
-            whiteSpace: "pre-wrap",
-          }}
-        >
-          <TeamSnekRules />
-        </Box>
-      </FormControl>
+      <SettingsPanel
+        label="Rules"
+        contentSx={{
+          padding: 2,
+          display: "flex",
+          alignItems: "start",
+          flexDirection: "column",
+          fontFamily: "monospace",
+          whiteSpace: "pre-wrap",
+        }}
+      >
+        <TeamSnekRules />
+      </SettingsPanel>
       {/* Tournament Mode */}
-      <FormControl fullWidth variant="outlined" sx={{ mt: 2 }}>
-        <InputLabel shrink sx={{ backgroundColor: "white", px: 1 }}>
-          Tournament Mode
-        </InputLabel>
-        <Box
-          sx={{
-            border: "2px solid black",
-            padding: 2,
-            borderRadius: "0px",
-            minHeight: "56px",
-            display: "flex",
-            flexDirection: "column",
-          }}
-        >
+      <SettingsPanel
+        label="Tournament Mode"
+        contentSx={{
+          padding: 2,
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
           <FormControlLabel
             control={
               <Checkbox
@@ -927,50 +1114,33 @@ const GameSetup: React.FC = () => {
               </Box>
             </Stack>
           )}
-        </Box>
-      </FormControl>
+      </SettingsPanel>
 
       {/* Teams */}
-      <FormControl fullWidth variant="outlined" sx={{ mt: 2 }}>
-        <InputLabel shrink sx={{ backgroundColor: "white", px: 1 }}>
-          Teams
-        </InputLabel>
-        <Box
-          sx={{
-            border: "2px solid black",
-            padding: 1,
-            borderRadius: "0px",
-            minHeight: "56px",
-          }}
-        >
-          <TeamList
-            teams={gameSetup.teams}
-            onColorChange={handleTeamColorChange}
-            onRemove={handleRemoveTeam}
-            disabled={started || isConfigDisabled}
-            centaurStatuses={centaurStatuses}
-            onRecheck={recheckCentaurHealth}
-            recheckDisabled={started || isConfigDisabled}
-          />
-        </Box>
-      </FormControl>
+      {/* Deliberate drift kept: this panel pads 1 where the others pad 2. */}
+      <SettingsPanel label="Teams" contentSx={{ padding: 1 }}>
+        <TeamList
+          teams={gameSetup.teams}
+          onColorChange={handleTeamColorChange}
+          onRemove={handleRemoveTeam}
+          disabled={started || isConfigDisabled}
+          centaurStatuses={centaurStatuses}
+          onRecheck={recheckCentaurHealth}
+          recheckDisabled={started || isConfigDisabled}
+        />
+      </SettingsPanel>
 
       {/* Available Centaurs */}
       {centaurs.length > 0 && (
-        <FormControl fullWidth variant="outlined" sx={{ mt: 2 }}>
-          <InputLabel shrink sx={{ backgroundColor: "white", px: 1, zIndex: 2 }}>
-            Available Centaurs
-          </InputLabel>
-          <Box
-            sx={{
-              border: "2px solid black",
-              borderRadius: "0px",
-              minHeight: "56px",
-              maxHeight: "300px",
-              display: "flex",
-              flexDirection: "column",
-            }}
-          >
+        <SettingsPanel
+          label="Available Centaurs"
+          labelSx={{ zIndex: 2 }}
+          contentSx={{
+            maxHeight: "300px",
+            display: "flex",
+            flexDirection: "column",
+          }}
+        >
             <Box sx={{ px: 1, pt: 1, pb: 0.5, borderBottom: "1px solid #ddd", flexShrink: 0 }}>
               <TextField
                 size="small"
@@ -1003,134 +1173,23 @@ const GameSetup: React.FC = () => {
               />
             </Box>
             <Box sx={{ overflowY: "auto", flexGrow: 1 }}>
-            {(() => {
-              const searchLower = centaurSearchQuery.toLowerCase();
-              const filtered = centaurSearchQuery
-                ? centaurs.filter((centaur) => centaur.name.toLowerCase().includes(searchLower))
-                : centaurs;
-              const grouped: Record<string, typeof centaurs> = {};
-              filtered.forEach((centaur) => {
-                if (!grouped[centaur.owner]) grouped[centaur.owner] = [];
-                grouped[centaur.owner].push(centaur);
-              });
-              Object.values(grouped).forEach((group) =>
-                group.sort((a, b) => a.name.localeCompare(b.name)),
-              );
-              const ownerOrder = Object.keys(grouped).sort((a, b) => {
-                if (a === userID) return -1;
-                if (b === userID) return 1;
-                const nameA = ownerNames[a] || a;
-                const nameB = ownerNames[b] || b;
-                return nameA.localeCompare(nameB);
-              });
-
-              if (ownerOrder.length === 0 && centaurSearchQuery) {
-                return (
-                  <Typography sx={{ px: 2, py: 2, color: "#999", fontSize: "0.9rem" }}>
-                    No centaurs match "{centaurSearchQuery}"
-                  </Typography>
-                );
-              }
-
-              return ownerOrder.map((ownerID) => (
-                <Box key={ownerID}>
-                  <Box
-                    sx={{
-                      display: "flex",
-                      alignItems: "center",
-                      px: 2,
-                      py: 1,
-                      backgroundColor: "#f0f0f0",
-                      borderBottom: "1px solid #ddd",
-                      position: "sticky",
-                      top: 0,
-                      zIndex: 1,
-                    }}
-                  >
-                    <Typography
-                      sx={{ fontSize: "0.8rem", fontWeight: 600, color: "#555" }}
-                    >
-                      {ownerID === userID
-                        ? `${ownerNames[ownerID] || "You"} (You)`
-                        : ownerNames[ownerID] || ownerID}
-                    </Typography>
-                  </Box>
-                  {grouped[ownerID].map((centaur) => {
-                    const isInGame = gameSetup.teams.some(
-                      (team) => team.id === centaur.id,
-                    );
-
-                    return (
-                      <Box
-                        key={centaur.id}
-                        title={centaur.name}
-                        sx={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 1,
-                          px: 2,
-                          py: 1,
-                          borderBottom: "1px solid #eee",
-                        }}
-                      >
-                        <Link
-                          to={`/ladder/${centaur.id}`}
-                          style={{
-                            fontWeight: 500,
-                            flexGrow: 1,
-                            wordBreak: "break-word",
-                            color: "inherit",
-                            textDecoration: "none",
-                          }}
-                          onMouseEnter={(e: React.MouseEvent<HTMLAnchorElement>) => {
-                            e.currentTarget.style.textDecoration = "underline";
-                          }}
-                          onMouseLeave={(e: React.MouseEvent<HTMLAnchorElement>) => {
-                            e.currentTarget.style.textDecoration = "none";
-                          }}
-                        >
-                          {centaur.name}
-                          {isInGame && " (IN GAME)"}
-                        </Link>
-                        <Button
-                          size="small"
-                          variant="outlined"
-                          disabled={
-                            isInGame ||
-                            started ||
-                            isConfigDisabled ||
-                            addingCentaur ||
-                            gameSetup.teams.length >= MAX_TEAMS
-                          }
-                          onClick={() => handleAddCentaur(centaur)}
-                          sx={{ flexShrink: 0 }}
-                        >
-                          Add
-                        </Button>
-                      </Box>
-                    );
-                  })}
-                </Box>
-              ));
-            })()}
+              <CentaurPicker
+                centaurs={centaurs}
+                searchQuery={centaurSearchQuery}
+                userID={userID}
+                ownerNames={ownerNames}
+                teams={gameSetup.teams}
+                started={started}
+                isConfigDisabled={isConfigDisabled}
+                addingCentaur={addingCentaur}
+                onAddCentaur={handleAddCentaur}
+              />
             </Box>
-          </Box>
-        </FormControl>
+        </SettingsPanel>
       )}
 
       {/* Snek Configuration */}
-      <FormControl fullWidth variant="outlined" sx={{ mt: 2 }}>
-        <InputLabel shrink sx={{ backgroundColor: "white", px: 1 }}>
-          Snek Configuration
-        </InputLabel>
-        <Box
-          sx={{
-            border: "2px solid black",
-            padding: 2,
-            borderRadius: "0px",
-            minHeight: "56px",
-          }}
-        >
+      <SettingsPanel label="Snek Configuration" contentSx={{ padding: 2 }}>
           <Box sx={isConfigDisabled ? { pointerEvents: 'none', opacity: 0.6 } : {}}>
             <SnekConfiguration
               maxTurns={maxTurns}
@@ -1167,52 +1226,38 @@ const GameSetup: React.FC = () => {
               snakesPerTeam={gameSetup.snakesPerTeam}
             />
           </Box>
-        </Box>
-      </FormControl>
+      </SettingsPanel>
 
       {/* Team Cluster */}
-      <FormControl fullWidth variant="outlined" sx={{ mt: 2 }}>
-        <InputLabel shrink sx={{ backgroundColor: "white", px: 1 }}>
-          Team Cluster
-        </InputLabel>
-        <Box
-          sx={{
-            border: "2px solid black",
-            padding: 2,
-            borderRadius: "0px",
-            minHeight: "56px",
-            display: "flex",
-            alignItems: "center",
-          }}
-        >
-          <FormControlLabel
-            control={
-              <Checkbox
-                checked={teamClustersEnabled}
-                onChange={(e) => handleTeamClustersToggle(e.target.checked)}
-                disabled={started || isConfigDisabled}
-              />
-            }
-            label="Team cluster"
-          />
-        </Box>
-      </FormControl>
+      <SettingsPanel
+        label="Team Cluster"
+        contentSx={{
+          padding: 2,
+          display: "flex",
+          alignItems: "center",
+        }}
+      >
+        <FormControlLabel
+          control={
+            <Checkbox
+              checked={teamClustersEnabled}
+              onChange={(e) => handleTeamClustersToggle(e.target.checked)}
+              disabled={started || isConfigDisabled}
+            />
+          }
+          label="Team cluster"
+        />
+      </SettingsPanel>
 
       {/* Invulnerability Potions */}
-      <FormControl fullWidth variant="outlined" sx={{ mt: 2 }}>
-        <InputLabel shrink sx={{ backgroundColor: "white", px: 1 }}>
-          (In)vulnerability Potions
-        </InputLabel>
-        <Box
-          sx={{
-            border: "2px solid black",
-            padding: 2,
-            borderRadius: "0px",
-            minHeight: "56px",
-            display: "flex",
-            flexDirection: "column",
-          }}
-        >
+      <SettingsPanel
+        label="(In)vulnerability Potions"
+        contentSx={{
+          padding: 2,
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
           <FormControlLabel
             control={
               <Checkbox
@@ -1240,8 +1285,7 @@ const GameSetup: React.FC = () => {
               />
             </Box>
           )}
-        </Box>
-      </FormControl>
+      </SettingsPanel>
     </Stack>
   );
 };
