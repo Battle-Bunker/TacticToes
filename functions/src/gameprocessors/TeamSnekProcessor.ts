@@ -11,6 +11,7 @@ import {
   toXY,
 } from "./chess/pieceMoves"
 import { SimUnit, runChessTurnSim } from "./chess/chessTurnSim"
+import { assignCellsToSlices, sliceDistance } from "../utils/radialSlices"
 
 export interface SnakeGameState {
   // Input data
@@ -1972,14 +1973,13 @@ export class TeamSnekProcessor {
     return !!this.gameSetup.teamClustersEnabled
   }
 
+  // Radial team spawns: the board is cut from its centre into one equal-angle
+  // pie slice per team, the whole partition sitting at a random rotation so
+  // wedges differ between games. Each team's units then take random legal
+  // cells inside the team's own slice.
   private generateTeamClusterStartingPositions(): { x: number; y: number }[] {
     const { boardWidth, boardHeight, gamePlayers, teams } = this.gameSetup
     const minDistance = 2
-    const intraTeamSpacing = 2
-    const ringInset = Math.max(
-      2,
-      Math.floor(Math.min(boardWidth, boardHeight) / 2) - 6,
-    )
 
     const teamMap = new Map<string, GamePlayer[]>()
     gamePlayers.forEach((player) => {
@@ -1990,100 +1990,98 @@ export class TeamSnekProcessor {
     })
 
     const teamIDs = this.getOrderedTeamIDs(teamMap, teams)
-    const teamCount = teamIDs.length
-    if (teamCount === 0) {
+    const sliceCount = teamIDs.length
+    if (sliceCount === 0) {
       return []
     }
 
-    const ringPositions = this.getSquareRingPositions(
-      boardWidth,
-      boardHeight,
-      ringInset,
-    )
-    if (ringPositions.length === 0) {
+    // Board capacity guard: every unit needs a legal spawn cell of its own.
+    const spawnCells = this.getSpawnCells(boardWidth, boardHeight)
+    if (spawnCells.length < gamePlayers.length) {
       return []
     }
 
-    const minGap = 2
-    const totalPlayers = teamIDs.reduce(
-      (sum, teamID) => sum + (teamMap.get(teamID)?.length || 0),
-      0,
-    )
-    if (totalPlayers === 0) {
-      return []
-    }
-
-    const maxAttempts = Math.min(12, ringPositions.length)
+    const maxAttempts = 8
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      const teamInfo = this.shuffleArray(
-        teamIDs.map((teamID) => ({
-          teamID,
-          players: this.shuffleArray(teamMap.get(teamID) || []),
-        })),
+      const rotation = Math.random() * Math.PI * 2
+      const slices = assignCellsToSlices(
+        spawnCells,
+        boardWidth,
+        boardHeight,
+        sliceCount,
+        rotation,
       )
 
-      const availableSlots = ringPositions.length - teamCount * minGap
-      if (availableSlots <= 0) {
-        return []
-      }
+      // Teams draw slices at random, so a team is not tied to one wedge.
+      const sliceForTeam = this.shuffleArray(slices.map((_cells, index) => index))
+      const orderedTeams = this.shuffleArray(teamIDs)
 
-      const segmentLengths = this.calculateTeamSegmentLengths(
-        teamInfo.map((team) => team.players.length),
-        availableSlots,
-        intraTeamSpacing,
-      )
-      if (!segmentLengths) {
-        return []
-      }
-
-      const rotation = Math.floor(Math.random() * ringPositions.length)
-      const rotatedRing = [
-        ...ringPositions.slice(rotation),
-        ...ringPositions.slice(0, rotation),
-      ]
-
-      const segments = this.buildTeamSegments(teamInfo, segmentLengths, rotatedRing, minGap)
-      if (!segments) {
-        continue
-      }
-
-      const placedPositions = new Map<string, { x: number; y: number }>()
-      const occupied: { x: number; y: number; teamID: string }[] = []
+      const placed = new Map<string, { x: number; y: number }>()
+      const occupied: { x: number; y: number }[] = []
       let failed = false
 
-      for (const segment of segments) {
-        const candidates = segment.positions.filter((pos) =>
-          this.isValidSpawnPosition(pos, true, boardWidth, boardHeight),
-        )
-        const block = this.findSpacedBlock(
-          candidates,
-          segment.players.length,
-          intraTeamSpacing,
-          occupied,
-          minDistance,
-          segment.teamID,
-        )
-        if (!block) {
-          failed = true
+      for (let index = 0; index < orderedTeams.length; index++) {
+        const players = teamMap.get(orderedTeams[index]) || []
+        const candidates = this.orderSliceCandidates(slices, sliceForTeam[index])
+        for (const player of players) {
+          // The minimum distance also keeps spawns distinct, since a cell is
+          // zero away from itself.
+          const spot = candidates.find((cell) =>
+            this.isFarFromAllSnakes(cell, occupied, minDistance),
+          )
+          if (!spot) {
+            failed = true
+            break
+          }
+          placed.set(player.id, spot)
+          occupied.push(spot)
+        }
+        if (failed) {
           break
         }
-
-        block.forEach((pos, index) => {
-          const player = segment.players[index]
-          if (!player) return
-          placedPositions.set(player.id, pos)
-          occupied.push({ ...pos, teamID: segment.teamID })
-        })
       }
 
-      if (!failed && placedPositions.size === gamePlayers.length) {
+      if (!failed && placed.size === gamePlayers.length) {
         return gamePlayers
-          .map((player) => placedPositions.get(player.id))
+          .map((player) => placed.get(player.id))
           .filter((pos): pos is { x: number; y: number } => !!pos)
       }
     }
 
     return []
+  }
+
+  // Every cell a unit may spawn on: board interior only, and on the spawn
+  // parity so any two spawns sit an even Manhattan distance apart.
+  private getSpawnCells(
+    boardWidth: number,
+    boardHeight: number,
+  ): { x: number; y: number }[] {
+    const cells: { x: number; y: number }[] = []
+    for (let y = 1; y < boardHeight - 1; y++) {
+      for (let x = 1; x < boardWidth - 1; x++) {
+        if (this.isValidSpawnPosition({ x, y }, true, boardWidth, boardHeight)) {
+          cells.push({ x, y })
+        }
+      }
+    }
+    return cells
+  }
+
+  // Cells a team may spawn on, best first: its own slice in random order,
+  // then — the fallback for a slice too small to hold the team under the
+  // spacing constraints — the nearest other slices, also randomly ordered.
+  private orderSliceCandidates(
+    slices: { x: number; y: number }[][],
+    sliceIndex: number,
+  ): { x: number; y: number }[] {
+    return this.shuffleArray(slices.map((cells, index) => ({ cells, index })))
+      .sort(
+        (a, b) =>
+          sliceDistance(a.index, sliceIndex, slices.length) -
+          sliceDistance(b.index, sliceIndex, slices.length),
+      )
+      .flatMap((slice) => this.shuffleArray(slice.cells))
   }
 
   private getOrderedTeamIDs(
@@ -2106,147 +2104,14 @@ export class TeamSnekProcessor {
     return ordered
   }
 
-  private getSquareRingPositions(
-    boardWidth: number,
-    boardHeight: number,
-    inset: number,
-  ): { x: number; y: number }[] {
-    const minX = inset
-    const minY = inset
-    const maxX = boardWidth - inset - 1
-    const maxY = boardHeight - inset - 1
-    if (minX >= maxX || minY >= maxY) {
-      return []
-    }
-
-    const positions: { x: number; y: number }[] = []
-    for (let x = minX; x <= maxX; x++) {
-      positions.push({ x, y: minY })
-    }
-    for (let y = minY + 1; y <= maxY; y++) {
-      positions.push({ x: maxX, y })
-    }
-    for (let x = maxX - 1; x >= minX; x--) {
-      positions.push({ x, y: maxY })
-    }
-    for (let y = maxY - 1; y > minY; y--) {
-      positions.push({ x: minX, y })
-    }
-
-    return positions
-  }
-
-  private calculateTeamSegmentLengths(
-    teamSizes: number[],
-    availableSlots: number,
-    intraTeamSpacing: number,
-  ): number[] | null {
-    const minPerTeam = teamSizes.map((size) =>
-      size <= 1 ? Math.max(size, 1) : 1 + (size - 1) * intraTeamSpacing,
-    )
-    const minTotal = minPerTeam.reduce((sum, len) => sum + len, 0)
-    if (minTotal > availableSlots) {
-      return null
-    }
-
-    const totalPlayers = teamSizes.reduce((sum, size) => sum + size, 0)
-    let remaining = availableSlots - minTotal
-    const lengths = minPerTeam.map((len, index) => {
-      if (remaining <= 0) return len
-      const extra = Math.floor((remaining * teamSizes[index]) / totalPlayers)
-      remaining -= extra
-      return len + extra
-    })
-
-    const order = this.shuffleArray(teamSizes.map((_size, index) => index))
-    let pointer = 0
-    while (remaining > 0) {
-      lengths[order[pointer % order.length]] += 1
-      remaining -= 1
-      pointer += 1
-    }
-
-    return lengths
-  }
-
-  private buildTeamSegments(
-    teamInfo: { teamID: string; players: GamePlayer[] }[],
-    segmentLengths: number[],
-    ringPositions: { x: number; y: number }[],
-    gap: number,
-  ): { teamID: string; players: GamePlayer[]; positions: { x: number; y: number }[] }[] | null {
-    const segments: { teamID: string; players: GamePlayer[]; positions: { x: number; y: number }[] }[] = []
-    let cursor = 0
-    for (let i = 0; i < teamInfo.length; i++) {
-      const length = segmentLengths[i]
-      if (cursor + length > ringPositions.length) {
-        return null
-      }
-      const positions = ringPositions.slice(cursor, cursor + length)
-      segments.push({
-        teamID: teamInfo[i].teamID,
-        players: teamInfo[i].players,
-        positions,
-      })
-      cursor += length + gap
-    }
-    return segments
-  }
-
-  private findSpacedBlock(
-    positions: { x: number; y: number }[],
-    blockSize: number,
-    spacing: number,
-    occupied: { x: number; y: number; teamID: string }[],
-    minDistance: number,
-    teamID: string,
-  ): { x: number; y: number }[] | null {
-    if (blockSize <= 0) return []
-    const maxStart = positions.length - 1 - spacing * (blockSize - 1)
-    if (maxStart < 0) return null
-
-    const startIndices = this.shuffleArray(
-      Array.from({ length: maxStart + 1 }, (_, i) => i),
-    )
-
-    for (const start of startIndices) {
-      const block = Array.from({ length: blockSize }, (_unused, index) => {
-        return positions[start + index * spacing]
-      })
-      const blockEntries = block.map((pos) => ({ ...pos, teamID }))
-      const valid =
-        this.arePositionsSpaced(blockEntries, minDistance) &&
-        blockEntries.every((pos) => this.isFarFromAllSnakes(pos, occupied, minDistance))
-      if (valid) {
-        return block
-      }
-    }
-
-    return null
-  }
-
   private isFarFromAllSnakes(
     position: { x: number; y: number },
-    occupied: { x: number; y: number; teamID: string }[],
+    occupied: { x: number; y: number }[],
     minDistance: number,
   ): boolean {
     return occupied.every(
       (other) => this.getManhattanDistance(position, other) >= minDistance,
     )
-  }
-
-  private arePositionsSpaced(
-    positions: { x: number; y: number; teamID: string }[],
-    minDistance: number,
-  ): boolean {
-    for (let i = 0; i < positions.length; i++) {
-      for (let j = i + 1; j < positions.length; j++) {
-        if (this.getManhattanDistance(positions[i], positions[j]) < minDistance) {
-          return false
-        }
-      }
-    }
-    return true
   }
 
   private shuffleArray<T>(items: T[]): T[] {

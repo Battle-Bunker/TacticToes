@@ -42,7 +42,7 @@ import {
   Typography,
 } from "@mui/material";
 import { Centaur, Team, UnitCounts, UnitMaxHealth, UnitType } from "@shared/types/Game";
-import { PIECE_GLYPHS } from "../../utils/unitGlyphs";
+import { PIECE_GLYPHS, SNAKE_GLYPH } from "../../utils/unitGlyphs";
 import { useGameStateContext } from "../../context/GameStateContext";
 
 // Define the board size mapping
@@ -66,7 +66,7 @@ const UNIT_COUNT_OPTIONS = [0, 1, 2, 3, 4, 5, 6, 7, 8];
 const MAX_UNITS_PER_TEAM = 26;
 
 const UNIT_TYPES: { type: UnitType; label: string }[] = [
-  { type: "snake", label: "🐍 Snakes" },
+  { type: "snake", label: `${SNAKE_GLYPH} Snakes` },
   { type: "pawn", label: `${PIECE_GLYPHS.pawn} Pawns` },
   { type: "knight", label: `${PIECE_GLYPHS.knight} Knights` },
   { type: "bishop", label: `${PIECE_GLYPHS.bishop} Bishops` },

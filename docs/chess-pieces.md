@@ -202,8 +202,9 @@ sub-steps to order.
 
 ## Implementer judgment calls (reported, not escalated)
 
-- Spawning uses the existing ring/cluster placement machinery, with pieces
-  interleaved among snakes. Chess-style formations can come later.
+- Spawning uses the shared placement machinery (radial team slices when team
+  clusters are on), with pieces interleaved among snakes. Chess-style
+  formations can come later.
 - Pieces participate fully in the invulnerability system (potions at the
   destination square, ally buffs, debuffs, tiers).
 - Knight movement health cost is a flat 1 total for the jump (there is no

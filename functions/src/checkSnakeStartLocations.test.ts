@@ -2,6 +2,7 @@ import { GamePlayer, GameState } from "@shared/types/Game"
 import { Timestamp } from "firebase/firestore"
 import { TeamSnekProcessor } from "./gameprocessors/TeamSnekProcessor"
 import { expandTeams } from "./utils/expandTeams"
+import { assignCellsToSlices } from "./utils/radialSlices"
 
 // Mock Timestamp.now() to return a consistent value
 jest.mock("firebase/firestore", () => ({
@@ -81,36 +82,6 @@ describe("snake start locations", () => {
       timeCreated: Timestamp.fromMillis(0),
       timeFinished: Timestamp.fromMillis(0),
     }
-  }
-
-  function getRingPositions(
-    boardWidth: number,
-    boardHeight: number,
-    inset: number,
-  ): { x: number; y: number }[] {
-    const minX = inset
-    const minY = inset
-    const maxX = boardWidth - inset - 1
-    const maxY = boardHeight - inset - 1
-    if (minX >= maxX || minY >= maxY) {
-      return []
-    }
-
-    const positions: { x: number; y: number }[] = []
-    for (let x = minX; x <= maxX; x++) {
-      positions.push({ x, y: minY })
-    }
-    for (let y = minY + 1; y <= maxY; y++) {
-      positions.push({ x: maxX, y })
-    }
-    for (let x = maxX - 1; x >= minX; x--) {
-      positions.push({ x, y: maxY })
-    }
-    for (let y = maxY - 1; y > minY; y--) {
-      positions.push({ x: minX, y })
-    }
-
-    return positions
   }
 
   function getManhattanDistance(
@@ -222,122 +193,196 @@ describe("snake start locations", () => {
     })
   })
 
-  test(
-    "spawns team clusters with teammate proximity and separation",
-    () => {
-      const originalRandom = Math.random
-      Math.random = () => 0
-      try {
-        const intraTeamSpacing = 2
-        const gameState = createTeamGameState(17, 17, 3, 2)
+  const TAU = Math.PI * 2
+
+  // Same enumeration order as the processor's spawn cells: interior only, on
+  // the spawn parity, row-major.
+  function getSpawnCells(
+    boardWidth: number,
+    boardHeight: number,
+  ): { x: number; y: number }[] {
+    const cells: { x: number; y: number }[] = []
+    for (let y = 1; y < boardHeight - 1; y++) {
+      for (let x = 1; x < boardWidth - 1; x++) {
+        if ((x + y) % 2 === 0) cells.push({ x, y })
+      }
+    }
+    return cells
+  }
+
+  // Constraints every spawn must satisfy: interior of the board, spawn parity,
+  // a distinct cell per unit, and at least minDistance between any two units.
+  function expectSpawnConstraints(
+    gameState: GameState,
+    positions: Map<string, { x: number; y: number }>,
+    minDistance = 2,
+  ): void {
+    const { boardWidth, boardHeight, gamePlayers } = gameState.setup
+    expect(positions.size).toBe(gamePlayers.length)
+
+    positions.forEach((pos) => {
+      expect(pos.x).toBeGreaterThanOrEqual(1)
+      expect(pos.y).toBeGreaterThanOrEqual(1)
+      expect(pos.x).toBeLessThanOrEqual(boardWidth - 2)
+      expect(pos.y).toBeLessThanOrEqual(boardHeight - 2)
+      expect((pos.x + pos.y) % 2).toBe(0)
+    })
+
+    const ids = [...positions.keys()]
+    for (let i = 0; i < ids.length; i++) {
+      for (let j = i + 1; j < ids.length; j++) {
+        const distance = getManhattanDistance(
+          positions.get(ids[i])!,
+          positions.get(ids[j])!,
+        )
+        expect(distance).toBeGreaterThanOrEqual(minDistance)
+      }
+    }
+  }
+
+  // The slice each spawn cell belongs to, recomputed exactly as the processor
+  // does. Valid only while Math.random is stubbed to a constant, which fixes
+  // both the rotation and the tie-breaking.
+  function getSliceOfCell(
+    gameState: GameState,
+    sliceCount: number,
+    draw: number,
+  ): Map<string, number> {
+    const { boardWidth, boardHeight } = gameState.setup
+    const slices = assignCellsToSlices(
+      getSpawnCells(boardWidth, boardHeight),
+      boardWidth,
+      boardHeight,
+      sliceCount,
+      draw * TAU,
+      () => draw,
+    )
+    const sliceOfCell = new Map<string, number>()
+    slices.forEach((cells, sliceIndex) => {
+      cells.forEach((cell) => sliceOfCell.set(`${cell.x},${cell.y}`, sliceIndex))
+    })
+    return sliceOfCell
+  }
+
+  function withStubbedRandom(draw: number, run: () => void): void {
+    const originalRandom = Math.random
+    Math.random = () => draw
+    try {
+      run()
+    } finally {
+      Math.random = originalRandom
+    }
+  }
+
+  test("spawns every team inside its own radial slice", () => {
+    const teamCount = 4
+    const snakesPerTeam = 3
+    ;[0, 0.13, 0.5, 0.77, 0.99].forEach((draw) => {
+      withStubbedRandom(draw, () => {
+        const gameState = createTeamGameState(21, 21, teamCount, snakesPerTeam)
         const game = new TeamSnekProcessor(gameState)
         const initializedGame = game.firstTurn()
+        expect(initializedGame.teamClusterFallback).toBe(false)
+
         const positions = getPositionMap(gameState, initializedGame)
+        expectSpawnConstraints(gameState, positions)
 
-        const teamMap = new Map<string, string[]>()
+        const sliceOfCell = getSliceOfCell(gameState, teamCount, draw)
+        const sliceOfTeam = new Map<string, number>()
         gameState.setup.gamePlayers.forEach((player) => {
-          if (!player.teamID) return
-          const list = teamMap.get(player.teamID) || []
-          list.push(player.id)
-          teamMap.set(player.teamID, list)
+          const pos = positions.get(player.id)!
+          const slice = sliceOfCell.get(`${pos.x},${pos.y}`)
+          expect(slice).toBeDefined()
+          const known = sliceOfTeam.get(player.teamID!)
+          if (known === undefined) {
+            sliceOfTeam.set(player.teamID!, slice!)
+          } else {
+            expect(slice).toBe(known)
+          }
         })
+        // One slice per team, and no two teams share one.
+        expect(sliceOfTeam.size).toBe(teamCount)
+        expect(new Set(sliceOfTeam.values()).size).toBe(teamCount)
+      })
+    })
+  })
 
-        teamMap.forEach((playerIDs) => {
-          if (playerIDs.length < 2) return
-          playerIDs.forEach((playerID) => {
-            const position = positions.get(playerID)
-            expect(position).toBeDefined()
-            if (!position) return
-            const teammateDistances = playerIDs
-              .filter((id) => id !== playerID)
-              .map((id) => getManhattanDistance(position, positions.get(id)!))
-            const closestTeammate = Math.min(...teammateDistances)
-            expect(closestTeammate).toBeLessThanOrEqual(10)
+  test("places units in different cells across games", () => {
+    const layouts = new Set<string>()
+    for (let run = 0; run < 20; run++) {
+      const gameState = createTeamGameState(21, 21, 3, 2)
+      const game = new TeamSnekProcessor(gameState)
+      const positions = getPositionMap(gameState, game.firstTurn())
+      expectSpawnConstraints(gameState, positions)
+      layouts.add(
+        gameState.setup.gamePlayers
+          .map((player) => {
+            const pos = positions.get(player.id)!
+            return `${player.id}:${pos.x},${pos.y}`
           })
-        })
+          .join("|"),
+      )
+    }
+    // A random rotation per game, and random cells within each slice: repeats
+    // across 20 runs of a 21x21 board are vanishingly unlikely.
+    expect(layouts.size).toBeGreaterThanOrEqual(15)
+  })
 
-        const players = gameState.setup.gamePlayers
-        for (let i = 0; i < players.length; i++) {
-          for (let j = i + 1; j < players.length; j++) {
-            const a = players[i]
-            const b = players[j]
-            const posA = positions.get(a.id)!
-            const posB = positions.get(b.id)!
-            expect(getManhattanDistance(posA, posB)).toBeGreaterThanOrEqual(2)
-          }
-        }
+  test("relaxes outside a slice too small to hold its team", () => {
+    // A wide, shallow board: the slices pointing up and down hold far fewer
+    // cells than the teams assigned to them need.
+    withStubbedRandom(0.31, () => {
+      const teamCount = 4
+      const gameState = createTeamGameState(33, 7, teamCount, 6)
+      const game = new TeamSnekProcessor(gameState)
+      const initializedGame = game.firstTurn()
+      expect(initializedGame.teamClusterFallback).toBe(false)
 
-        const inset = Math.max(
-          2,
-          Math.floor(
-            Math.min(gameState.setup.boardWidth, gameState.setup.boardHeight) /
-              2,
-          ) - 6,
+      const positions = getPositionMap(gameState, initializedGame)
+      expectSpawnConstraints(gameState, positions)
+
+      const sliceOfCell = getSliceOfCell(gameState, teamCount, 0.31)
+      const slicesPerTeam = new Map<string, Set<number>>()
+      gameState.setup.gamePlayers.forEach((player) => {
+        const pos = positions.get(player.id)!
+        const slices = slicesPerTeam.get(player.teamID!) || new Set<number>()
+        slices.add(sliceOfCell.get(`${pos.x},${pos.y}`)!)
+        slicesPerTeam.set(player.teamID!, slices)
+      })
+      // Some team has spilled past its own slice, and every unit still holds
+      // to the spawn constraints checked above.
+      expect(
+        [...slicesPerTeam.values()].some((slices) => slices.size > 1),
+      ).toBe(true)
+    })
+  })
+
+  test("falls back to the default spread when the board cannot seat the teams", () => {
+    // 20 units, but a 7x7 board offers only 13 parity spawn cells.
+    const gameState = createTeamGameState(7, 7, 4, 5)
+    const game = new TeamSnekProcessor(gameState)
+    const initializedGame = game.firstTurn()
+
+    expect(initializedGame.teamClusterFallback).toBe(true)
+    const positions = getPositionMap(gameState, initializedGame)
+    expect(positions.size).toBe(gameState.setup.gamePlayers.length)
+    const cells = new Set(
+      [...positions.values()].map((pos) => `${pos.x},${pos.y}`),
+    )
+    expect(cells.size).toBe(gameState.setup.gamePlayers.length)
+  })
+
+  test("preview board spawns match the engine's spawns", () => {
+    withStubbedRandom(0.42, () => {
+      const gameState = createTeamGameState(21, 21, 3, 2)
+      const engineTurn = new TeamSnekProcessor(gameState).firstTurn()
+      const preview = new TeamSnekProcessor(gameState).generatePreviewBoard()
+
+      gameState.setup.gamePlayers.forEach((player) => {
+        expect(preview.playerPositions[player.id]).toBe(
+          engineTurn.playerPieces[player.id][0],
         )
-        const ringPositions = getRingPositions(
-          gameState.setup.boardWidth,
-          gameState.setup.boardHeight,
-          inset,
-        )
-        const ringIndex = new Map(
-          ringPositions.map((pos, index) => [`${pos.x},${pos.y}`, index]),
-        )
-
-        positions.forEach((pos) => {
-          expect(ringIndex.has(`${pos.x},${pos.y}`)).toBeTruthy()
-          expect((pos.x + pos.y) % 2).toBe(0)
-        })
-
-        const teamRanges = Array.from(teamMap.entries()).map(([teamID, ids]) => {
-          const indices = ids
-            .map(
-              (id) =>
-                ringIndex.get(
-                  `${positions.get(id)!.x},${positions.get(id)!.y}`,
-                )!,
-            )
-            .sort((a, b) => a - b)
-          return {
-            teamID,
-            min: indices[0],
-            max: indices[indices.length - 1],
-            size: ids.length,
-            indices,
-          }
-        })
-
-        // Spawn candidates are every other ring cell (parity requirement), so
-        // an intra-team spacing of N candidates is 2N raw ring steps.
-        teamRanges.forEach((range) => {
-          for (let i = 1; i < range.indices.length; i++) {
-            expect(range.indices[i] - range.indices[i - 1]).toBe(
-              intraTeamSpacing * 2,
-            )
-          }
-        })
-
-        const sortedRanges = [...teamRanges].sort((a, b) => a.min - b.min)
-        for (let i = 0; i < sortedRanges.length; i++) {
-          const current = sortedRanges[i]
-          const next = sortedRanges[(i + 1) % sortedRanges.length]
-          const gap =
-            i === sortedRanges.length - 1
-              ? ringPositions.length - 1 - current.max + next.min
-              : next.min - current.max - 1
-          expect(gap).toBeGreaterThanOrEqual(2)
-        }
-
-        const playerIDs = gameState.setup.gamePlayers.map((player) => player.id)
-        for (let i = 0; i < playerIDs.length; i++) {
-          for (let j = i + 1; j < playerIDs.length; j++) {
-            const posA = positions.get(playerIDs[i])!
-            const posB = positions.get(playerIDs[j])!
-            expect(getManhattanDistance(posA, posB) % 2).toBe(0)
-          }
-        }
-      } finally {
-        Math.random = originalRandom
-      }
-    },
-  )
+      })
+    })
+  })
 })
