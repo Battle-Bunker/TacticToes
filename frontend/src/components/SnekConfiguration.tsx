@@ -1,6 +1,7 @@
 import React, { useMemo } from "react"
-import { Checkbox, FormControl, FormControlLabel, IconButton, Slider, TextField, Typography, Box } from "@mui/material"
+import { Checkbox, FormControl, FormControlLabel, IconButton, Slider, Typography, Box } from "@mui/material"
 import { RefreshCw } from "lucide-react"
+import { NumericField } from "./NumericField"
 import { Team, UnitCounts } from "@shared/types/Game"
 import { useTeamColors } from "../hooks/useTeamColors"
 import { expandTeams } from "../utils/expandTeams"
@@ -92,10 +93,10 @@ export const SnekConfiguration: React.FC<SnekConfigurationProps> = ({
           control={<Checkbox checked={maxTurnsEnabled} onChange={(e) => onMaxTurnsToggle(e.target.checked)} />}
           label="Enable Turn Limit"
         />
-        <TextField
-          type="number" label="Max Turns" value={maxTurns}
-          onChange={(e) => onMaxTurnsChange(parseInt(e.target.value) || 0)}
-          sx={{ flex: 1 }} inputProps={{ min: 1, max: 1000 }} disabled={!maxTurnsEnabled}
+        <NumericField
+          label="Max Turns" value={maxTurns} onChange={onMaxTurnsChange}
+          min={1} max={1000} step={1} round={Math.round}
+          sx={{ flex: 1 }} disabled={!maxTurnsEnabled}
         />
       </div>
       <Box sx={{ mt: 1 }}>
@@ -105,13 +106,11 @@ export const SnekConfiguration: React.FC<SnekConfigurationProps> = ({
           min={0} max={100} step={1} valueLabelDisplay="auto" valueLabelFormat={(v) => `${v}%`} sx={{ mx: 1 }}
         />
         {hazardPercentage > 0 && (
-          <TextField
-            type="number" label="Hazard damage" size="small" value={hazardDamage}
-            onChange={(e) => {
-              const value = parseInt(e.target.value)
-              if (!isNaN(value)) onHazardDamageChange(value)
-            }}
-            sx={{ mt: 1, width: 200 }} inputProps={{ min: 1, max: 1000, step: 1 }}
+          <NumericField
+            label="Hazard damage" size="small" value={hazardDamage}
+            onChange={onHazardDamageChange}
+            min={1} max={1000} step={1} round={Math.round}
+            sx={{ mt: 1, width: 200 }}
             helperText="Health lost per hazard square entered"
           />
         )}

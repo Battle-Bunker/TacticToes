@@ -17,6 +17,7 @@ import { CentaurLink } from "../../components/CentaurLink";
 import { useUser } from "../../context/UserContext";
 import { db, functions } from "../../firebaseConfig";
 import { useFirestoreSubscription } from "../../hooks/useFirestoreSubscription";
+import { NumericField } from "../../components/NumericField";
 import { SnekConfiguration } from "../../components/SnekConfiguration";
 import { TeamList } from "../../components/TeamList";
 import { TeamSnekRules } from "../../constants/Rules";
@@ -320,12 +321,7 @@ const GameSetup: React.FC = () => {
   const { statuses: centaurStatuses, recheck: recheckCentaurHealth } =
     useCentaurStatuses(sessionName, gameID);
 
-  const [secondsPerTurn, setSecondsPerTurn] = useState<string>("10");
   const [boardSize, setBoardSize] = useState<BoardSize>("medium");
-  // Local text state for the Custom width/height inputs so partial typing
-  // (e.g. clearing the field) doesn't write invalid values to Firestore.
-  const [customWidth, setCustomWidth] = useState<string>("21");
-  const [customHeight, setCustomHeight] = useState<string>("21");
   const [centaurSearchQuery, setCentaurSearchQuery] = useState("");
   const [maxTurnsEnabled, setMaxTurnsEnabled] = useState<boolean>(
     gameSetup?.maxTurns !== undefined,
@@ -512,11 +508,6 @@ const GameSetup: React.FC = () => {
       } else {
         setBoardSize("custom");
       }
-      setCustomWidth(`${gameSetup.boardWidth}`);
-      setCustomHeight(`${gameSetup.boardHeight}`);
-
-      setSecondsPerTurn(`${gameSetup.maxTurnTime}`);
-
       if (gameSetup.maxTurns !== undefined) {
         setMaxTurns(gameSetup.maxTurns);
         setMaxTurnsEnabled(true);
@@ -850,12 +841,10 @@ const GameSetup: React.FC = () => {
     await updateDoc(gameDocRef, { scheduledStartTime: deleteField() });
   };
 
-  // Handle max turn time configuration (min 0.5s, max 5 minutes; the local
-  // mirror is the text-field string)
+  // Handle max turn time configuration (min 0.5s, max 5 minutes)
   const handleSecondsPerTurnChange = setupNumberField("maxTurnTime", {
     min: 0.5,
     max: 300,
-    setLocal: (v) => setSecondsPerTurn(`${v}`),
   });
 
   // Handler for selecting board size
@@ -864,10 +853,8 @@ const GameSetup: React.FC = () => {
     setBoardSize(selectedBoardSize);
 
     if (selectedBoardSize === "custom") {
-      // Seed the custom inputs from the current board; no Firestore write
-      // until a dimension is actually edited.
-      setCustomWidth(`${gameSetup?.boardWidth ?? 21}`);
-      setCustomHeight(`${gameSetup?.boardHeight ?? 21}`);
+      // The custom inputs read the current board; no Firestore write until a
+      // dimension is actually edited.
       return;
     }
 
@@ -882,23 +869,12 @@ const GameSetup: React.FC = () => {
     debouncedRegeneratePreview();
   };
 
-  // Handler for the Custom width/height inputs. Writes only complete, valid
-  // integer dimensions; partial input just updates the local field.
+  // Handler for the Custom width/height inputs. NumericField hands over only
+  // complete, in-range integers, so every call here is a write.
   const handleCustomDimensionChange = async (
     dimension: "width" | "height",
-    raw: string,
+    value: number,
   ) => {
-    if (dimension === "width") setCustomWidth(raw);
-    else setCustomHeight(raw);
-
-    const value = parseInt(raw, 10);
-    if (
-      isNaN(value) ||
-      value < MIN_BOARD_DIMENSION ||
-      value > MAX_BOARD_DIMENSION
-    ) {
-      return;
-    }
     if (!gameSetup?.started) {
       await updateDoc(gameDocRef, {
         [dimension === "width" ? "boardWidth" : "boardHeight"]: value,
@@ -1034,49 +1010,41 @@ const GameSetup: React.FC = () => {
         {/* Custom board dimensions (perimeter included) */}
         {boardSize === "custom" && (
           <>
-            <TextField
+            <NumericField
               label="Width"
-              type="number"
-              value={customWidth}
-              onChange={(e) => handleCustomDimensionChange("width", e.target.value)}
+              value={gameSetup.boardWidth}
+              onChange={(value) => handleCustomDimensionChange("width", value)}
               disabled={started || isConfigDisabled}
               sx={{ flex: 1 }}
-              inputProps={{ min: MIN_BOARD_DIMENSION, max: MAX_BOARD_DIMENSION, step: 1 }}
-              error={(() => {
-                const v = parseInt(customWidth, 10);
-                return isNaN(v) || v < MIN_BOARD_DIMENSION || v > MAX_BOARD_DIMENSION;
-              })()}
+              min={MIN_BOARD_DIMENSION}
+              max={MAX_BOARD_DIMENSION}
+              step={1}
+              round={Math.round}
             />
-            <TextField
+            <NumericField
               label="Height"
-              type="number"
-              value={customHeight}
-              onChange={(e) => handleCustomDimensionChange("height", e.target.value)}
+              value={gameSetup.boardHeight}
+              onChange={(value) => handleCustomDimensionChange("height", value)}
               disabled={started || isConfigDisabled}
               sx={{ flex: 1 }}
-              inputProps={{ min: MIN_BOARD_DIMENSION, max: MAX_BOARD_DIMENSION, step: 1 }}
-              error={(() => {
-                const v = parseInt(customHeight, 10);
-                return isNaN(v) || v < MIN_BOARD_DIMENSION || v > MAX_BOARD_DIMENSION;
-              })()}
+              min={MIN_BOARD_DIMENSION}
+              max={MAX_BOARD_DIMENSION}
+              step={1}
+              round={Math.round}
             />
           </>
         )}
 
         {/* Turn Time */}
-        <TextField
+        <NumericField
           label="Turn Time (s)"
-          type="number"
-          value={secondsPerTurn}
-          onChange={(e) => {
-            const value = parseFloat(e.target.value);
-            if (!isNaN(value)) {
-              handleSecondsPerTurnChange(value);
-            }
-          }}
+          value={gameSetup.maxTurnTime}
+          onChange={handleSecondsPerTurnChange}
           disabled={started || isConfigDisabled}
           sx={{ flex: 1 }}
-          inputProps={{ min: 0.5, max: 300, step: 0.1 }}
+          min={0.5}
+          max={300}
+          step={0.1}
         />
       </Box>
 
@@ -1144,29 +1112,25 @@ const GameSetup: React.FC = () => {
                 </Button>
               </Box>
               <Box sx={{ display: "flex", gap: 2 }}>
-                <TextField
+                <NumericField
                   label="Remaining Rounds"
-                  type="number"
                   value={remainingRounds}
-                  onChange={(e) => {
-                    const val = parseInt(e.target.value);
-                    if (!isNaN(val)) handleRemainingRoundsChange(val);
-                  }}
+                  onChange={handleRemainingRoundsChange}
                   disabled={isConfigDisabled}
                   sx={{ flex: 1 }}
-                  inputProps={{ min: 0, step: 1 }}
+                  min={0}
+                  step={1}
+                  round={Math.round}
                 />
-                <TextField
+                <NumericField
                   label="Interlude Duration (s)"
-                  type="number"
                   value={interludeDuration}
-                  onChange={(e) => {
-                    const val = parseInt(e.target.value);
-                    if (!isNaN(val)) handleInterludeDurationChange(val);
-                  }}
+                  onChange={handleInterludeDurationChange}
                   disabled={isConfigDisabled}
                   sx={{ flex: 1 }}
-                  inputProps={{ min: 0, step: 1 }}
+                  min={0}
+                  step={1}
+                  round={Math.round}
                 />
               </Box>
             </Stack>
@@ -1283,18 +1247,17 @@ const GameSetup: React.FC = () => {
                 ))}
               </Box>
               {unitCount("pawn") > 0 && (
-                <TextField
+                <NumericField
                   label="Pawn promotion weight"
-                  type="number"
                   size="small"
                   value={pawnPromotionWeight}
-                  onChange={(e) => {
-                    const value = parseInt(e.target.value);
-                    if (!isNaN(value)) handlePawnPromotionWeightChange(value);
-                  }}
+                  onChange={handlePawnPromotionWeightChange}
                   disabled={started || isConfigDisabled}
                   sx={{ mt: 1.5, width: 200 }}
-                  inputProps={{ min: 2, max: 100, step: 1 }}
+                  min={2}
+                  max={100}
+                  step={1}
+                  round={Math.round}
                   helperText="A promoted queen restarts at weight 1"
                 />
               )}
@@ -1309,20 +1272,20 @@ const GameSetup: React.FC = () => {
                   ({ type, label }) => {
                     const promotedOnly = type === "queen" && unitCount("queen") === 0;
                     return (
-                      <TextField
+                      <NumericField
                         key={type}
                         label={label}
-                        type="number"
                         size="small"
-                        value={maxHealthPerUnit[type] ?? ""}
+                        value={maxHealthPerUnit[type]}
                         placeholder="100"
-                        onChange={(e) => {
-                          const value = parseInt(e.target.value);
-                          if (!isNaN(value)) handleMaxHealthChange(type, value);
-                        }}
+                        onChange={(value) => handleMaxHealthChange(type, value)}
                         disabled={started || isConfigDisabled}
                         sx={{ width: promotedOnly ? 150 : 110 }}
-                        inputProps={{ min: 1, max: 1000, step: 1 }}
+                        min={1}
+                        max={1000}
+                        step={1}
+                        round={Math.round}
+                        emptyValue={100}
                         helperText={promotedOnly ? "Promoted pawns" : undefined}
                       />
                     );
