@@ -2,7 +2,7 @@
 // board, drawn in CSS pixels onto a bitmap backed at the display's own
 // resolution.
 
-import { CLASH_RING_COLOR, clashCellKeys } from "./clashes"
+import { UNCERTAIN_RING_COLOR, clashRings } from "./clashes"
 
 export interface Cell {
   x: number
@@ -44,10 +44,82 @@ export interface BoardUnit {
   invulnerabilityExpiryTurn?: number
 }
 
-/** A cell where units died this turn, in the colour of whoever died there. */
+/**
+ * What produced a board event, mirroring the wire's ClashKind — plus `unknown`,
+ * which is what a kind the board does not recognise becomes. The board NEVER
+ * infers a kind: `unknown` is rendered as uncertainty, not as a guess.
+ */
+export type BoardClashKind =
+  | "contest"
+  | "edge"
+  | "bodyBlock"
+  | "regicide"
+  | "sever"
+  | "hazard"
+  | "starvation"
+  | "wall"
+  | "self"
+  | "unknown"
+
+/**
+ * How a death is DRAWN. Two causes of death look nothing alike on this board:
+ *   - `combat` — killed in a fight (contest, edge exchange, body block, wall,
+ *     its own body): a solid disc in the victim's colour with a white ✗.
+ *   - `starved` — health ran out (movement cost or hazard damage) and the unit
+ *     halted where it stood, to be removed at end of turn: a HOLLOW ring in the
+ *     victim's colour around a drained, ash-pale middle, barred through. Solid
+ *     versus hollow is the difference a reader sees before they see anything
+ *     else, which is the point: nobody killed this one.
+ *   - `unknown` — the record named a cause this board does not know. Drawn as
+ *     uncertainty, never as either of the above.
+ */
+export type DeathStyle = "combat" | "starved" | "unknown"
+
+/** One unit that died this turn, as the board draws it. */
+export interface DeathVictim {
+  id: string
+  letter: string
+  teamName: string
+  /** The VICTIM's team colour — never the killer's. */
+  color: string
+  cause: BoardClashKind
+  style: DeathStyle
+  subStep: number
+}
+
+/**
+ * One cell one or more units died on this turn, straight off the turn's death
+ * registry. Several units can fall on one durable cell across several
+ * sub-steps, so a mark carries every victim it holds — the board splits the
+ * mark between them and the inspector lists them all.
+ */
 export interface DeathMark {
   cell: Cell
+  /** In sub-step order: the order they fell. */
+  victims: DeathVictim[]
+}
+
+/**
+ * One cell cut from a SURVIVING unit by a sever — damage, not a death. Drawn in
+ * the OWNER's colour: it is their body that was cut.
+ */
+export interface SeverMark {
+  cell: Cell
+  ownerID: string
+  letter: string
+  teamName: string
   color: string
+}
+
+/**
+ * A cell whose story the turn record cannot tell: a unit that left the board
+ * with no death recorded, a clash of an unrecognised kind, a record with no
+ * victim list. The board says so in as many words rather than guessing, and
+ * `note` is the sentence the inspector shows.
+ */
+export interface UncertaintyMark {
+  cell: Cell
+  note: string
 }
 
 /**
@@ -61,17 +133,34 @@ export interface BoardTeam {
 }
 
 /**
- * One collision the game server resolved this turn, in RENDERER coordinates:
- * where it happened, who took part, why someone died, and — for pieces, which
- * walk their path one square at a time — which within-turn sub-step it happened
- * on. It says nothing about who died: the server records PARTICIPANTS, and a
- * participant missing from `units` is one that did not walk away.
+ * One adjudicated event the game server resolved this turn, in RENDERER
+ * coordinates. Everything a reader is told about it is HERE, from the server's
+ * own record: what kind of event it was, who took part, which of them died,
+ * which one was left standing, and which within-turn sub-step it happened on.
+ *
+ * The board never reads end-of-turn occupancy to decide who died — occupancy
+ * and the record disagree on a sever (the cut snake is alive somewhere else)
+ * and on a durable cell (the corpse's square may be taken by a later arrival),
+ * and when they disagree the record is right.
  */
 export interface BoardClash {
   cell: Cell
+  kind: BoardClashKind
+  /** Every unit in this record, survivors included. */
   playerIDs: string[]
+  /** The subset that died here. Empty for a non-fatal record such as a sever. */
+  victimIDs: string[]
+  /** The one unit left standing at this cell, when the record names one. */
+  survivorID?: string
+  subStep: number
+  /** Display text from the server. Never load-bearing for rendering. */
   reason: string
-  subStep?: number
+  /**
+   * False when the wire record was missing something the board needs (an
+   * unrecognised kind, no victim list). The cell is then marked as uncertain
+   * rather than drawn as if it were understood.
+   */
+  complete: boolean
 }
 
 /**
@@ -104,9 +193,19 @@ export interface BoardModel {
   invulnerabilityPotions: Cell[]
   teams: BoardTeam[]
   units: BoardUnit[]
+  /** Every death this turn, cell by cell, straight off the turn's registry. */
   deaths: DeathMark[]
   /** Every collision this turn, for the rings on the board and the inspector. */
   clashes: BoardClash[]
+  /** Non-fatal sever damage: cells cut from units that are still alive. */
+  severed: SeverMark[]
+  /** Cells the turn record cannot account for. */
+  uncertainties: UncertaintyMark[]
+  /**
+   * Board-wide notes about what this turn's record failed to carry. Empty when
+   * the record is complete, which is the normal case.
+   */
+  recordNotes: string[]
   /** Units that are no longer on the board, at their last-known state. */
   deadUnits: RosterUnit[]
 }
@@ -1668,6 +1767,7 @@ function drawClashMarker(
   boardHeight: number,
   cellSize: number,
   occupied: boolean,
+  color: string,
 ) {
   if (!cell) return
   const x = cell.x * cellSize
@@ -1698,15 +1798,220 @@ function drawClashMarker(
   ctx.stroke()
   ctx.globalAlpha = 0.95
   ctx.lineWidth = width
-  ctx.strokeStyle = CLASH_RING_COLOR
+  ctx.strokeStyle = color
   path()
   ctx.stroke()
   ctx.restore()
 }
 
-// A death marker at a board cell: a filled disc in the fallen unit's colour with
-// a white ✗, drawn last so it sits on top of everything the cell holds.
+// ── Deaths, damage and doubt ────────────────────────────────────────────────
+//
+// Three marks, three different things to say, and none of them derived from
+// where units happen to be standing at the end of the turn:
+//
+//   DEATH      a disc at the cell the death registry names, in the VICTIM's
+//              colour. Solid with a white ✗ when something killed it; a hollow
+//              ring around a drained, ash-pale middle, barred through, when it
+//              starved where it stood. A cell that holds several deaths splits
+//              the disc between them and carries the count.
+//   SEVER      a cut length of body: the owner's colour, hatched and dashed,
+//              bitten at the edges. Damage, in the colour of who took it.
+//   UNCERTAIN  a muted dashed ring with a "?". The record is incomplete and the
+//              board says so instead of inventing the missing half.
+
+/** The drained middle of a starvation mark: the colour has gone out of it. */
+const STARVED_INTERIOR = "#eceae4"
+/** The rim every death mark wears, so a mark reads on any terrain. */
+const DEATH_RIM = "#101418"
+/** The ink of the doubt mark, and of the ring it wears. */
+const UNCERTAIN_COLOR = UNCERTAIN_RING_COLOR
+
+interface MarkGeometry {
+  cx: number
+  cy: number
+  r: number
+}
+
+/**
+ * Where a mark goes in its cell. A mark must never bury a living unit, and a
+ * living unit must never bury a mark:
+ *   - Nobody standing here: the middle of the cell, full size. The cell is the
+ *     grave and it can look like one.
+ *   - A survivor standing here — which is exactly what a head-on contest leaves
+ *     behind — the mark shrinks to a corner badge in the bottom-left, clear of
+ *     the body's inset square and of the numbers written on it. The survivor
+ *     keeps its cell; the badge says someone else did not walk away from it.
+ */
+function markGeometry(
+  cell: Cell,
+  boardHeight: number,
+  cellSize: number,
+  occupied: boolean,
+): MarkGeometry {
+  const x = cell.x * cellSize
+  const y = (boardHeight - 1 - cell.y) * cellSize
+  if (occupied) {
+    // Top-left. The bottom edge of a head cell is the health bar's, and the
+    // middle is where a unit writes its letter — the top-left corner is the one
+    // that costs a living unit nothing.
+    const r = cellSize * 0.23
+    return { cx: x + r + cellSize * 0.03, cy: y + r + cellSize * 0.03, r }
+  }
+  return { cx: x + cellSize / 2, cy: y + cellSize / 2, r: cellSize * 0.34 }
+}
+
+/** The wedge of the mark that belongs to victim `i` of `n`, starting at 12 o'clock. */
+function victimWedge(n: number, i: number): { from: number; to: number } {
+  const span = (Math.PI * 2) / n
+  const start = -Math.PI / 2 + i * span
+  return { from: start, to: start + span }
+}
+
+function fillWedge(
+  ctx: CanvasRenderingContext2D,
+  g: MarkGeometry,
+  from: number,
+  to: number,
+  style: string,
+  full: boolean,
+) {
+  ctx.beginPath()
+  if (full) {
+    ctx.arc(g.cx, g.cy, g.r, 0, Math.PI * 2)
+  } else {
+    ctx.moveTo(g.cx, g.cy)
+    ctx.arc(g.cx, g.cy, g.r, from, to)
+    ctx.closePath()
+  }
+  ctx.fillStyle = style
+  ctx.fill()
+}
+
+/**
+ * One cell's deaths. The victims' colours divide the disc between them, each
+ * wedge drawn in the treatment its own cause earned — so a pile-up of a
+ * killed unit and a starved one shows both at once — and the count rides on top
+ * whenever there is more than one. Every one of them is listed by the
+ * inspector; the disc is the handle, not the whole account.
+ */
 function drawDeathMarker(
+  ctx: CanvasRenderingContext2D,
+  mark: DeathMark,
+  boardHeight: number,
+  cellSize: number,
+  occupied: boolean,
+) {
+  if (!mark?.cell || mark.victims.length === 0) return
+  const g = markGeometry(mark.cell, boardHeight, cellSize, occupied)
+  const n = mark.victims.length
+  const single = n === 1
+
+  ctx.save()
+  ctx.lineJoin = "round"
+  ctx.lineCap = "round"
+
+  // The pale ground every mark sits on: it is what a starved wedge's middle is
+  // drained TO, and it keeps a mark from taking the colour of the terrain.
+  fillWedge(ctx, g, 0, Math.PI * 2, STARVED_INTERIOR, true)
+
+  mark.victims.forEach((victim, i) => {
+    const { from, to } = victimWedge(n, i)
+    const color = victim.color || "#888888"
+    if (victim.style === "combat") {
+      fillWedge(ctx, g, from, to, color, single)
+    } else if (victim.style === "starved") {
+      // Hollow: the colour survives only as the rim, and the middle is drained.
+      fillWedge(ctx, g, from, to, hexWithAlpha(color, 0.18), single)
+      ctx.strokeStyle = color
+      ctx.lineWidth = Math.max(2, g.r * 0.34)
+      ctx.beginPath()
+      ctx.arc(g.cx, g.cy, g.r - Math.max(1, g.r * 0.17), single ? 0 : from, single ? Math.PI * 2 : to)
+      ctx.stroke()
+    } else {
+      fillWedge(ctx, g, from, to, hexWithAlpha(UNCERTAIN_COLOR, 0.3), single)
+    }
+  })
+
+  ctx.strokeStyle = DEATH_RIM
+  ctx.lineWidth = Math.max(1.2, cellSize * 0.055)
+  ctx.beginPath()
+  ctx.arc(g.cx, g.cy, g.r, 0, Math.PI * 2)
+  ctx.stroke()
+
+  if (single) {
+    const victim = mark.victims[0]
+    const d = g.r * 0.5
+    ctx.lineWidth = Math.max(1.5, g.r * 0.3)
+    if (victim.style === "combat") {
+      ctx.strokeStyle = "#ffffff"
+      ctx.beginPath()
+      ctx.moveTo(g.cx - d, g.cy - d)
+      ctx.lineTo(g.cx + d, g.cy + d)
+      ctx.moveTo(g.cx + d, g.cy - d)
+      ctx.lineTo(g.cx - d, g.cy + d)
+      ctx.stroke()
+    } else if (victim.style === "starved") {
+      // One flat bar through a drained middle: nothing struck this unit, it
+      // simply ran out.
+      ctx.strokeStyle = DEATH_RIM
+      ctx.beginPath()
+      ctx.moveTo(g.cx - d * 0.95, g.cy)
+      ctx.lineTo(g.cx + d * 0.95, g.cy)
+      ctx.stroke()
+    } else {
+      drawQueryGlyph(ctx, g.cx, g.cy, g.r * 1.15, UNCERTAIN_COLOR)
+    }
+    ctx.restore()
+    return
+  }
+
+  // A pile-up: the count on a white plaque, so it reads over any set of wedges.
+  const plaque = g.r * 0.52
+  ctx.fillStyle = "#ffffff"
+  ctx.beginPath()
+  ctx.arc(g.cx, g.cy, plaque, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.strokeStyle = DEATH_RIM
+  ctx.lineWidth = Math.max(1, cellSize * 0.02)
+  ctx.stroke()
+  ctx.fillStyle = DEATH_RIM
+  ctx.font = `700 ${Math.max(8, plaque * 1.5)}px "Roboto Mono", monospace`
+  ctx.textAlign = "center"
+  ctx.textBaseline = "middle"
+  ctx.fillText(String(n), g.cx, g.cy + plaque * 0.06)
+  ctx.restore()
+}
+
+/**
+ * A "?" drawn as a path rather than as text, so it keeps its weight at the size
+ * a board cell can spare.
+ */
+function drawQueryGlyph(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  size: number,
+  color: string,
+) {
+  ctx.save()
+  ctx.fillStyle = color
+  ctx.textAlign = "center"
+  ctx.textBaseline = "middle"
+  ctx.font = `700 ${Math.max(8, size)}px "Roboto Mono", monospace`
+  ctx.fillText("?", cx, cy + size * 0.04)
+  ctx.restore()
+}
+
+/**
+ * A cell cut off a snake that is still alive. It is drawn as the body segment
+ * it used to be — the same inset square, the same colour — but rendered as
+ * WRECKAGE rather than as a unit: hatched on the opposite diagonal to fertile
+ * ground so the two can never be confused, outlined in dashes because the shape
+ * is no longer whole, and bitten out of the top and bottom edges where the cut
+ * went through. No disc, no glyph, nothing round: whatever else this mark is
+ * mistaken for, it will not be mistaken for a death.
+ */
+function drawSeverMark(
   ctx: CanvasRenderingContext2D,
   cell: Cell,
   boardHeight: number,
@@ -1714,31 +2019,103 @@ function drawDeathMarker(
   color: string,
 ) {
   if (!cell) return
-  const cx = cell.x * cellSize + cellSize / 2
-  const cy = (boardHeight - 1 - cell.y) * cellSize + cellSize / 2
-  const r = cellSize * 0.34
-  const markColor = color || "#888888"
+  const gap = getSnakeGap(cellSize)
+  const x = cell.x * cellSize + gap
+  const y = (boardHeight - 1 - cell.y) * cellSize + gap
+  const size = cellSize - gap * 2
+  const ink = color || "#888888"
+
   ctx.save()
-  ctx.fillStyle = markColor
   ctx.beginPath()
-  ctx.arc(cx, cy, r, 0, Math.PI * 2)
+  ctx.rect(x, y, size, size)
+  ctx.clip()
+  ctx.fillStyle = hexWithAlpha(ink, 0.16)
+  ctx.fillRect(x, y, size, size)
+  // "\" hatch — fertile ground's is "/", and a reader should never have to work
+  // out which yellow-ish stripe they are looking at.
+  ctx.strokeStyle = hexWithAlpha(ink, 0.6)
+  ctx.lineWidth = Math.max(1.2, cellSize / 12)
+  const spacing = Math.max(4, cellSize / 3.4)
+  for (let offset = -size; offset <= size * 2; offset += spacing) {
+    ctx.beginPath()
+    ctx.moveTo(x + offset, y)
+    ctx.lineTo(x + offset + size, y + size)
+    ctx.stroke()
+  }
+  ctx.restore()
+
+  // The cut itself: two bites taken out of the segment, top and bottom.
+  const bite = size * 0.26
+  ctx.save()
+  ctx.fillStyle = "#ffffff"
+  ctx.globalAlpha = 0.92
+  ctx.beginPath()
+  ctx.moveTo(x + size / 2 - bite / 2, y)
+  ctx.lineTo(x + size / 2 + bite / 2, y)
+  ctx.lineTo(x + size / 2, y + bite * 0.85)
+  ctx.closePath()
   ctx.fill()
-  ctx.lineWidth = Math.max(1.5, cellSize * 0.07)
-  ctx.strokeStyle = "#000000"
   ctx.beginPath()
-  ctx.arc(cx, cy, r, 0, Math.PI * 2)
-  ctx.stroke()
-  const d = r * 0.55
-  ctx.lineCap = "round"
-  ctx.lineWidth = Math.max(1.5, cellSize * 0.1)
-  ctx.strokeStyle = "#ffffff"
+  ctx.moveTo(x + size / 2 - bite / 2, y + size)
+  ctx.lineTo(x + size / 2 + bite / 2, y + size)
+  ctx.lineTo(x + size / 2, y + size - bite * 0.85)
+  ctx.closePath()
+  ctx.fill()
+  ctx.restore()
+
+  ctx.save()
+  ctx.setLineDash([Math.max(2, cellSize * 0.13), Math.max(2, cellSize * 0.09)])
+  ctx.lineWidth = Math.max(1.2, cellSize * 0.05)
+  ctx.strokeStyle = ink
+  ctx.strokeRect(x, y, size, size)
+  ctx.restore()
+}
+
+/**
+ * The mark for a cell the record cannot explain. Muted, dashed, and carrying a
+ * "?" — it is deliberately the quietest thing on the board, because it makes no
+ * claim: it says only that this turn's record is missing something, and that
+ * whatever happened here was not written down. It is never drawn in a team's
+ * colour, because attributing it to a team would be the guess it exists to
+ * avoid.
+ */
+function drawUncertaintyMark(
+  ctx: CanvasRenderingContext2D,
+  cell: Cell,
+  boardHeight: number,
+  cellSize: number,
+  occupied: boolean,
+) {
+  if (!cell) return
+  const g = markGeometry(cell, boardHeight, cellSize, occupied)
+  ctx.save()
+  ctx.fillStyle = "rgba(252, 252, 251, 0.93)"
   ctx.beginPath()
-  ctx.moveTo(cx - d, cy - d)
-  ctx.lineTo(cx + d, cy + d)
-  ctx.moveTo(cx + d, cy - d)
-  ctx.lineTo(cx - d, cy + d)
+  ctx.arc(g.cx, g.cy, g.r, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.setLineDash([Math.max(2, cellSize * 0.11), Math.max(2, cellSize * 0.09)])
+  ctx.lineWidth = Math.max(1.2, cellSize * 0.05)
+  ctx.strokeStyle = UNCERTAIN_COLOR
+  ctx.beginPath()
+  ctx.arc(g.cx, g.cy, g.r, 0, Math.PI * 2)
   ctx.stroke()
   ctx.restore()
+  drawQueryGlyph(ctx, g.cx, g.cy, g.r * 1.25, UNCERTAIN_COLOR)
+}
+
+/**
+ * A colour with an alpha, for the #rrggbb strings a team carries. Anything the
+ * parser does not recognise is handed back untouched, which keeps a named or
+ * already-alpha colour working rather than turning it into black.
+ */
+function hexWithAlpha(color: string, alpha: number): string {
+  const hex = /^#([0-9a-f]{6})$/i.exec(color.trim())
+  if (!hex) return color
+  const value = parseInt(hex[1], 16)
+  const r = (value >> 16) & 255
+  const g = (value >> 8) & 255
+  const b = value & 255
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
 }
 
 // ── Unit tags ───────────────────────────────────────────────────────────────
@@ -2213,6 +2590,14 @@ export function renderBoard(
     ctx.restore()
   })
 
+  // Sever damage goes down with the ground, not with the units: a cut cell is
+  // wreckage lying on the board, and anything that is standing on it now — the
+  // attacker that stopped there, a scrap of food that spawned there — belongs
+  // on top of it.
+  board.severed.forEach((mark) => {
+    drawSeverMark(ctx, mark.cell, board.height, cellSize, mark.color)
+  })
+
   board.food.forEach((food) => {
     const x = food.x * cellSize
     const y = (board.height - 1 - food.y) * cellSize
@@ -2249,23 +2634,24 @@ export function renderBoard(
     ctx.restore()
   })
 
-  // Clash marks go down BEFORE the units, so a unit that survived a collision
-  // is drawn on top of the mark rather than under it: the survivor is the
+  // Clash rings go down BEFORE the units, so a unit that survived a collision
+  // is drawn on top of the ring rather than under it: the survivor is the
   // subject of its cell, and the dashes are what say the cell has a story to
-  // tell. Death markers come last of all, for the cells nobody walked away
-  // from.
+  // tell. Death marks and doubt marks come last of all — a death is drawn
+  // whether or not somebody is standing on the cell (on a contest the winner
+  // is), and it steps aside into a corner badge rather than being dropped.
   const occupiedCells = new Set<string>()
   board.units.forEach((unit) => {
     unit.body.forEach((cell) => occupiedCells.add(`${cell.x},${cell.y}`))
   })
-  clashCellKeys(board).forEach((key) => {
-    const [x, y] = key.split(",")
+  clashRings(board).forEach(({ cell, color }) => {
     drawClashMarker(
       ctx,
-      { x: Number(x), y: Number(y) },
+      cell,
       board.height,
       cellSize,
-      occupiedCells.has(key),
+      occupiedCells.has(`${cell.x},${cell.y}`),
+      color,
     )
   })
 
@@ -2315,10 +2701,28 @@ export function renderBoard(
     options?.tagHoverUnitId ?? null,
   )
 
-  // Death markers last, so a cell that ended the turn as a grave says so over
-  // whatever terrain it sits on.
-  board.deaths.forEach((death) => {
-    drawDeathMarker(ctx, death.cell, board.height, cellSize, death.color)
+  // Death marks last, so a cell that ended the turn as a grave says so over
+  // whatever terrain — and whatever survivor — it sits under.
+  board.deaths.forEach((mark) => {
+    drawDeathMarker(
+      ctx,
+      mark,
+      board.height,
+      cellSize,
+      occupiedCells.has(`${mark.cell.x},${mark.cell.y}`),
+    )
+  })
+
+  // And doubt after even that: where the record ran out, the last word on the
+  // cell should be the one that admits it.
+  board.uncertainties.forEach((mark) => {
+    drawUncertaintyMark(
+      ctx,
+      mark.cell,
+      board.height,
+      cellSize,
+      occupiedCells.has(`${mark.cell.x},${mark.cell.y}`),
+    )
   })
 
   return cellSize
