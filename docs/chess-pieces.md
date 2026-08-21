@@ -32,7 +32,8 @@ The engine sees one kind of thing, a unit with behavioural properties:
 - `leavesTrail` — occupancy trails the head, and the trail cells are
   body-walls that can be severed. True for snakes only.
 - `traversesEdges` — false for jumps (knights), which therefore never contest
-  an edge.
+  an edge. It is the ONLY thing that exempts a unit from an edge exchange:
+  having a trail does not.
 - `path` — the cells to enter, ONE PER SUB-STEP. "Snakes move only in
   sub-step 1" is not a rule: it is what a path of length 1 means.
 - `weightAtTurnStart`, `tier` — frozen for the whole turn (see below).
@@ -73,7 +74,8 @@ Consequences worth stating outright:
 Sub-step count = the longest path staged this turn. Per sub-step:
 
 1. **Advance** every mover with a cell for this sub-step (trail units pop the
-   tail before the head lands; piece stacks teleport).
+   tail before the head lands; piece stacks teleport). The tail pop is
+   unconditional — nothing later in the sub-step puts a tail back.
 2. **Detect** every collision event against the post-advance snapshot: edge
    exchanges, cell co-arrivals, arrivals onto living body/trail cells,
    arrivals onto persistent collision objects.
@@ -97,18 +99,37 @@ order-independent rather than iteration-order dependent.
 Tier first, then frozen weight; **at most one unique strict maximum
 survives**, and any tie leaves nobody standing.
 
-- **Edge exchange** — two units traversing the same edge in opposite
-  directions in one sub-step. Exempt: non-edge-traversers (knights), and trail
-  units whose post-advance occupancy still holds their origin (their body
-  swept in behind the head, so the body rules resolve the meeting instead). A
-  length-1 trail unit leaves nothing behind and contests the edge exactly like
-  a piece; length-1 snakes are reachable in ordinary play, because severing
-  bottoms out there.
-  - Unique winner: it completes into the loser's origin cell and
-    capture-stops. The loser falls back to the cell it started the sub-step on
-    and dies there — its occupancy, its clash record, its `paths` entry and
-    its `moves` cell are all that cell, never the one it tried to swap into.
-  - Tie: both fall back and die on their own two cells, one clash record each.
+- **Edge exchange** — two units whose HEADS exchange through the same edge in
+  one sub-step. **This is uniform across every unit — trails make no
+  difference.** The only exemption is `traversesEdges === false`, i.e. a jump:
+  a knight crosses no edge. (In current geometry no unit can actually exchange
+  heads with a knight, since an L-offset never lands on an adjacent cell; the
+  exemption is stated for the rule, not for a live case.) The contest is
+  head-to-head and is settled before either head reaches the far side, so
+  neither unit is ever charged for the cell it did not enter.
+  - Unique winner: it completes into the loser's start-of-sub-step head cell
+    and capture-stops (if it had path remaining). It is registered as the
+    SURVIVOR of that cell, not re-adjudicated against the pile it just made
+    there; a later arrival contests the winner plus that pile in one
+    cumulative contest, as usual.
+  - Loser: **squashed against its own neck.** It dies at the cell its head
+    held at the start of the sub-step — its clash record, its `paths` entry
+    and its `moves` cell are all that cell, never the one it tried to swap
+    into. Only the HEAD is reverted: **the tail pop is unconditional and
+    stands**, because tails depart deterministically and are never contingent
+    on a contest ahead of the head. So a swap-losing trail unit's final
+    occupancy is its start-of-turn body MINUS the popped tail cell — which for
+    a length-1 unit is nothing at all: it cleared its cell completely and was
+    squashed against empty space. It is still a collision object at its death
+    cell for the rest of the turn. Pieces have no trail, so their whole stack
+    simply reverts.
+  - Tie: both are squashed at their own head cells, one clash record each.
+  - Consequence: two length-≥2 snakes exchanging heads resolve by frozen tier
+    then frozen WEIGHT — not by running into each other's necks. A piece
+    exchanging heads with a snake is the same contest. Head *chasing* (the
+    target moves away, or perpendicular) is not an exchange and still resolves
+    through the body-wall rules below: you cannot chase a head, because by the
+    time you arrive the cell it left is its neck.
 - **Cell contest** — every head-class occupant of a cell somebody arrived at
   (arrivers and stationary units alike) plus everything the cell's pile holds.
   The unique maximum survives (and stops, if it was mid-path); everyone else

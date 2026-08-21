@@ -462,11 +462,11 @@ describe("chess pieces: in-flight edge swaps", () => {
     expect(clash!.subStep).toBe(2)
   })
 
-  // A snake is exempt from the edge contest only while it leaves a body
-  // segment behind for the swapper to hit. A LENGTH-1 snake pops its only
-  // segment before its head lands, so it genuinely clears its square — it
-  // must contest the edge like a piece, or it glides straight through.
-  // Length-1 snakes are reachable in normal play: severing bottoms out there.
+  // The edge contest is UNIFORM: two units whose heads exchange through one
+  // edge contest it, trail or no trail. The only exemption is a jump, which
+  // traverses no edge — and a knight's L never lands adjacent anyway, so no
+  // unit can actually exchange heads with one. A losing trail unit is squashed
+  // against its own neck: only its head is reverted, the tail pop stands.
   const snakeSwap = (
     snakeBody: number[],
     pieceBody: number[],
@@ -553,20 +553,75 @@ describe("chess pieces: in-flight edge swaps", () => {
     expect(next.clashes.find((c) => c.index === b)!.playerIDs.sort()).toEqual(["t1", "t2"])
   })
 
-  it("regression: a longer snake still exempts the swap — its swept-in body resolves it", () => {
+  // INVERTED. This used to assert the trail exemption: the rook was said to
+  // meet the snake's swept-in neck and die on it, whatever the two weighed.
+  // The exchange is now a plain edge contest on frozen weight.
+  it("a length-2 snake exchanging heads with a heavier piece loses the edge", () => {
     const head = at(5, 5)
     const rookAt = at(6, 5)
-    // Length 2: the tail pops but the old head stays as a segment on (5,5),
-    // so the rook meets a body segment there — the body rules, not the edge
-    // contest, and weight does not save it.
-    const next = snakeSwap([head, at(4, 5)], [rookAt, rookAt, rookAt])
+    const next = snakeSwap([head, at(4, 5)], [rookAt, rookAt, rookAt]) // 2 vs 3
+
+    expect(next.alivePlayers).toEqual(["t2"])
+    // The winner completes into the loser's head cell and stops there.
+    expect(next.playerPieces.t2).toEqual([head, head, head])
+    expect(next.moves.t2).toBe(head)
+    expect(next.paths?.t2).toEqual([head])
+    // The snake is squashed against its own neck: it dies on the cell its head
+    // started the sub-step on, never on the one it tried to swap into.
+    expect(next.moves.t1).toBe(head)
+    expect(next.deaths.t1).toEqual({ cell: head, subStep: 1, cause: "edge" })
+    expect(next.clashes.some((c) => c.index === rookAt)).toBe(false)
+    expect(next.clashes.find((c) => c.index === head)).toMatchObject({
+      kind: "edge",
+      reason: REASON.weight,
+      victimIDs: ["t1"],
+      survivorID: "t2",
+    })
+  })
+
+  it("and wins the same edge when the snake is the heavier one", () => {
+    const head = at(5, 5)
+    const rookAt = at(6, 5)
+    // Weight 4 vs 1: the snake completes its step and the rook is squashed
+    // where it stood, having entered nothing at all.
+    const next = snakeSwap([head, at(4, 5), at(3, 5), at(2, 5)], [rookAt])
 
     expect(next.alivePlayers).toEqual(["t1"])
-    expect(next.playerPieces.t1).toEqual([rookAt, head]) // swept in behind the head
-    expect(next.moves.t2).toBe(head) // the rook did enter the square
-    expect(next.paths?.t2).toEqual([head])
-    const clash = next.clashes.find((c) => c.index === head)
-    expect(clash!.reason).toBe(REASON.bodyBlock)
+    expect(next.playerPieces.t1).toEqual([rookAt, head, at(4, 5), at(3, 5)])
+    expect(next.moves.t2).toBe(rookAt)
+    expect(next.paths?.t2).toBeUndefined()
+    expect(next.deaths.t2).toEqual({ cell: rookAt, subStep: 1, cause: "edge" })
+  })
+
+  it("a later arrival contests the edge winner and the pile it made, together", () => {
+    // The rook wins the edge on (5,5) and stops there. Four sub-steps later a
+    // weight-5 rook reaches the same cell and is judged against BOTH the
+    // winner standing on it and the snake it squashed there.
+    const next = run(
+      [
+        gp("s", "t1", "A", "snake"),
+        gp("r", "t2", "A", "rook"),
+        gp("q", "t2", "B", "rook"),
+      ],
+      {
+        s: [at(5, 5), at(4, 5)],
+        r: [at(6, 5), at(6, 5), at(6, 5)],
+        q: [at(9, 5), at(9, 5), at(9, 5), at(9, 5), at(9, 5)],
+      },
+      [mv("s", at(6, 5)), mv("r", at(5, 5)), mv("q", at(1, 5))]
+    )
+
+    expect(next.alivePlayers).toEqual(["q"])
+    expect(next.deaths.s).toEqual({ cell: at(5, 5), subStep: 1, cause: "edge" })
+    expect(next.deaths.r).toEqual({ cell: at(5, 5), subStep: 4, cause: "contest" })
+    const pile = next.clashes.find((c) => c.kind === "contest")
+    expect(pile).toMatchObject({
+      index: at(5, 5),
+      subStep: 4,
+      playerIDs: ["q", "r", "s"],
+      victimIDs: ["r"],
+      survivorID: "q",
+    })
   })
 })
 

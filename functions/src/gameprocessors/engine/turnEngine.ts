@@ -38,6 +38,13 @@ import { Clash, ClashKind } from "@shared/types/Game"
  * snapshot plus the tiers before it, which is what makes the whole sub-step
  * order-independent rather than iteration-order dependent.
  *
+ * ## Edge exchanges
+ *
+ * Two units whose HEADS exchange through the same edge in one sub-step contest
+ * that edge. This is uniform across every unit: the only exemption is a jump,
+ * which traverses no edge at all. Trails make no difference — the contest is
+ * head-to-head and is decided before either head reaches the far side.
+ *
  * ## The wrestling rule
  *
  * From the moment a unit dies or starves, its entire remaining occupancy
@@ -112,8 +119,6 @@ interface RuntimeUnit extends EngineUnit {
   traversed: number[]
   /** Head cell held at the start of the current sub-step, for fallbacks. */
   subStepOrigin: number | null
-  /** Tail this sub-step's advance popped off a trail unit, for an exact revert. */
-  poppedTail: number | null
   /** Segment indices at which this unit's trail was cut, this turn. */
   severCuts: number[]
   death: UnitDeathRecord | null
@@ -170,7 +175,6 @@ export const runTurnEngine = (
       weight: u.occupancy.length,
       traversed: [] as number[],
       subStepOrigin: null,
-      poppedTail: null,
       severCuts: [] as number[],
       death: null,
     }))
@@ -221,7 +225,7 @@ export const runTurnEngine = (
     const to = unit.path[subStep - 1]
     unit.subStepOrigin = unit.occupancy[0]
     if (unit.leavesTrail) {
-      unit.poppedTail = unit.occupancy.pop() ?? null
+      unit.occupancy.pop()
       unit.occupancy.unshift(to)
     } else {
       unit.occupancy.fill(to)
@@ -229,29 +233,33 @@ export const runTurnEngine = (
     unit.traversed.push(to)
   }
 
-  // The exact inverse of `advance`: an edge-contest loser never crossed, so
-  // its occupancy, its traversed list and its final cell all go back to the
-  // cell it held at the start of the sub-step.
+  // An edge-contest loser is squashed against its own neck: its head never
+  // crossed, so it goes back to the cell it held at the start of the sub-step,
+  // and it never gets credited with entering anywhere.
+  //
+  // The TAIL POP IS NOT UNDONE. Tails depart deterministically — a trail unit
+  // shedding its last cell is not conditional on whether a contest happened
+  // somewhere ahead of its head. So a swap-losing trail unit's final occupancy
+  // is its start-of-turn body MINUS the popped tail cell, which for a length-1
+  // unit is nothing at all: it left its cell completely and was squashed
+  // against empty space. It still dies at its start-of-sub-step head cell, and
+  // that cell is a collision object for the rest of the turn either way.
   const fallback = (unit: RuntimeUnit): void => {
     if (unit.subStepOrigin === null) return
     if (unit.leavesTrail) {
       unit.occupancy.shift()
-      if (unit.poppedTail !== null) unit.occupancy.push(unit.poppedTail)
     } else {
       unit.occupancy.fill(unit.subStepOrigin)
     }
     unit.traversed.pop()
   }
 
-  // Whether a mover contests the edge it just crossed. A trail unit is exempt
-  // while it leaves something behind — its body sweeps in behind the head, so
-  // a would-be swapper meets a segment and the body rules resolve it. A
-  // length-1 trail unit leaves nothing behind and contests like a piece.
-  const contestsEdge = (unit: RuntimeUnit): boolean => {
-    if (!unit.traversesEdges || unit.subStepOrigin === null) return false
-    if (!unit.leavesTrail) return true
-    return unit.occupancy.indexOf(unit.subStepOrigin, 1) === -1
-  }
+  // Whether a mover contests the edge it just crossed. Uniform for every unit:
+  // the only exemption is a jump, which traverses no edge at all. Trails make
+  // no difference — the contest is head-to-head, decided before either head
+  // can reach the far side.
+  const contestsEdge = (unit: RuntimeUnit): boolean =>
+    unit.traversesEdges && unit.subStepOrigin !== null
 
   const maxSubSteps = Math.max(1, ...units.map((u) => u.path.length))
 
@@ -290,7 +298,7 @@ export const runTurnEngine = (
         const reason = contestReason(pair, winner)
         const ids = [a.id, b.id]
         if (!winner) {
-          // Tie: neither crosses. Each dies on the cell it started from, and
+          // Tie: neither crosses. Each is squashed at its own head cell, and
           // each cell gets its own record.
           pair.forEach((u) => {
             blocked.add(u.id)
@@ -300,20 +308,18 @@ export const runTurnEngine = (
           })
         } else {
           const loser = winner === a ? b : a
+          const cell = loser.subStepOrigin as number
           blocked.add(loser.id)
           batch.push({ op: "fallback", unit: loser })
-          condemn(loser, loser.subStepOrigin as number, "edge")
-          // The winner completes into the loser's cell and capture-stops.
+          condemn(loser, cell, "edge")
+          // The winner completes into the loser's head cell and capture-stops.
+          // It is the SURVIVOR of that cell, not a fresh arrival at it: the
+          // pile it just made there must not be re-adjudicated against it this
+          // sub-step. Registering both means later arrivals contest the winner
+          // plus the pile, in one cumulative contest, exactly as usual.
           batch.push({ op: "stop", unit: winner })
-          record(
-            "edge",
-            loser.subStepOrigin as number,
-            ids,
-            [loser.id],
-            reason,
-            subStep,
-            winner.id,
-          )
+          batch.push({ op: "durable", cell, unitIDs: ids })
+          record("edge", cell, ids, [loser.id], reason, subStep, winner.id)
         }
       }
     }
@@ -480,7 +486,6 @@ export const runTurnEngine = (
 
     units.forEach((u) => {
       u.subStepOrigin = null
-      u.poppedTail = null
     })
   }
 
@@ -522,7 +527,10 @@ export const runTurnEngine = (
   units.forEach((u) => {
     occupancy.set(u.id, u.occupancy)
     traversed.set(u.id, u.traversed)
-    finalCell.set(u.id, u.occupancy[0])
+    // A swap-losing length-1 trail unit ends up owning no cells at all: its
+    // only cell was the tail it shed. It still died somewhere, and that is the
+    // cell the wire must name.
+    finalCell.set(u.id, u.occupancy.length > 0 ? u.occupancy[0] : (u.death as UnitDeathRecord).cell)
     health.set(u.id, u.health)
   })
 

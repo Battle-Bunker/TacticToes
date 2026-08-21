@@ -545,7 +545,9 @@ describe("snake-only games run the same engine", () => {
     })
   })
 
-  it("a longer snake is still exempt: its swept-in body resolves the meeting", () => {
+  // INVERTED. There is no trail exemption: two length-2 snakes exchanging
+  // heads contest the edge like anything else, and frozen WEIGHT decides it.
+  it("two length-2 snakes exchanging heads contest the edge, and weight decides", () => {
     const next = play({
       players: [
         gp("s1", "t1", "A", "snake"),
@@ -553,15 +555,23 @@ describe("snake-only games run the same engine", () => {
         gp("sb1", "t1", "B", "snake"),
         gp("sb2", "t2", "B", "snake"),
       ],
-      pieces: { s1: [at(5, 5), at(4, 5)], s2: [at(6, 5), at(7, 5)], ...bystanders },
+      pieces: {
+        s1: [at(5, 5), at(4, 5), at(3, 5)], // weight 3
+        s2: [at(6, 5), at(7, 5)], // weight 2
+        ...bystanders,
+      },
       moves: [mv("s1", at(6, 5)), mv("s2", at(5, 5)), ...bystanderMoves],
     })
 
-    // Both meet a body segment rather than an edge: equal tier, so both die on
-    // the segment they ran into.
-    expect(next.alivePlayers.sort()).toEqual(["sb1", "sb2"])
-    expect(next.deaths.s1.cause).toBe("bodyBlock")
-    expect(next.deaths.s2.cause).toBe("bodyBlock")
+    expect(next.alivePlayers.sort()).toEqual(["s1", "sb1", "sb2"])
+    expect(next.playerPieces.s1).toEqual([at(6, 5), at(5, 5), at(4, 5)])
+    expect(next.deaths.s2).toEqual({ cell: at(6, 5), subStep: 1, cause: "edge" })
+    expect(next.clashes.find((c) => c.kind === "edge")).toMatchObject({
+      index: at(6, 5),
+      victimIDs: ["s2"],
+      survivorID: "s1",
+      reason: REASON.weight,
+    })
   })
 })
 
@@ -709,8 +719,8 @@ describe("determinism under roster permutation", () => {
 // square colours — have heads that can meet through an EDGE but can never
 // co-arrive on one cell. The legacy engine had no rule for a snake-vs-snake
 // edge meeting at all: the two heads simply passed through each other. Under
-// the unified engine these all fall out of the general rules, and this block
-// pins what the general rules actually produce.
+// the unified engine the edge rule is uniform — heads that exchange through
+// one edge contest it, trail or no trail — and this block pins what falls out.
 describe("off-parity snakes", () => {
   const bystanders = {
     sb1: [at(2, 2), at(2, 3), at(2, 4)],
@@ -742,56 +752,73 @@ describe("off-parity snakes", () => {
       setup,
     })
 
-  // 1. Neither snake contests the edge: each one's neck sweeps into the cell
-  // it came from, so each head lands on the OTHER's neck and the body rules
-  // decide. At equal tier that is mutual annihilation, one cell each.
-  it("(1) equal tier, both length 2: each dies on the other's neck", () => {
+  // 1. A head-to-head exchange, decided on frozen weight. Equal weight leaves
+  // nobody standing, and each is squashed against its OWN neck — never on the
+  // cell it was trying to reach.
+  it("(1) equal tier and weight, both length 2: an edge deadlock at their own head cells", () => {
     const next = faceOff([at(5, 5), at(4, 5)], [at(6, 5), at(7, 5)], at(5, 5))
 
     expect(next.alivePlayers.sort()).toEqual(["sb1", "sb2"])
     expect(next.deaths).toEqual({
-      s1: { cell: at(6, 5), subStep: 1, cause: "bodyBlock" },
-      s2: { cell: at(5, 5), subStep: 1, cause: "bodyBlock" },
+      s1: { cell: at(5, 5), subStep: 1, cause: "edge" },
+      s2: { cell: at(6, 5), subStep: 1, cause: "edge" },
     })
-    // One record per cell, each naming both units and its own victim. Neither
-    // record claims a survivor: they condemned each other simultaneously.
-    const [onFive, onSix] = next.clashes.filter((c) => c.kind === "bodyBlock")
-    expect(onFive).toMatchObject({
-      index: at(5, 5),
-      playerIDs: ["s1", "s2"],
-      victimIDs: ["s2"],
+    // One record per cell, each naming both units and its own victim, neither
+    // claiming a survivor.
+    const edges = next.clashes.filter((c) => c.kind === "edge")
+    expect(edges.map((c) => c.index)).toEqual([at(5, 5), at(6, 5)])
+    edges.forEach((c) => {
+      expect(c.playerIDs).toEqual(["s1", "s2"])
+      expect(c.reason).toBe(REASON.tie)
+      expect(c.survivorID).toBeUndefined()
     })
-    expect(onSix).toMatchObject({
-      index: at(6, 5),
-      playerIDs: ["s1", "s2"],
-      victimIDs: ["s1"],
-    })
-    expect(onFive.survivorID).toBeUndefined()
-    expect(onSix.survivorID).toBeUndefined()
-    // Both corpses stay put as collision objects for the rest of the turn.
-    expect(next.moves.s1).toBe(at(6, 5))
-    expect(next.moves.s2).toBe(at(5, 5))
+    expect(edges[0].victimIDs).toEqual(["s1"])
+    expect(edges[1].victimIDs).toEqual(["s2"])
+    expect(next.moves.s1).toBe(at(5, 5))
+    expect(next.moves.s2).toBe(at(6, 5))
   })
 
-  // 2. Asymmetric, and deliberately so: the length-1 snake vacates completely,
-  // so the longer snake walks into an empty cell — while the length-1 snake
-  // walks into the neck the longer one just swept in.
-  it("(2) length 2 vs length 1: only the length-1 snake dies, on its own destination", () => {
+  it("(1b) unequal weight: the heavier snake completes the step, the lighter is squashed at home", () => {
+    const next = faceOff(
+      [at(5, 5), at(4, 5), at(3, 5)], // weight 3
+      [at(6, 5), at(7, 5)], // weight 2
+      at(5, 5)
+    )
+
+    expect(next.alivePlayers.sort()).toEqual(["s1", "sb1", "sb2"])
+    expect(next.playerPieces.s1).toEqual([at(6, 5), at(5, 5), at(4, 5)])
+    expect(next.deaths).toEqual({
+      s2: { cell: at(6, 5), subStep: 1, cause: "edge" },
+    })
+    expect(next.clashes.find((c) => c.kind === "edge")).toMatchObject({
+      index: at(6, 5),
+      playerIDs: ["s1", "s2"],
+      victimIDs: ["s2"],
+      survivorID: "s1",
+      reason: REASON.weight,
+    })
+  })
+
+  // 2. Nothing special about a length-1 snake any more: it is just the lighter
+  // side of the same weight contest. What IS particular to it is what it
+  // leaves behind — its only cell was the tail it shed, so its corpse owns no
+  // cells at all. It still died somewhere, and the wire still says where.
+  it("(2) length 2 vs length 1: the same weight contest, and the loser owns nothing", () => {
     const next = faceOff([at(5, 5), at(4, 5)], [at(6, 5)], at(5, 5))
 
     expect(next.alivePlayers.sort()).toEqual(["s1", "sb1", "sb2"])
     expect(next.playerPieces.s1).toEqual([at(6, 5), at(5, 5)]) // completed the step
+    expect(next.playerPieces.s2).toBeUndefined()
     expect(next.deaths).toEqual({
-      s2: { cell: at(5, 5), subStep: 1, cause: "bodyBlock" },
+      s2: { cell: at(6, 5), subStep: 1, cause: "edge" },
     })
-    expect(next.clashes.find((c) => c.kind === "bodyBlock")).toMatchObject({
-      index: at(5, 5),
-      playerIDs: ["s1", "s2"],
+    expect(next.moves.s2).toBe(at(6, 5))
+    expect(next.clashes.find((c) => c.kind === "edge")).toMatchObject({
+      index: at(6, 5),
       victimIDs: ["s2"],
       survivorID: "s1",
+      reason: REASON.weight,
     })
-    // The corpse sits on the cell the survivor's own neck now occupies.
-    expect(next.playerPieces.s1).toContain(next.deaths.s2.cell)
   })
 
   // 3. Both leave nothing behind, so this is the one genuine snake-vs-snake
@@ -837,11 +864,9 @@ describe("off-parity snakes", () => {
     })
   })
 
-  // 4. Sever and bodyBlock fire in the same sub-step, each adjudicated against
-  // the same snapshot: the higher tier cuts the neck it landed on, and the
-  // lower tier dies on the neck IT landed on. Because the owner is removed
-  // outright, its recorded cut never truncates anything.
-  it("(4) higher tier vs lower tier, both length 2: simultaneous sever and bodyBlock", () => {
+  // 4. Tier outranks weight, and the exchange is a PURE edge contest: no sever
+  // fires for it, because the two heads never reach each other's bodies.
+  it("(4) higher tier vs lower tier, both length 2: a tier win, and no sever", () => {
     const next = faceOff([at(5, 5), at(4, 5)], [at(6, 5), at(7, 5)], at(5, 5), {
       playerInvulnerabilityLevel: { s1: 1, s2: 0, sb1: 0, sb2: 0 },
     })
@@ -849,16 +874,15 @@ describe("off-parity snakes", () => {
     expect(next.alivePlayers.sort()).toEqual(["s1", "sb1", "sb2"])
     expect(next.playerPieces.s1).toEqual([at(6, 5), at(5, 5)])
     expect(next.deaths).toEqual({
-      s2: { cell: at(5, 5), subStep: 1, cause: "bodyBlock" },
+      s2: { cell: at(6, 5), subStep: 1, cause: "edge" },
     })
-    expect(next.clashes.find((c) => c.kind === "sever")).toMatchObject({
+    expect(next.clashes.map((c) => c.kind)).toEqual(["edge"])
+    expect(next.clashes[0]).toMatchObject({
       index: at(6, 5),
-      playerIDs: ["s1", "s2"],
-      victimIDs: [],
+      victimIDs: ["s2"],
       survivorID: "s1",
+      reason: REASON.tier,
     })
-    // The severed owner died the same sub-step, so the cut is recorded on the
-    // wire but truncates nothing: severedCells only ever names SURVIVORS.
     expect(next.severedCells).toBeUndefined()
   })
 
@@ -910,9 +934,9 @@ describe("off-parity snakes", () => {
     expect(next.severedCells).toEqual({ s2: [at(6, 5)] })
   })
 
-  // 6. Collisions adjudicate strictly before health, so a hazard on the
-  // destination never pre-empts the collision that was already decided.
-  it("(6a) a hazard on the destination does not change who killed whom", () => {
+  // 6. Collisions adjudicate strictly before health, so a hazard on the far
+  // side of the edge never touches a unit that never crossed it.
+  it("(6a) an edge loser is not dosed by a hazard on the cell it never reached", () => {
     const next = faceOff(
       [at(5, 5), at(4, 5)],
       [at(6, 5), at(7, 5)],
@@ -924,17 +948,17 @@ describe("off-parity snakes", () => {
       { hazardDamage: 30 }
     )
 
-    // s1 would have starved on the hazard, but it died to the neck first: the
-    // cause on the wire is the collision, and it is charged no hazard dose.
-    expect(next.deaths.s1).toEqual({
-      cell: at(6, 5),
-      subStep: 1,
-      cause: "bodyBlock",
+    // The deadlock squashes s1 at its own head cell — the hazard sits on the
+    // cell it was aiming at, and it is charged nothing for it.
+    expect(next.deaths).toEqual({
+      s1: { cell: at(5, 5), subStep: 1, cause: "edge" },
+      s2: { cell: at(6, 5), subStep: 1, cause: "edge" },
     })
+    expect(next.clashes.every((c) => c.kind === "edge")).toBe(true)
     expect(next.clashes.some((c) => c.kind === "hazard")).toBe(false)
   })
 
-  it("(6b) a survivor of the collision can still starve on that same cell, that same sub-step", () => {
+  it("(6b) the edge WINNER does cross, and can starve on the hazard it lands in", () => {
     const next = faceOff(
       [at(5, 5), at(4, 5)],
       [at(6, 5), at(7, 5)],
@@ -950,12 +974,61 @@ describe("off-parity snakes", () => {
     expect(next.alivePlayers.sort()).toEqual(["sb1", "sb2"])
     expect(next.deaths).toEqual({
       s1: { cell: at(6, 5), subStep: 1, cause: "hazard" },
-      s2: { cell: at(5, 5), subStep: 1, cause: "bodyBlock" },
+      s2: { cell: at(6, 5), subStep: 1, cause: "edge" },
     })
-    // The sever it landed still went on the wire — it just outlived nobody.
-    const sever = next.clashes.find((c) => c.kind === "sever")
-    expect(sever).toMatchObject({ index: at(6, 5), victimIDs: [] })
-    expect(sever!.survivorID).toBeUndefined()
-    expect(next.severedCells).toBeUndefined()
+    // It won the edge and then died on the same cell in the same sub-step, so
+    // the record withdraws its claim to a survivor.
+    const edge = next.clashes.find((c) => c.kind === "edge")
+    expect(edge).toMatchObject({ index: at(6, 5), victimIDs: ["s2"] })
+    expect(edge!.survivorID).toBeUndefined()
+  })
+
+  // A piece exchanging heads with a trail unit is the same contest: no
+  // friendly geometry, no trail exemption, just frozen tier then weight.
+  it("(7) a piece exchanging heads with a length-2 snake is an ordinary edge contest", () => {
+    const heavierPiece = play({
+      players: [
+        gp("s", "t1", "A", "snake"),
+        gp("r", "t2", "A", "rook"),
+        ...bystanderPlayers,
+      ],
+      pieces: {
+        s: [at(5, 5), at(4, 5)],
+        r: [at(6, 5), at(6, 5), at(6, 5)],
+        ...bystanders,
+      },
+      moves: [mv("s", at(6, 5)), mv("r", at(1, 5)), ...bystanderMoves],
+    })
+
+    expect(heavierPiece.deaths.s).toEqual({
+      cell: at(5, 5),
+      subStep: 1,
+      cause: "edge",
+    })
+    expect(heavierPiece.playerPieces.r).toEqual([at(5, 5), at(5, 5), at(5, 5)])
+    // The winner capture-stops: the rest of its ray is abandoned.
+    expect(heavierPiece.paths?.r).toEqual([at(5, 5)])
+
+    const heavierSnake = play({
+      players: [
+        gp("s", "t1", "A", "snake"),
+        gp("r", "t2", "A", "rook"),
+        ...bystanderPlayers,
+      ],
+      pieces: {
+        s: [at(5, 5), at(4, 5), at(3, 5), at(2, 5)],
+        r: [at(6, 5)],
+        ...bystanders,
+      },
+      moves: [mv("s", at(6, 5)), mv("r", at(1, 5)), ...bystanderMoves],
+    })
+
+    expect(heavierSnake.deaths.r).toEqual({
+      cell: at(6, 5),
+      subStep: 1,
+      cause: "edge",
+    })
+    expect(heavierSnake.playerPieces.s).toEqual([at(6, 5), at(5, 5), at(4, 5), at(3, 5)])
+    expect(heavierSnake.paths?.r).toBeUndefined() // it entered nothing
   })
 })
