@@ -148,10 +148,12 @@ export interface Turn {
   clashes: Clash[]
   /**
    * Authoritative death registry for this turn — the ONLY source renderers
-   * use to draw deaths. Every unit removed this turn appears here, including
-   * starved units (health exhausted mid-turn: they halt where they are,
-   * remain collision objects until the collision phase ends, and are removed
-   * at end of turn). Empty object when nobody died.
+   * use to draw deaths. Every unit removed this turn appears here. Exhaustion
+   * (health at or below zero mid-turn) is PROVISIONAL death: the unit halts
+   * where it stood and remains a collision object, but it appears here only
+   * if its health is still at or below zero at end of turn — an exhausted
+   * unit whose halt cell holds food eats, recovers, and survives. Empty
+   * object when nobody died.
    */
   deaths: { [playerID: string]: UnitDeath }
   /**
@@ -190,8 +192,8 @@ export type ClashKind =
   | "edge" // in-flight edge exchange contest (units swapping cells mid-sub-step)
   | "bodyBlock" // died entering a cell occupied by a unit's body/trail
   | "sever" // body cut by a strictly-higher-tier unit — non-fatal for the owner
-  | "hazard" // health exhausted by hazard damage (starved where it stood)
-  | "starvation" // health exhausted by movement cost (starved where it stood)
+  | "hazard" // exhausted by hazard damage: halted where it stood; fatal only if still at zero or below at end of turn
+  | "exhaustion" // exhausted by movement cost: halted where it stood; fatal only if still at zero or below at end of turn
   | "wall" // hit a boundary wall
   | "self" // collided with own body
   | "regicide" // removed with its team when the team's last king fell

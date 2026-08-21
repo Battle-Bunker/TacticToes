@@ -38,7 +38,8 @@ The engine sees one kind of thing, a unit with behavioural properties:
   sub-step 1" is not a rule: it is what a path of length 1 means.
 - `weightAtTurnStart`, `tier` — frozen for the whole turn (see below).
 - `health` — the only thing that advances within the turn.
-- `status` — `active | stopped | starved | dead`.
+- `status` — `active | stopped | exhausted | dead`. Exhausted is not dead:
+  see "Exhaustion is provisional death" below.
 
 Occupancy on the wire (`Turn.playerPieces`) is unchanged: a snake's body
 (index 0 = head), or a piece's weight-stack (`weight` copies of its cell).
@@ -57,9 +58,9 @@ START of the turn.**
 
 Board occupancy changes within the turn ONLY through movement (a trail sweep
 including the tail pop, a piece stack teleporting) and halting — **never
-through removal**. Dead units, starved units and severed segments all stay on
-the board as collision objects until the collision phase (every sub-step) has
-finished.
+through removal**. Dead units, exhausted units and severed segments all stay
+on the board until the collision phase (every sub-step) has finished — the
+dead as collision objects, the exhausted as their live selves.
 
 Consequences worth stating outright:
 
@@ -145,7 +146,7 @@ survives**, and any tie leaves nobody standing.
   means living as the body tier found the board — so two snakes that run into
   each other's necks both die, whichever order the roster lists them in.
 - **Persistent collision objects (the wrestling rule)** — from the moment a
-  unit dies or starves, its ENTIRE remaining occupancy becomes durable
+  unit dies, its ENTIRE remaining occupancy becomes durable
   collision cells, as does any cell where a fatal contest happened. A unit
   arriving at such a cell on a later sub-step joins that cell's CUMULATIVE
   contest against every prior participant there, on frozen tier and weight. It
@@ -170,23 +171,59 @@ nothing is settled at end of turn any more.
   configurable) per hazard cell entered, charged the same sub-step. A unit
   that does not move at all and stands on a hazard pays exactly one dose, at
   sub-step 1.
-- **Starving**: health ≤ 0 makes the unit `starved`. It halts immediately at
-  the cell it reached, its body persists as a collision incumbent — a dying
-  animal that still defeats a lower-frozen-weight arrival for the rest of the
-  turn — and it is removed at end of turn. It appears in `Turn.deaths` with
-  cause `"hazard"` (a hazard dose finished it) or `"starvation"`.
-- **Units die mid-ray from running out of health.** A slider that cannot
-  afford its ray halts where the health ran out; it never reaches its staged
-  destination, and food waiting there does not rescue it. There is no
-  mid-ray food rescue at all: cost is charged as it is spent.
+- **Exhaustion**: health ≤ 0 makes the unit `exhausted` — see the section
+  below. It halts immediately at the cell it reached, stays a live collision
+  incumbent, and may or may not die for it.
+- **Units halt mid-ray from running out of health.** A slider that cannot
+  afford its ray halts where the health ran out and never reaches its staged
+  destination — so food waiting there is no rescue. Cost is charged as it is
+  spent; only food on the cell it actually halted on can bring it back.
 - An edge-contest loser is never charged for the cell it did not enter.
+
+### Exhaustion is provisional death
+
+Health at or below zero mid-turn does **not** kill. It stops MOVEMENT, and
+nothing else:
+
+- The unit becomes `exhausted` and halts on the cell it had reached. Whatever
+  is left of its path is abandoned.
+- It stays **fully alive on the board** for the rest of the collision phase.
+  It is not a corpse and does not go into any durable pile: it contests as
+  itself. It still beats a lighter arrival on frozen tier and weight — a dying
+  animal is still dangerous — and a heavier arrival can still kill it. That
+  kill is an ordinary **collision** death (`contest`), not an exhaustion one,
+  and the unit appears in `Turn.deaths` exactly once, with that cause.
+- **Exhaustion kills only if the unit is still at or below zero at END OF
+  TURN.** Food is the only heal in the game, and it is eaten at a unit's final
+  cell in the end-of-turn food phase — which now runs BEFORE exhaustion is
+  settled. So, with no carve-out anywhere: an exhausted unit whose halt cell
+  holds food eats, restores to its type's max, grows, and survives — halted,
+  short of where it was going, but alive. An exhausted unit anywhere else dies
+  on its halt cell, entering `Turn.deaths` with cause `"exhaustion"` (movement
+  cost) or `"hazard"` (a hazard dose), and the sub-step it halted on.
+
+A snake at 1 health stepping onto food therefore exhausts on the food cell and
+comes straight back. A slider that cannot afford its ray still dies, unless it
+happens to halt on food — food further along the ray is no use to a unit that
+never reaches it.
+
+**On the wire**, the halt is always visible. The engine emits a clash at the
+halt cell with kind `"exhaustion"` or `"hazard"` the moment it happens:
+
+- if the exhaustion proves fatal, the unit is in that record's `victimIDs`,
+  and there is a matching `Turn.deaths` entry;
+- if the unit recovers — or is killed by something else first — `victimIDs`
+  stays **empty**, the same non-fatal shape a `sever` uses. The record is then
+  purely the explanation for why the unit stopped short of its staged path.
 
 ### Eating
 
-Eating happens in the end-of-turn food phase: a SURVIVOR standing on food
-consumes it, restores health to its current kind's configured max
-(`maxHealthPerUnit`, default 100) and gains one weight/length. It no longer
-replaces the movement cost — that was already charged in-sim.
+Eating happens in the end-of-turn food phase: every unit still on the board
+and standing on food consumes it, restores health to its current kind's
+configured max (`maxHealthPerUnit`, default 100) and gains one weight/length.
+It no longer replaces the movement cost — that was already charged in-sim.
+The phase runs after the collision dead are removed but BEFORE exhaustion is
+settled, which is the whole mechanism by which an exhausted unit recovers.
 
 ## Movement grammar
 
@@ -238,16 +275,20 @@ engine-legality-bearing.
 
 After the collision phase, in this order:
 
-1. dead and starved units leave the board (severs already truncated survivors
-   inside the engine, writing `Turn.severedCells`);
-2. ally buff expiry for vulnerable units — see below;
-3. food and growth;
-4. regicide;
-5. orientation rewrite (so dead units drop out, and a pawn promoting this turn
+1. the COLLISION dead leave the board (severs already truncated survivors
+   inside the engine, writing `Turn.severedCells`). Exhausted units stay — they
+   still have the food phase ahead of them;
+2. food and growth, for every surviving unit standing on food, **exhausted
+   units included**;
+3. exhaustion is settled: anything still at or below zero dies on the cell it
+   halted on;
+4. ally buff expiry for vulnerable units — see below;
+5. regicide;
+6. orientation rewrite (so dead units drop out, and a pawn promoting this turn
    keeps its pawn orientation);
-6. potion collection, food/potion spawning, effect expiry;
-7. pawn promotion;
-8. winners, then turn assembly.
+7. potion collection, food/potion spawning, effect expiry;
+8. pawn promotion;
+9. winners, then turn assembly.
 
 **Vulnerable-collision buff expiry**: when a unit whose frozen tier is below
 zero DIES — for any cause — or SURVIVES A SEVER, its team-mates'
@@ -269,7 +310,8 @@ the piece path never fired it for a severed snake.)
   Trail units are excluded, and so is any piece that entered nothing.
 - **`Turn.deaths: { [playerID]: { cell, subStep, cause } }`** — the
   authoritative death registry, and the ONLY source renderers use to draw
-  deaths. Every unit removed this turn appears here, starved units included.
+  deaths. Every unit removed this turn appears here. An exhausted unit
+  appears only if its exhaustion proved fatal — see below.
   `cause` is a `ClashKind`.
 - **`Turn.severedCells?: { [playerID]: number[] }`** — cells cut from each
   SURVIVING trail unit this turn (non-fatal damage, for damage indicators).
@@ -278,10 +320,11 @@ the piece path never fired it for a severed snake.)
 - **`Turn.clashes: Clash[]`** — one adjudicated event at one cell:
   - `index` — the cell;
   - `subStep` — which sub-step it happened on (1 for whole-move units);
-  - `kind` — `contest | edge | bodyBlock | sever | hazard | starvation | wall
+  - `kind` — `contest | edge | bodyBlock | sever | hazard | exhaustion | wall
     | self | regicide`;
   - `playerIDs` — every unit involved, survivors included;
-  - `victimIDs` — the subset that died (or starved) HERE. Empty for a sever;
+  - `victimIDs` — the subset that died HERE. Empty for a sever, and empty for
+    an exhaustion that the unit recovered from or outlived;
   - `survivorID?` — the unique unit left standing at this cell, when there is
     one. Withdrawn when the named unit was condemned in the same sub-step (two
     snakes can annihilate each other simultaneously);
@@ -316,5 +359,5 @@ the piece path never fired it for a severed snake.)
 - Board capacity guard counts total units per team.
 - A unit that never moves pays its stationary hazard dose inside the engine,
   at sub-step 1, so ALL health accounting lives in one place — and a piece
-  that starves on a hazard while standing still becomes a collision incumbent
-  like any other starved unit.
+  that exhausts on a hazard while standing still is an incumbent like any
+  other exhausted unit — and recovers if it happens to be standing on food.

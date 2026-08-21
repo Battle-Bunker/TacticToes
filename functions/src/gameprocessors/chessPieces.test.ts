@@ -674,9 +674,10 @@ describe("chess pieces: death squares on the wire", () => {
   // INVERTED against the pre-engine behavior. Movement cost used to be
   // settled once, in the food phase, so a piece could complete a ray it could
   // not afford and die on the staged destination. The engine now charges each
-  // cell as it is entered, so the piece starves MID-RAY and halts where its
-  // health ran out — three cells short of where it was going.
-  it("a piece that starves mid-ray halts and dies on the cell that drained it", () => {
+  // cell as it is entered, so the piece EXHAUSTS mid-ray and halts where its
+  // health ran out — three cells short of where it was going. Nothing revives
+  // it here, so the halt is where it dies.
+  it("a piece that exhausts mid-ray halts and dies on the cell that drained it", () => {
     const players = [gp("t1", "t1", "A", "rook"), gp("t2", "t2", "A", "king")]
     const dest = at(5, 5)
     const drained = at(4, 5) // the third cell entered: 3 health, 1 per cell
@@ -690,9 +691,9 @@ describe("chess pieces: death squares on the wire", () => {
     expect(next.alivePlayers).toEqual(["t2"])
     expect(next.moves.t1).toBe(drained)
     expect(next.paths?.t1).toEqual([at(2, 5), at(3, 5), drained])
-    expect(next.deaths.t1).toEqual({ cell: drained, subStep: 3, cause: "starvation" })
+    expect(next.deaths.t1).toEqual({ cell: drained, subStep: 3, cause: "exhaustion" })
     expect(
-      next.clashes.some((c) => c.index === drained && c.reason === REASON.starvation)
+      next.clashes.some((c) => c.index === drained && c.reason === REASON.exhaustion)
     ).toBe(true)
   })
 

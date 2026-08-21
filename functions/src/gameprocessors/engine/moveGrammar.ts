@@ -112,17 +112,9 @@ export const spawnOrientationCandidates = (
   return best
 }
 
-// Spawn orientation, assigned once at turn 0: toward the board centre,
-// ties resolved uniformly at random among the tied candidates.
-export const spawnOrientation = (
-  type: UnitType,
-  index: number,
-  boardWidth: number,
-  boardHeight: number,
-): Orientation => {
-  const best = spawnOrientationCandidates(type, index, boardWidth, boardHeight)
-  return best[Math.floor(Math.random() * best.length)]
-}
+// NOTE: picking ONE of these candidates is spawning, not rules, and the tie
+// break is random — so it lives with the caller. Nothing in this directory may
+// read a clock or an RNG (see VENDOR.md).
 
 export type UnitAction =
   | { kind: "stay" }

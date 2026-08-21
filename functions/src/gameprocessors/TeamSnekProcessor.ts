@@ -16,15 +16,12 @@ import {
   DEFAULT_PAWN_PROMOTION_WEIGHT,
   Orientation,
   ORTHOGONALS,
-  defaultAction,
   isPieceType,
   leavesTrail,
-  planUnitAction,
-  spawnOrientation,
+  spawnOrientationCandidates,
   toXY,
-  traversesEdges,
 } from "./engine/moveGrammar"
-import { EngineUnit, REASON, runTurnEngine } from "./engine/turnEngine"
+import { ResolveTurnInput, TurnResolution, resolveTurn } from "./engine/resolveTurn"
 import { assignCellsToSlices, sliceDistance } from "../utils/radialSlices"
 
 export interface SnakeGameState {
@@ -200,7 +197,7 @@ export class TeamSnekProcessor {
     // random).
     const orientation: { [playerID: string]: Orientation } = {}
     gamePlayers.forEach((player) => {
-      orientation[player.id] = spawnOrientation(
+      orientation[player.id] = this.spawnOrientation(
         player.unitType ?? "snake",
         playerPieces[player.id][0],
         boardWidth,
@@ -245,9 +242,10 @@ export class TeamSnekProcessor {
     return firstTurn
   }
 
-  // One turn, one engine. Every game — snake-only, pure chess or mixed —
-  // resolves movement and every collision inside the sub-step engine, and then
-  // runs the same end-of-turn phases on the result.
+  // One turn, one encoding. Movement, every collision and the whole end-of-turn
+  // settlement live in engine/resolveTurn.ts — the same pure module a client
+  // vendors to predict a turn. This method is the game-level shell around it:
+  // Firestore state in, potions/orientation/scoring/wire out.
   applyMoves(currentTurn: Turn, moves: Move[]): Turn {
     try {
       if (currentTurn.fertileTiles && currentTurn.fertileTiles.length > 0) {
@@ -258,43 +256,35 @@ export class TeamSnekProcessor {
       // 1. Setup
       const gameState = this.initializeGameState(currentTurn)
       const originSquares = this.captureOriginSquares(gameState)
+      moves.forEach((move) => {
+        gameState.playerMoves[move.playerID] = move.move
+      })
 
-      // 2. Validate staged moves into per-unit paths (no board mutation yet)
-      const plannedPaths = this.planUnitActions(gameState, moves)
+      // 2. Resolve the turn: grammar, collision phase, collision deaths, food
+      //    and growth, exhaustion deaths, sever truncation, regicide.
+      this.applyResolution(gameState, resolveTurn(this.resolveTurnInput(gameState)))
 
-      // 3. The collision phase: every sub-step, every collision, every sever
-      //    truncation and all in-turn health accounting.
-      this.runEngine(gameState, plannedPaths)
-
-      // 4. Ally buff expiry for vulnerable units that died OR were severed,
-      //    then the dead and starved leave the board.
+      // 3. Ally buff expiry for vulnerable units that died — collisions and
+      //    fatal exhaustion alike — or that survived a sever.
       this.scheduleVulnerableCollisionBuffExpiry(gameState)
-      this.removeDeadPlayers(gameState)
-
-      // 5. Food: eating restores health and adds weight. Movement cost is no
-      //    longer settled here — the engine charged it as it was spent.
-      this.processFood(gameState)
-
-      // 6. Regicide: a team configured with kings dies with its last king
-      this.applyRegicide(gameState)
 
       // Orientation rewrites after the last phase that can kill, so the map it
       // rebuilds holds exactly the units still on the board — and before
       // promotion, so a pawn that promotes this turn keeps its pawn orientation.
       this.updateOrientation(gameState, originSquares)
 
-      // 7. Potions, spawns, effect expiry
+      // 4. Potions, spawns, effect expiry
       this.processInvulnerabilityPotionCollection(gameState, currentTurnNumber)
       this.generateNewFood(gameState)
       this.generateNewInvulnerabilityPotions(gameState)
       this.expireEffects(gameState, currentTurnNumber)
 
-      // 8. Pawns that grew to the threshold promote after the food phase, so a
+      // 5. Pawns that grew to the threshold promote after the food phase, so a
       //    pawn that eats into the threshold promotes the same turn. The weight
       //    reset lands after every phase that reads weight and before winners.
       this.applyPawnPromotions(gameState)
 
-      // 9. Winners and turn assembly
+      // 6. Winners and turn assembly
       const winners = this.calculateWinners(gameState)
       return this.createNewTurn(currentTurn, gameState, winners)
     } catch (error) {
@@ -303,10 +293,104 @@ export class TeamSnekProcessor {
     }
   }
 
+  // Teams that play under regicide: those configured with at least one king,
+  // whether or not one is still standing. Kings never change kind (promotion
+  // only creates queens), so the setup is authoritative.
+  private regicideTeamIDs(): string[] {
+    return Array.from(
+      new Set(
+        this.gameSetup.gamePlayers
+          .filter((p) => p.unitType === "king")
+          .map((p) => p.teamID),
+      ),
+    )
+  }
+
+  // The board and roster as the pure module wants them. Tier is passed in
+  // rather than derived, which is exactly how potions and effects reach the
+  // rules without the module knowing they exist.
+  private resolveTurnInput(gameState: SnakeGameState): ResolveTurnInput {
+    const kings = new Set(
+      this.gameSetup.gamePlayers.filter((p) => p.unitType === "king").map((p) => p.id),
+    )
+    return {
+      units: gameState.newAlivePlayers.map((playerID) => ({
+        id: playerID,
+        type: gameState.unitTypes[playerID],
+        teamID: this.gameSetup.gamePlayers.find((p) => p.id === playerID)?.teamID ?? "",
+        isKing: kings.has(playerID),
+        tier: gameState.playerInvulnerabilityLevel[playerID] ?? 0,
+        health: gameState.newPlayerHealth[playerID],
+        occupancy: gameState.newSnakes[playerID],
+        orientation: gameState.orientation[playerID],
+        stagedMove: gameState.playerMoves[playerID],
+      })),
+      boardWidth: gameState.boardWidth,
+      boardHeight: gameState.boardHeight,
+      walls: this.getWallPositions(gameState.boardWidth, gameState.boardHeight),
+      hazards: gameState.newHazards,
+      hazardDamage: this.hazardDamage(),
+      food: gameState.newFood,
+      maxHealth: this.gameSetup.maxHealthPerUnit,
+      regicideTeamIDs: this.regicideTeamIDs(),
+    }
+  }
+
+  // Folds the settled turn back into the game-level state. Everything the
+  // module reports is authoritative: occupancy, health, food, applied moves,
+  // the death registry, severed cells and the clash stream.
+  private applyResolution(gameState: SnakeGameState, resolution: TurnResolution): void {
+    gameState.clashes.push(...resolution.clashes)
+    gameState.deaths = resolution.deaths
+    gameState.traversed = resolution.traversed
+    gameState.severedCells = resolution.severedCells
+    gameState.subStepCount = resolution.subStepCount
+    gameState.newFood = resolution.food
+
+    // A rotation is a grammar outcome, not a movement one: the unit spent its
+    // turn turning, so its new facing lands before the orientation rewrite.
+    Object.entries(resolution.rotations).forEach(([playerID, orientation]) => {
+      gameState.orientation[playerID] = orientation
+    })
+    // The applied move is the cell the unit actually ended on — a truncated
+    // slider its stop cell, anything that died the cell it died on.
+    Object.entries(resolution.finalCell).forEach(([playerID, cell]) => {
+      gameState.playerMoves[playerID] = cell
+    })
+    resolution.vulnerableCollided.forEach((playerID) => {
+      gameState.vulnerableSnakesCollided.add(playerID)
+    })
+
+    Object.keys(resolution.deaths).forEach((playerID) => gameState.deadPlayers.add(playerID))
+    this.removeDeadPlayers(gameState)
+    Object.entries(resolution.board).forEach(([playerID, unit]) => {
+      gameState.newSnakes[playerID] = unit.occupancy
+      gameState.newPlayerHealth[playerID] = unit.health
+    })
+
+    resolution.eliminatedTeamIDs.forEach((teamID) => {
+      logger.info(`Snek: Team ${teamID} eliminated — its last king fell.`)
+    })
+  }
+
   // Piece-only wire fields (Turn.unitTypes, Turn.paths) are written only for
   // games that field pieces. The engine itself never asks.
   protected hasPieceUnits(): boolean {
     return this.gameSetup.gamePlayers.some((p) => isPieceType(p.unitType))
+  }
+
+  // Spawn orientation, assigned once at turn 0: toward the board centre, ties
+  // resolved uniformly at random among the tied candidates. The candidate set
+  // is a rule (engine/moveGrammar.ts); choosing among them is spawning, and
+  // spawning is random, so it lives out here.
+  private spawnOrientation(
+    type: UnitType,
+    index: number,
+    boardWidth: number,
+    boardHeight: number,
+  ): Orientation {
+    const best = spawnOrientationCandidates(type, index, boardWidth, boardHeight)
+    return best[Math.floor(Math.random() * best.length)]
   }
 
   // Max health for a unit type: per-type config with a universal default of
@@ -364,152 +448,6 @@ export class TeamSnekProcessor {
         type === "knight" ? { dx, dy } : { dx: Math.sign(dx), dy: Math.sign(dy) }
     })
     gameState.orientation = orientation
-  }
-
-  // Turns each unit's staged destination into the path it will walk, one cell
-  // per sub-step. An illegal or missing destination falls back to the kind's
-  // default action: trail units continue straight, pieces hold.
-  private planUnitActions(
-    gameState: SnakeGameState,
-    moves: Move[],
-  ): { [playerID: string]: number[] } {
-    moves.forEach((move) => {
-      gameState.playerMoves[move.playerID] = move.move
-    })
-
-    // Squares a pawn may step to diagonally: food or any unit, at turn start.
-    const pawnTargets = new Set<number>(gameState.newFood)
-    Object.values(gameState.newSnakes).forEach((body) => {
-      body.forEach((pos) => pawnTargets.add(pos))
-    })
-
-    const { boardWidth, boardHeight } = gameState
-    const plannedPaths: { [playerID: string]: number[] } = {}
-    gameState.newAlivePlayers.forEach((playerID) => {
-      const type = gameState.unitTypes[playerID]
-      const origin = gameState.newSnakes[playerID][0]
-      const orientation = gameState.orientation[playerID]
-      const staged = gameState.playerMoves[playerID]
-
-      const planned =
-        staged === undefined
-          ? null
-          : planUnitAction(type, origin, staged, boardWidth, boardHeight, orientation, pawnTargets)
-      const action =
-        planned ?? defaultAction(type, origin, boardWidth, boardHeight, orientation)
-
-      if (action.kind === "move") {
-        plannedPaths[playerID] = action.path
-        return
-      }
-      if (action.kind === "rotate") gameState.orientation[playerID] = action.orientation
-      plannedPaths[playerID] = []
-    })
-    return plannedPaths
-  }
-
-  // Hands the board to the unified engine and folds its typed events back into
-  // the turn state. Everything the engine reports — occupancy, health, death
-  // registry, severed cells, clashes, applied moves — is authoritative.
-  private runEngine(
-    gameState: SnakeGameState,
-    plannedPaths: { [playerID: string]: number[] },
-  ): void {
-    const engineUnits: EngineUnit[] = gameState.newAlivePlayers.map((playerID) => {
-      const type = gameState.unitTypes[playerID]
-      return {
-        id: playerID,
-        leavesTrail: leavesTrail(type),
-        traversesEdges: traversesEdges(type),
-        occupancy: gameState.newSnakes[playerID],
-        tier: gameState.playerInvulnerabilityLevel[playerID] ?? 0,
-        health: gameState.newPlayerHealth[playerID],
-        path: plannedPaths[playerID] ?? [],
-      }
-    })
-
-    gameState.subStepCount = Math.max(1, ...engineUnits.map((u) => u.path.length))
-
-    const result = runTurnEngine(
-      engineUnits,
-      gameState.newHazards,
-      this.getWallPositions(gameState.boardWidth, gameState.boardHeight),
-      this.hazardDamage(),
-    )
-
-    gameState.clashes.push(...result.clashes)
-    result.occupancy.forEach((cells, playerID) => {
-      gameState.newSnakes[playerID] = cells
-    })
-    result.health.forEach((health, playerID) => {
-      gameState.newPlayerHealth[playerID] = health
-    })
-    // The applied move is the cell the unit actually ended on — a truncated
-    // slider its stop cell, anything that died the cell it died on.
-    result.finalCell.forEach((cell, playerID) => {
-      gameState.playerMoves[playerID] = cell
-    })
-    result.traversed.forEach((cells, playerID) => {
-      gameState.traversed[playerID] = cells
-    })
-    result.severedCells.forEach((cells, playerID) => {
-      gameState.severedCells[playerID] = cells
-    })
-    result.deaths.forEach((death) => {
-      gameState.deadPlayers.add(death.unitID)
-      gameState.deaths[death.unitID] = {
-        cell: death.cell,
-        subStep: death.subStep,
-        cause: death.cause,
-      }
-    })
-    result.vulnerableCollided.forEach((playerID) => {
-      gameState.vulnerableSnakesCollided.add(playerID)
-    })
-  }
-
-  // Kings never change type (promotion only creates queens), so the setup's
-  // unitType is authoritative for which teams play under regicide.
-  private applyRegicide(gameState: SnakeGameState): void {
-    const players = this.gameSetup.gamePlayers
-    const kingTeams = new Set(
-      players.filter((p) => p.unitType === "king").map((p) => p.teamID),
-    )
-    let anyEliminated = false
-    kingTeams.forEach((teamID) => {
-      const kingAlive = players.some(
-        (p) =>
-          p.teamID === teamID &&
-          p.unitType === "king" &&
-          gameState.newAlivePlayers.includes(p.id) &&
-          !gameState.deadPlayers.has(p.id),
-      )
-      if (kingAlive) return
-
-      players
-        .filter((p) => p.teamID === teamID)
-        .forEach((p) => {
-          if (!gameState.newAlivePlayers.includes(p.id) || gameState.deadPlayers.has(p.id)) return
-          gameState.deadPlayers.add(p.id)
-          anyEliminated = true
-          const cell = gameState.newSnakes[p.id]?.[0] ?? gameState.playerMoves[p.id]
-          gameState.deaths[p.id] = {
-            cell,
-            subStep: gameState.subStepCount,
-            cause: "regicide",
-          }
-          gameState.clashes.push({
-            index: cell,
-            subStep: gameState.subStepCount,
-            kind: "regicide",
-            playerIDs: [p.id],
-            victimIDs: [p.id],
-            reason: REASON.regicide,
-          })
-        })
-      logger.info(`Snek: Team ${teamID} eliminated — its last king fell.`)
-    })
-    if (anyEliminated) this.removeDeadPlayers(gameState)
   }
 
   private applyPawnPromotions(gameState: SnakeGameState): void {
@@ -735,18 +673,6 @@ export class TeamSnekProcessor {
   // weight/length. Movement cost is NOT settled here any more — the engine
   // charged it cell by cell as it was spent, so there is no mid-ray rescue by
   // food a unit never lived to reach.
-  private processFood(gameState: SnakeGameState): void {
-    Object.keys(gameState.newSnakes).forEach((playerID) => {
-      const unit = gameState.newSnakes[playerID]
-      const foodIndex = gameState.newFood.indexOf(unit[0])
-      if (foodIndex === -1) return
-
-      gameState.newFood.splice(foodIndex, 1)
-      unit.push(unit[unit.length - 1])
-      gameState.newPlayerHealth[playerID] = this.maxHealthFor(gameState.unitTypes[playerID])
-    })
-  }
-
   private generateNewFood(gameState: SnakeGameState): void {
       const guaranteedFood = Math.floor(this.foodSpawnRate)
       const fractional = this.foodSpawnRate - guaranteedFood

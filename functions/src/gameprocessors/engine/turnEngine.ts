@@ -15,9 +15,21 @@ import { Clash, ClashKind } from "@shared/types/Game"
  * All collision adjudication reads the TIER and WEIGHT each unit held at the
  * START of the turn. Board occupancy changes within the turn only through
  * movement (a trail sweep including the tail pop, a piece stack teleporting)
- * and halting — never through removal. Dead units, starved units and severed
+ * and halting — never through removal. Dead units, exhausted units and severed
  * segments all stay on the board as collision objects until the collision
  * phase (every sub-step) has finished. Health is the only thing that advances.
+ *
+ * ## Exhaustion is provisional death
+ *
+ * Running out of health mid-turn (movement cost or a hazard dose) stops
+ * MOVEMENT and nothing else. The unit halts on the cell it reached and stays a
+ * fully live collision incumbent for the rest of the phase: it still beats
+ * lighter arrivals on frozen tier and weight, and a heavier arrival can still
+ * kill it — which is an ordinary collision death, not an exhaustion one.
+ * Whether exhaustion itself kills is decided at END OF TURN by the caller,
+ * after the food phase: food is the only heal, and it is eaten at a unit's
+ * final cell, so an exhausted unit that halted on food recovers and lives.
+ * The engine therefore reports exhaustions rather than acting on them.
  *
  * ## Sub-step loop: snapshot → resolve → apply
  *
@@ -47,7 +59,7 @@ import { Clash, ClashKind } from "@shared/types/Game"
  *
  * ## The wrestling rule
  *
- * From the moment a unit dies or starves, its entire remaining occupancy
+ * From the moment a unit dies, its entire remaining occupancy
  * becomes a set of DURABLE cells. Any unit arriving at a durable cell on a
  * later sub-step joins that cell's cumulative contest against every prior
  * participant there, judged on frozen tier and weight. It lives only if it is
@@ -56,7 +68,7 @@ import { Clash, ClashKind } from "@shared/types/Game"
  * before its first death is untouched by any of it.
  */
 
-export type UnitStatus = "active" | "stopped" | "starved" | "dead"
+export type UnitStatus = "active" | "stopped" | "exhausted" | "dead"
 
 /** One set of display strings. Rendering keys on `kind` and the id lists. */
 export const REASON = {
@@ -68,7 +80,7 @@ export const REASON = {
   wall: "Hit the wall",
   self: "Ran into its own body",
   hazard: "Drained by a hazard",
-  starvation: "Ran out of health",
+  exhaustion: "Ran out of health",
   regicide: "Team eliminated: king fell",
 } as const
 
@@ -94,11 +106,34 @@ export interface UnitDeathRecord {
   cause: ClashKind
 }
 
+/**
+ * A unit that ran out of health mid-turn. Exhaustion is PROVISIONAL death: it
+ * halts movement and nothing else. Whether it kills is settled at end of turn,
+ * after the food phase, by the caller — so this is a report, not a death.
+ */
+export interface ExhaustionEvent {
+  unitID: string
+  /** The cell it halted on. */
+  cell: number
+  subStep: number
+  /** "hazard" when a hazard dose finished it, "exhaustion" for movement cost. */
+  cause: ClashKind
+  /**
+   * The halt record already on the wire, carrying an EMPTY victimIDs. If the
+   * exhaustion proves fatal the caller adds the unit to it; if food at the
+   * halt cell revives the unit, it stays empty and the record simply explains
+   * why the unit stopped short.
+   */
+  record: Clash
+}
+
 export interface TurnEngineResult {
   /** Typed events, deterministically ordered. */
   clashes: Clash[]
-  /** Every unit removed this turn, dead and starved alike. */
+  /** Units killed outright during the collision phase. Exhaustion is separate. */
   deaths: UnitDeathRecord[]
+  /** Units that ran out of health and halted; fatality is the caller's call. */
+  exhaustions: ExhaustionEvent[]
   /** Cells actually cut from each SURVIVING trail unit. */
   severedCells: Map<string, number[]>
   /** Units whose frozen tier was below zero and which died or were severed. */
@@ -160,10 +195,12 @@ export const runTurnEngine = (
   const wallSet = new Set(walls)
   const clashes: Clash[] = []
   const deaths: UnitDeathRecord[] = []
+  const exhaustions: ExhaustionEvent[] = []
   const vulnerableCollided = new Set<string>()
 
-  // Cells that hold collision objects: corpses, starved units, and every unit
-  // that took part in a fatal contest there. Cumulative for the whole turn.
+  // Cells that hold collision objects: corpses, and every unit that took part
+  // in a fatal contest there. Cumulative for the whole turn. Exhausted units
+  // are NOT here — they are still alive, and contest as themselves.
   const durable = new Map<number, Set<string>>()
 
   const units: RuntimeUnit[] = input
@@ -181,7 +218,9 @@ export const runTurnEngine = (
     .sort(byID)
 
   const byId = new Map(units.map((u) => [u.id, u]))
-  const isLiving = (u: RuntimeUnit): boolean => u.status === "active" || u.status === "stopped"
+  // Exhausted counts as living: it has halted, but it is on the board, it
+  // contests, and it may yet be fed back to health at end of turn.
+  const isLiving = (u: RuntimeUnit): boolean => u.status !== "dead"
 
   const record = (
     kind: ClashKind,
@@ -191,8 +230,8 @@ export const runTurnEngine = (
     reason: string,
     subStep: number,
     survivorID?: string,
-  ): void => {
-    clashes.push({
+  ): Clash => {
+    const clash: Clash = {
       index: cell,
       subStep,
       kind,
@@ -200,7 +239,9 @@ export const runTurnEngine = (
       victimIDs: [...victimIDs].sort(),
       ...(survivorID ? { survivorID } : {}),
       reason,
-    })
+    }
+    clashes.push(clash)
+    return clash
   }
 
   const addDurable = (cell: number, unitIDs: string[]): void => {
@@ -213,7 +254,7 @@ export const runTurnEngine = (
   // and its whole remaining occupancy becomes durable collision objects.
   const kill = (unit: RuntimeUnit, cell: number, cause: ClashKind, subStep: number): void => {
     if (!isLiving(unit)) return
-    unit.status = cause === "hazard" || cause === "starvation" ? "starved" : "dead"
+    unit.status = "dead"
     unit.death = { unitID: unit.id, cell, subStep, cause }
     deaths.push(unit.death)
     if (unit.tier < 0) vulnerableCollided.add(unit.id)
@@ -477,11 +518,25 @@ export const runTurnEngine = (
 
       u.health -= cost
       if (u.health > 0) return
-      // Starved: it halts right here and becomes a collision incumbent — a
-      // dying animal that still beats a lighter arrival for the rest of the turn.
-      const cause: ClashKind = onHazard ? "hazard" : "starvation"
-      kill(u, cell, cause, subStep)
-      record(cause, cell, [u.id], [u.id], onHazard ? REASON.hazard : REASON.starvation, subStep)
+
+      // Exhausted: MOVEMENT stops here and nothing else does. It stays on the
+      // board as a full collision incumbent — a dying animal that still beats
+      // a lighter arrival, and that a heavier arrival can still kill outright
+      // (an ordinary collision death, not this one). Whether the exhaustion
+      // itself is fatal is settled at end of turn, once food has been eaten,
+      // so the record goes out now with an EMPTY victimIDs and the caller
+      // fills it in only if the unit is still at zero when the turn closes.
+      u.status = "exhausted"
+      const cause: ClashKind = onHazard ? "hazard" : "exhaustion"
+      const halt = record(
+        cause,
+        cell,
+        [u.id],
+        [],
+        onHazard ? REASON.hazard : REASON.exhaustion,
+        subStep,
+      )
+      exhaustions.push({ unitID: u.id, cell, subStep, cause, record: halt })
     })
 
     units.forEach((u) => {
@@ -537,6 +592,7 @@ export const runTurnEngine = (
   return {
     clashes,
     deaths,
+    exhaustions,
     severedCells,
     vulnerableCollided,
     occupancy,

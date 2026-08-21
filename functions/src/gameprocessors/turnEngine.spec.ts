@@ -250,11 +250,16 @@ describe("frozen state: nothing leaves the board mid-turn", () => {
   })
 })
 
-describe("starvation is a death like any other", () => {
-  // A rook with 2 health and a stack of 3 starves on the second cell of its
-  // ray and STAYS there as an incumbent — a dying animal that still beats a
-  // lighter arrival on frozen weight, and still loses to a heavier one.
-  const starvedIncumbent = (challengerWeight: number): Turn =>
+// Exhaustion — health at or below zero mid-turn — is PROVISIONAL death. It
+// stops movement and nothing else: the unit halts on the cell it reached and
+// stays a live collision incumbent. Whether it kills is settled at end of
+// turn, AFTER food, and food is the only heal there is.
+describe("exhaustion is provisional death", () => {
+  // A rook with 2 health and a stack of 3 halts on the second cell of its ray.
+  const exhaustedIncumbent = (
+    challengerWeight: number,
+    turn: Partial<Turn> = {}
+  ): Turn =>
     play({
       players: [gp("dying", "t1", "A", "rook"), gp("comer", "t2", "A", "rook")],
       pieces: {
@@ -262,46 +267,157 @@ describe("starvation is a death like any other", () => {
         comer: stack(at(7, 5), challengerWeight),
       },
       moves: [mv("dying", at(9, 5)), mv("comer", at(1, 5))],
-      turn: { playerHealth: { dying: 2, comer: 100 } },
+      turn: { playerHealth: { dying: 2, comer: 100 }, ...turn },
     })
 
-  it("halts where its health ran out and is recorded as starved", () => {
-    const next = starvedIncumbent(5)
+  /** The same rook, with nobody coming to meet it. */
+  const undisturbed = (turn: Partial<Turn> = {}): Turn =>
+    play({
+      players: [gp("dying", "t1", "A", "rook"), gp("k", "t2", "A", "king")],
+      pieces: { dying: stack(at(1, 5), 3), k: [at(9, 9)] },
+      moves: [mv("dying", at(9, 5))],
+      turn: { playerHealth: { dying: 2, k: 100 }, ...turn },
+    })
+
+  it("halts where the health ran out, and dies there when nothing revives it", () => {
+    const next = undisturbed()
+
+    expect(next.alivePlayers).toEqual(["k"])
+    expect(next.moves.dying).toBe(at(3, 5))
+    expect(next.paths?.dying).toEqual([at(2, 5), at(3, 5)])
     expect(next.deaths.dying).toEqual({
       cell: at(3, 5),
       subStep: 2,
-      cause: "starvation",
+      cause: "exhaustion",
+    })
+    // Fatal exhaustion names its victim, like any other lethal record.
+    expect(next.clashes.find((c) => c.kind === "exhaustion")).toMatchObject({
+      index: at(3, 5),
+      subStep: 2,
+      playerIDs: ["dying"],
+      victimIDs: ["dying"],
+      reason: REASON.exhaustion,
+    })
+  })
+
+  it("recovers outright when its halt cell holds food", () => {
+    const next = undisturbed({ food: [at(3, 5)] })
+
+    expect(next.alivePlayers.sort()).toEqual(["dying", "k"])
+    expect(next.playerHealth.dying).toBe(100)
+    expect(next.playerPieces.dying).toEqual(stack(at(3, 5), 4)) // ate and grew
+    expect(next.food).toEqual([])
+    expect(next.deaths).toEqual({})
+    // The halt still happened and still shows on the wire — with an EMPTY
+    // victimIDs, the non-fatal shape, so the UI can explain why it stopped
+    // short of (9,5) without guessing.
+    expect(next.clashes.find((c) => c.kind === "exhaustion")).toMatchObject({
+      index: at(3, 5),
+      subStep: 2,
+      playerIDs: ["dying"],
+      victimIDs: [],
     })
     expect(next.moves.dying).toBe(at(3, 5))
     expect(next.paths?.dying).toEqual([at(2, 5), at(3, 5)])
-    expect(
-      next.clashes.some((c) => c.index === at(3, 5) && c.reason === REASON.starvation)
-    ).toBe(true)
   })
 
-  it("still defeats a lighter arrival two sub-steps after it died", () => {
-    const next = starvedIncumbent(2)
+  it("still beats a lighter arrival while exhausted, and still dies afterwards", () => {
+    const next = exhaustedIncumbent(2)
+
     expect(next.alivePlayers).toEqual([])
-    expect(next.deaths.comer).toEqual({
-      cell: at(3, 5),
+    // The dying animal wins its contest on frozen weight — and is named the
+    // survivor of it, because at that moment it is standing.
+    expect(next.clashes.find((c) => c.kind === "contest")).toMatchObject({
+      index: at(3, 5),
       subStep: 4,
-      cause: "contest",
+      playerIDs: ["comer", "dying"],
+      victimIDs: ["comer"],
+      survivorID: "dying",
+    })
+    expect(next.deaths).toEqual({
+      comer: { cell: at(3, 5), subStep: 4, cause: "contest" },
+      dying: { cell: at(3, 5), subStep: 2, cause: "exhaustion" },
     })
   })
 
-  it("loses to a heavier arrival, which capture-stops on the corpse", () => {
-    const next = starvedIncumbent(5)
-    expect(next.alivePlayers).toEqual(["comer"])
-    expect(next.playerPieces.comer).toEqual(stack(at(3, 5), 5))
-    expect(next.paths?.comer).toEqual([at(6, 5), at(5, 5), at(4, 5), at(3, 5)])
-    expect(next.playerHealth.comer).toBe(96)
+  it("wins that contest and then recovers on the food under it", () => {
+    const next = exhaustedIncumbent(2, { food: [at(3, 5)] })
+
+    expect(next.alivePlayers).toEqual(["dying"])
+    expect(next.playerHealth.dying).toBe(100)
+    expect(next.playerPieces.dying).toEqual(stack(at(3, 5), 4))
+    expect(next.deaths).toEqual({
+      comer: { cell: at(3, 5), subStep: 4, cause: "contest" },
+    })
+    expect(next.clashes.find((c) => c.kind === "exhaustion")!.victimIDs).toEqual([])
   })
 
-  // INVERTED. Movement cost used to be settled once, in the food phase, where
-  // eating replaced it outright — so food could rescue a unit that could not
-  // afford the trip. The engine charges each cell as it is entered, so the
-  // unit dies before it can arrive and the food stays on the board.
-  it("food no longer rescues a unit that cannot afford the ray", () => {
+  it("killed by a heavier arrival, it is a COLLISION death — never listed twice", () => {
+    const next = exhaustedIncumbent(5)
+
+    expect(next.alivePlayers).toEqual(["comer"])
+    // One entry, and the cause is the contest that actually killed it.
+    expect(next.deaths).toEqual({
+      dying: { cell: at(3, 5), subStep: 4, cause: "contest" },
+    })
+    expect(next.clashes.find((c) => c.kind === "contest")).toMatchObject({
+      victimIDs: ["dying"],
+      survivorID: "comer",
+    })
+    // Its halt record keeps the non-fatal shape: exhaustion is not what got it.
+    expect(next.clashes.find((c) => c.kind === "exhaustion")!.victimIDs).toEqual([])
+  })
+
+  it("food under an exhausted unit does not save it from a heavier arrival", () => {
+    const next = exhaustedIncumbent(5, { food: [at(3, 5)] })
+
+    expect(next.alivePlayers).toEqual(["comer"])
+    expect(next.deaths).toEqual({
+      dying: { cell: at(3, 5), subStep: 4, cause: "contest" },
+    })
+    // The winner is the one standing on the food at end of turn, so it eats.
+    expect(next.playerHealth.comer).toBe(100)
+    expect(next.playerPieces.comer).toEqual(stack(at(3, 5), 6))
+  })
+
+  // INVERTED against the first cut of this engine, which made exhaustion an
+  // immediate death and therefore had no food rescue at all.
+  it("a trail unit at 1 health exhausts on the food cell and comes straight back", () => {
+    const next = play({
+      players: [gp("s1", "t1", "A", "snake"), gp("s2", "t2", "A", "snake")],
+      pieces: { s1: [at(4, 5), at(3, 5), at(2, 5)], s2: [at(8, 8), at(8, 7), at(8, 6)] },
+      moves: [mv("s1", at(5, 5)), mv("s2", at(8, 9))],
+      turn: { food: [at(5, 5)], playerHealth: { s1: 1, s2: 100 } },
+    })
+
+    expect(next.alivePlayers.sort()).toEqual(["s1", "s2"])
+    expect(next.playerHealth.s1).toBe(100)
+    expect(next.playerPieces.s1).toEqual([at(5, 5), at(4, 5), at(3, 5), at(3, 5)])
+    expect(next.food).toEqual([])
+    expect(next.deaths).toEqual({})
+    // The 1/turn cost still exhausted it at sub-step 1 — that is what the
+    // non-fatal record on the wire says.
+    expect(next.clashes.find((c) => c.kind === "exhaustion")).toMatchObject({
+      index: at(5, 5),
+      subStep: 1,
+      playerIDs: ["s1"],
+      victimIDs: [],
+    })
+  })
+
+  it("the same trail unit dies when the cell it reaches is bare", () => {
+    const next = play({
+      players: [gp("s1", "t1", "A", "snake"), gp("s2", "t2", "A", "snake")],
+      pieces: { s1: [at(4, 5), at(3, 5), at(2, 5)], s2: [at(8, 8), at(8, 7), at(8, 6)] },
+      moves: [mv("s1", at(5, 5)), mv("s2", at(8, 9))],
+      turn: { playerHealth: { s1: 1, s2: 100 } },
+    })
+
+    expect(next.alivePlayers).toEqual(["s2"])
+    expect(next.deaths.s1).toEqual({ cell: at(5, 5), subStep: 1, cause: "exhaustion" })
+  })
+
+  it("food further along a ray is still no rescue — the unit never reaches it", () => {
     const next = play({
       players: [gp("t1", "t1", "A", "rook"), gp("t2", "t2", "A", "king")],
       pieces: { t1: [at(1, 5)], t2: [at(9, 9)] },
@@ -310,24 +426,11 @@ describe("starvation is a death like any other", () => {
     })
 
     expect(next.alivePlayers).toEqual(["t2"])
-    expect(next.deaths.t1).toEqual({ cell: at(3, 5), subStep: 2, cause: "starvation" })
+    expect(next.deaths.t1).toEqual({ cell: at(3, 5), subStep: 2, cause: "exhaustion" })
     expect(next.food).toEqual([at(5, 5)])
   })
 
-  it("the same holds for a trail unit stepping onto food at 1 health", () => {
-    const next = play({
-      players: [gp("s1", "t1", "A", "snake"), gp("s2", "t2", "A", "snake")],
-      pieces: { s1: [at(4, 5), at(3, 5), at(2, 5)], s2: [at(8, 8), at(8, 7), at(8, 6)] },
-      moves: [mv("s1", at(5, 5)), mv("s2", at(8, 9))],
-      turn: { food: [at(5, 5)], playerHealth: { s1: 1, s2: 100 } },
-    })
-
-    expect(next.alivePlayers).toEqual(["s2"])
-    expect(next.deaths.s1).toEqual({ cell: at(5, 5), subStep: 1, cause: "starvation" })
-    expect(next.food).toEqual([at(5, 5)])
-  })
-
-  it("a hazard that drains a unit to zero is recorded as a hazard death, not starvation", () => {
+  it("a hazard dose that empties a unit is a hazard exhaustion, not a movement one", () => {
     const next = play({
       players: [gp("t1", "t1", "A", "rook"), gp("t2", "t2", "A", "king")],
       pieces: { t1: [at(1, 5)], t2: [at(9, 9)] },
@@ -337,6 +440,25 @@ describe("starvation is a death like any other", () => {
     })
 
     expect(next.deaths.t1).toEqual({ cell: at(4, 5), subStep: 3, cause: "hazard" })
+  })
+
+  it("and food on the hazard cell brings it back, hazard or not", () => {
+    const next = play({
+      players: [gp("t1", "t1", "A", "rook"), gp("t2", "t2", "A", "king")],
+      pieces: { t1: [at(1, 5)], t2: [at(9, 9)] },
+      moves: [mv("t1", at(9, 5))],
+      turn: {
+        hazards: [at(4, 5)],
+        food: [at(4, 5)],
+        playerHealth: { t1: 20, t2: 100 },
+      },
+      setup: { hazardDamage: 30 },
+    })
+
+    expect(next.alivePlayers.sort()).toEqual(["t1", "t2"])
+    expect(next.playerHealth.t1).toBe(100)
+    expect(next.deaths).toEqual({})
+    expect(next.clashes.find((c) => c.kind === "hazard")!.victimIDs).toEqual([])
   })
 })
 
@@ -958,13 +1080,13 @@ describe("off-parity snakes", () => {
     expect(next.clashes.some((c) => c.kind === "hazard")).toBe(false)
   })
 
-  it("(6b) the edge WINNER does cross, and can starve on the hazard it lands in", () => {
+  it("(6b) the edge WINNER does cross, and exhausts on the hazard it lands in", () => {
     const next = faceOff(
       [at(5, 5), at(4, 5)],
       [at(6, 5), at(7, 5)],
       at(5, 5),
       {
-        hazards: [at(6, 5)],
+        hazards: [at(6, 5)], // deliberately foodless: nothing revives it
         playerHealth: { s1: 10, s2: 100, sb1: 100, sb2: 100 },
         playerInvulnerabilityLevel: { s1: 1, s2: 0, sb1: 0, sb2: 0 },
       },
@@ -976,11 +1098,41 @@ describe("off-parity snakes", () => {
       s1: { cell: at(6, 5), subStep: 1, cause: "hazard" },
       s2: { cell: at(6, 5), subStep: 1, cause: "edge" },
     })
-    // It won the edge and then died on the same cell in the same sub-step, so
-    // the record withdraws its claim to a survivor.
-    const edge = next.clashes.find((c) => c.kind === "edge")
-    expect(edge).toMatchObject({ index: at(6, 5), victimIDs: ["s2"] })
-    expect(edge!.survivorID).toBeUndefined()
+    // It really did win the edge, and the record says so: exhaustion is a
+    // separate, later verdict, so it does not retract the survivorID the way a
+    // simultaneous collision death does.
+    expect(next.clashes.find((c) => c.kind === "edge")).toMatchObject({
+      index: at(6, 5),
+      victimIDs: ["s2"],
+      survivorID: "s1",
+    })
+    expect(next.clashes.find((c) => c.kind === "hazard")).toMatchObject({
+      index: at(6, 5),
+      victimIDs: ["s1"],
+    })
+  })
+
+  it("(6c) put food on that same hazard cell and the winner walks away alive", () => {
+    const next = faceOff(
+      [at(5, 5), at(4, 5)],
+      [at(6, 5), at(7, 5)],
+      at(5, 5),
+      {
+        hazards: [at(6, 5)],
+        food: [at(6, 5)],
+        playerHealth: { s1: 10, s2: 100, sb1: 100, sb2: 100 },
+        playerInvulnerabilityLevel: { s1: 1, s2: 0, sb1: 0, sb2: 0 },
+      },
+      { hazardDamage: 30 }
+    )
+
+    expect(next.alivePlayers.sort()).toEqual(["s1", "sb1", "sb2"])
+    expect(next.playerHealth.s1).toBe(100)
+    expect(next.playerPieces.s1).toEqual([at(6, 5), at(5, 5), at(5, 5)]) // ate and grew
+    expect(next.deaths).toEqual({
+      s2: { cell: at(6, 5), subStep: 1, cause: "edge" },
+    })
+    expect(next.clashes.find((c) => c.kind === "hazard")!.victimIDs).toEqual([])
   })
 
   // A piece exchanging heads with a trail unit is the same contest: no
