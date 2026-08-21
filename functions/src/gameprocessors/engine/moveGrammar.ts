@@ -1,5 +1,15 @@
 import { UnitType } from "@shared/types/Game"
 
+/**
+ * The movement grammar: the one place unit-kind names still matter. It turns a
+ * staged destination square into the action a unit of that kind may take, and
+ * supplies the action a unit takes when nothing legal was staged.
+ *
+ * Everything downstream of this file is property-driven (see turnEngine.ts):
+ * the engine never asks what kind a unit is, only whether it leaves a trail,
+ * whether it traverses edges, and what path it is walking.
+ */
+
 export interface Orientation {
   dx: number
   dy: number
@@ -9,18 +19,13 @@ export interface Orientation {
 // (GameSetup.pawnPromotionWeight); this is the default.
 export const DEFAULT_PAWN_PROMOTION_WEIGHT = 10
 
-// Fixed expansion order for a team's units; letters are assigned in this order.
-export const UNIT_EXPANSION_ORDER: UnitType[] = [
-  "snake",
-  "king",
-  "queen",
-  "rook",
-  "bishop",
-  "knight",
-  "pawn",
-]
-
 export const isPieceType = (t?: UnitType): boolean => t !== undefined && t !== "snake"
+
+/** Trail units (snakes) drag their occupancy behind the head; pieces teleport their stack. */
+export const leavesTrail = (type: UnitType): boolean => type === "snake"
+
+/** A jump crosses no edge, so a knight can never contest one. */
+export const traversesEdges = (type: UnitType): boolean => type !== "knight"
 
 export const toXY = (index: number, boardWidth: number): { x: number; y: number } => ({
   x: index % boardWidth,
@@ -107,34 +112,32 @@ export const spawnOrientationCandidates = (
   return best
 }
 
-// Spawn orientation, assigned once at turn 0: toward the board centre,
-// ties resolved uniformly at random among the tied candidates.
-export const spawnOrientation = (
-  type: UnitType,
-  index: number,
-  boardWidth: number,
-  boardHeight: number,
-): Orientation => {
-  const best = spawnOrientationCandidates(type, index, boardWidth, boardHeight)
-  return best[Math.floor(Math.random() * best.length)]
-}
+// NOTE: picking ONE of these candidates is spawning, not rules, and the tie
+// break is random — so it lives with the caller. Nothing in this directory may
+// read a clock or an RNG (see VENDOR.md).
 
-export type PieceAction =
+export type UnitAction =
   | { kind: "stay" }
   | { kind: "move"; path: number[] }
   | { kind: "rotate"; orientation: Orientation }
 
 /**
- * Plans a piece's staged destination into an action.
+ * Plans a unit's staged destination into an action.
  *
- * Returns null when the destination is not legal for this piece — the caller
- * substitutes the default action (stay). `pawnTargets` holds every square
- * containing food or another unit at the start of the turn: a pawn's
- * diagonal-forward step is legal only into one of those (attack or eat).
- * Staging a pawn's side square means "spend the turn rotating to face that
- * way"; the square behind is never legal.
+ * Returns null when the destination is not legal for this kind — the caller
+ * substitutes `defaultAction`. `pawnTargets` holds every square containing
+ * food or another unit at the start of the turn: a pawn's diagonal-forward
+ * step is legal only into one of those (attack or eat). Staging a pawn's side
+ * square means "spend the turn rotating to face that way"; the square behind
+ * is never legal.
+ *
+ * Bounds: a piece may only ever enter the interior, so every branch that
+ * MOVES a piece requires it. The pawn's rotation branch does not — the side
+ * square is pure signalling, never entered, so a pawn against the wall may
+ * still turn. A trail unit (snake) is the one kind allowed to stage a wall
+ * square: walking into the perimeter is a legal, fatal move.
  */
-export const planPieceAction = (
+export const planUnitAction = (
   type: UnitType,
   origin: number,
   dest: number,
@@ -142,52 +145,92 @@ export const planPieceAction = (
   boardHeight: number,
   orientation: Orientation,
   pawnTargets?: Set<number>,
-): PieceAction | null => {
-  if (dest === origin) return { kind: "stay" }
+): UnitAction | null => {
   if (!Number.isInteger(dest) || dest < 0 || dest >= boardWidth * boardHeight) return null
   const o = toXY(origin, boardWidth)
   const d = toXY(dest, boardWidth)
-  // Origins are always interior and the interior is convex, so a straight
-  // ray between interior squares never touches the perimeter wall — only the
-  // destination needs the check.
-  if (!isInterior(d.x, d.y, boardWidth, boardHeight)) return null
   const dx = d.x - o.x
   const dy = d.y - o.y
   const adx = Math.abs(dx)
   const ady = Math.abs(dy)
+  // Origins are always interior and the interior is convex, so a straight ray
+  // between interior squares never touches the perimeter wall — only the
+  // destination needs the check.
+  const interior = isInterior(d.x, d.y, boardWidth, boardHeight)
+
+  // Trail units: one orthogonal step, walls included. They have no "stay":
+  // staging their own square is not a move, so the default (continue straight)
+  // takes over.
+  if (type === "snake") {
+    return adx + ady === 1 ? { kind: "move", path: [dest] } : null
+  }
+
+  if (dest === origin) return { kind: "stay" }
 
   switch (type) {
     case "knight":
-      return (adx === 1 && ady === 2) || (adx === 2 && ady === 1)
+      return interior && ((adx === 1 && ady === 2) || (adx === 2 && ady === 1))
         ? { kind: "move", path: [dest] }
         : null
     case "king":
-      return Math.max(adx, ady) === 1 ? { kind: "move", path: [dest] } : null
+      return interior && Math.max(adx, ady) === 1 ? { kind: "move", path: [dest] } : null
     case "rook":
-      return (dx === 0) !== (dy === 0) ? { kind: "move", path: rayPath(o, d, boardWidth) } : null
+      return interior && (dx === 0) !== (dy === 0)
+        ? { kind: "move", path: rayPath(o, d, boardWidth) }
+        : null
     case "bishop":
-      return adx === ady && adx > 0 ? { kind: "move", path: rayPath(o, d, boardWidth) } : null
+      return interior && adx === ady && adx > 0
+        ? { kind: "move", path: rayPath(o, d, boardWidth) }
+        : null
     case "queen":
-      return (dx === 0) !== (dy === 0) || (adx === ady && adx > 0)
+      return interior && ((dx === 0) !== (dy === 0) || (adx === ady && adx > 0))
         ? { kind: "move", path: rayPath(o, d, boardWidth) }
         : null
     case "pawn": {
-      if (dx === orientation.dx && dy === orientation.dy) return { kind: "move", path: [dest] }
-      // Side squares: a full-turn quarter rotation toward that side.
-      if ((dx === -orientation.dy && dy === orientation.dx) || (dx === orientation.dy && dy === -orientation.dx)) {
+      if (dx === orientation.dx && dy === orientation.dy) {
+        return interior ? { kind: "move", path: [dest] } : null
+      }
+      // Side squares: a full-turn quarter rotation toward that side. The pawn
+      // never enters the square, so it may sit anywhere — including a wall.
+      if (
+        (dx === -orientation.dy && dy === orientation.dx) ||
+        (dx === orientation.dy && dy === -orientation.dx)
+      ) {
         return { kind: "rotate", orientation: { dx, dy } }
       }
       // Diagonal-forward: attack/eat only.
       const diag1 = { dx: orientation.dx - orientation.dy, dy: orientation.dy + orientation.dx }
       const diag2 = { dx: orientation.dx + orientation.dy, dy: orientation.dy - orientation.dx }
       if ((dx === diag1.dx && dy === diag1.dy) || (dx === diag2.dx && dy === diag2.dy)) {
-        return pawnTargets?.has(dest) ? { kind: "move", path: [dest] } : null
+        return interior && pawnTargets?.has(dest) ? { kind: "move", path: [dest] } : null
       }
       return null
     }
     default:
       return null
   }
+}
+
+/**
+ * What a unit does when nothing legal was staged. Trail units have momentum:
+ * they continue one step along their orientation, wherever that leads (walls
+ * included — the default never re-routes). Pieces have none, so they hold.
+ */
+export const defaultAction = (
+  type: UnitType,
+  origin: number,
+  boardWidth: number,
+  boardHeight: number,
+  orientation: Orientation,
+): UnitAction => {
+  if (type !== "snake") return { kind: "stay" }
+  const { x, y } = toXY(origin, boardWidth)
+  const nx = x + orientation.dx
+  const ny = y + orientation.dy
+  // Only reachable from a head already off the interior, which cannot survive
+  // a turn; holding is the safe degenerate answer.
+  if (nx < 0 || nx >= boardWidth || ny < 0 || ny >= boardHeight) return { kind: "stay" }
+  return { kind: "move", path: [toIndex(nx, ny, boardWidth)] }
 }
 
 const rayPath = (o: { x: number; y: number }, d: { x: number; y: number }, boardWidth: number): number[] => {

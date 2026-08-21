@@ -6,7 +6,7 @@ import React, {
   useRef,
   useState,
 } from "react"
-import { clashesAtCell } from "./clashes"
+import { isInspectable } from "./clashes"
 import {
   BoardModel,
   Cell,
@@ -20,6 +20,12 @@ interface BoardCanvasProps {
   board: BoardModel
   /** The square a click landed on, in the board model's own coordinates. */
   onCellClick?: (cell: Cell) => void
+  /**
+   * A width the caller pins the board to, in CSS pixels. The board is then that
+   * wide and wears no grip — for surfaces that lay several boards out
+   * side by side (the fixture harness) rather than giving one board the page.
+   */
+  fixedWidth?: number
 }
 
 // ── Board size ───────────────────────────────────────────────────────────────
@@ -83,7 +89,11 @@ const maxBoardWidth = (): number => {
  * than the text around it while the slider, the turn controls and everything
  * else below stay exactly where the column puts them.
  */
-const BoardCanvas: React.FC<BoardCanvasProps> = ({ board, onCellClick }) => {
+const BoardCanvas: React.FC<BoardCanvasProps> = ({
+  board,
+  onCellClick,
+  fixedWidth,
+}) => {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const boardRef = useRef(board)
   boardRef.current = board
@@ -96,13 +106,14 @@ const BoardCanvas: React.FC<BoardCanvasProps> = ({ board, onCellClick }) => {
     typeof window === "undefined" ? BOARD_WIDTH_MAX : window.innerWidth,
   )
   const width = useMemo(() => {
+    if (fixedWidth) return Math.round(fixedWidth)
     // windowWidth is read for its effect on the clamp; maxBoardWidth is the one
     // place the two are combined.
     void windowWidth
     return Math.round(
       Math.max(BOARD_WIDTH_MIN, Math.min(maxBoardWidth(), widthPref)),
     )
-  }, [widthPref, windowWidth])
+  }, [fixedWidth, widthPref, windowWidth])
   const height = Math.round((width * board.height) / board.width)
 
   // ── Tag hover ──────────────────────────────────────────────────────────────
@@ -130,7 +141,7 @@ const BoardCanvas: React.FC<BoardCanvasProps> = ({ board, onCellClick }) => {
     setTagHoverUnitId((prev) => (prev === next ? prev : next))
     const cell =
       canvas && pos ? getClickedCell(canvas, boardRef.current, pos) : null
-    const onClash = !!cell && clashesAtCell(boardRef.current, cell).length > 0
+    const onClash = !!cell && isInspectable(boardRef.current, cell)
     setOverClashCell((prev) => (prev === onClash ? prev : onClash))
   }, [])
 
@@ -289,6 +300,7 @@ const BoardCanvas: React.FC<BoardCanvasProps> = ({ board, onCellClick }) => {
             cursor: onCellClick && overClashCell ? "pointer" : "default",
           }}
         />
+        {!fixedWidth && (
         <Box
           role="separator"
           aria-label="Resize board"
@@ -310,6 +322,7 @@ const BoardCanvas: React.FC<BoardCanvasProps> = ({ board, onCellClick }) => {
             "&:hover": { background: gripStripes("#1976d2") },
           }}
         />
+        )}
       </Box>
     </Box>
   )

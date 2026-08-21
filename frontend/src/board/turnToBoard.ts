@@ -1,16 +1,81 @@
-import { GameState, Turn, UnitType } from "@shared/types/Game"
+import { ClashKind, GameState, Turn, UnitDeath, UnitType } from "@shared/types/Game"
 import { teamColorMap } from "../hooks/useTeamColors"
 import {
   BoardClash,
+  BoardClashKind,
   BoardModel,
   BoardUnit,
   Cell,
   DeathMark,
+  DeathStyle,
+  DeathVictim,
+  RecoveryMark,
   RosterUnit,
+  SeverMark,
+  UncertaintyMark,
   UnitIconKey,
 } from "./renderer"
 
 const NEUTRAL_COLOR = "#888888"
+
+// ── What the board is allowed to know ───────────────────────────────────────
+//
+// Everything drawn about a turn's outcome comes from three fields the server
+// writes and nothing else:
+//
+//   turn.deaths        the authoritative registry: who died, on which cell, on
+//                      which sub-step, of what cause. It is the ONLY source of
+//                      death marks — the board never concludes "this clash cell
+//                      is empty, so somebody must have died on it", which was
+//                      wrong on every sever and on every durable cell a later
+//                      unit walked onto.
+//   turn.severedCells  the cells cut off units that are still alive. Damage.
+//   turn.clashes       what was adjudicated, with the victims and the survivor
+//                      named IN the record.
+//
+// Where one of those is missing something, the board draws doubt rather than a
+// guess: an unrecognised kind, a record with no victim list, or a unit that
+// left the board with no death written for it all end up as an uncertainty
+// mark and a note, never as an invented death or an invented attacker.
+
+/** The kinds this board knows how to draw. */
+const KNOWN_KINDS: ReadonlySet<string> = new Set<ClashKind>([
+  "contest",
+  "edge",
+  "bodyBlock",
+  "sever",
+  "hazard",
+  "exhaustion",
+  "wall",
+  "self",
+  "regicide",
+])
+
+/**
+ * The two causes that are not a killing: the unit's health ran out mid-move and
+ * it halted where it stood. Nobody beat it, and the board should not draw as
+ * though somebody had.
+ *
+ * Exhaustion is a PROVISIONAL death. A unit that is still at or below zero when
+ * the turn ends is in the death registry and gets the hollow exhaustion mark;
+ * one that ate on its halt square recovered, is NOT in the registry, and gets
+ * the recovery mark instead. Which of the two happened is never guessed here —
+ * the registry decides it.
+ */
+const EXHAUSTION_CAUSES: ReadonlySet<string> = new Set<ClashKind>([
+  "hazard",
+  "exhaustion",
+])
+
+const boardKind = (kind: unknown): BoardClashKind =>
+  typeof kind === "string" && KNOWN_KINDS.has(kind)
+    ? (kind as BoardClashKind)
+    : "unknown"
+
+const deathStyle = (cause: BoardClashKind): DeathStyle => {
+  if (cause === "unknown" || cause === "sever") return "unknown"
+  return EXHAUSTION_CAUSES.has(cause) ? "exhausted" : "combat"
+}
 
 /**
  * A full-board index to a renderer cell. The wire numbers squares row-major
@@ -107,10 +172,28 @@ export const turnToBoard = (
   // controlling centaur — never the team's document id, which is a key rather
   // than a name.
   const teamNames = new Map(gameState.setup.teams.map((t) => [t.id, t.name]))
-  const colorFor = (playerID: string): string => {
-    const teamID = gameState.setup.gamePlayers.find((gp) => gp.id === playerID)
-      ?.teamID
-    return (teamID !== undefined ? teamColors.get(teamID) : undefined) ?? NEUTRAL_COLOR
+  const rosterOf = (playerID: string) =>
+    gameState.setup.gamePlayers.find((gp) => gp.id === playerID)
+  /**
+   * A unit's identity for a mark that is ABOUT that unit: its own letter, its
+   * own team, its own colour. A death is drawn in the victim's colour and a
+   * sever in the owner's — never in the colour of whoever did it, which is what
+   * the old board showed when it took `playerIDs[0]` (usually the attacker) as
+   * the colour of the grave.
+   */
+  const identityOf = (playerID: string) => {
+    const roster = rosterOf(playerID)
+    const teamID = roster?.teamID
+    return {
+      letter: roster?.letter ?? "?",
+      teamName:
+        (teamID !== undefined ? teamNames.get(teamID) : undefined) ??
+        teamID ??
+        playerID,
+      color:
+        (teamID !== undefined ? teamColors.get(teamID) : undefined) ??
+        NEUTRAL_COLOR,
+    }
   }
 
   // The ROSTER is walked in setup order rather than the turn document's key
@@ -118,7 +201,7 @@ export const turnToBoard = (
   // come out in one deterministic order: team by team, letters ascending.
   const units: BoardUnit[] = []
   const deadUnits: RosterUnit[] = []
-  const occupied = new Set<number>()
+  const aliveNow = new Set<string>()
   gameState.setup.gamePlayers.forEach((gamePlayer) => {
     const playerID = gamePlayer.id
     const positions = turn.playerPieces[playerID]
@@ -141,7 +224,7 @@ export const turnToBoard = (
       })
       return
     }
-    positions.forEach((index) => occupied.add(index))
+    aliveNow.add(playerID)
     const isPiece = unitType !== "snake"
     const body = (isPiece ? positions.slice(0, 1) : positions).map((i) =>
       indexToCell(i, width, height),
@@ -159,24 +242,161 @@ export const turnToBoard = (
     })
   })
 
-  // A clash marks the square units died on. Where a survivor is standing there,
-  // the square is theirs to show — the marker would only bury a living unit.
-  const deaths: DeathMark[] = (turn.clashes ?? [])
-    .filter((clash) => !occupied.has(clash.index))
-    .map((clash) => ({
-      cell: indexToCell(clash.index, width, height),
-      color: clash.playerIDs.length ? colorFor(clash.playerIDs[0]) : NEUTRAL_COLOR,
-    }))
+  const recordNotes: string[] = []
+  const uncertainties: UncertaintyMark[] = []
+  const noteAt = (cell: Cell, note: string) => {
+    uncertainties.push({ cell, note })
+    if (!recordNotes.includes(note)) recordNotes.push(note)
+  }
 
-  // Every collision the server recorded this turn, mapped into renderer
-  // coordinates once, here: the rings on the board and the clash inspector both
-  // read these, so neither has to know how the wire numbers a square.
-  const clashes: BoardClash[] = (turn.clashes ?? []).map((clash) => ({
-    cell: indexToCell(clash.index, width, height),
-    playerIDs: clash.playerIDs,
-    reason: clash.reason,
-    subStep: clash.subStep,
-  }))
+  // ── Deaths ────────────────────────────────────────────────────────────────
+  // Straight off the registry, grouped by the cell each one names. A cell can
+  // hold several — two equal heavies annihilating each other on a durable cell,
+  // and a lighter unit walking onto the same cell a sub-step later — so the
+  // mark keeps every victim, in the order they fell, and the inspector lists
+  // them all. A death is recorded whether or not somebody is standing on the
+  // cell at the end of the turn: on a head-on contest the winner IS standing
+  // there, and that is precisely the death a board must not drop.
+  const deathsByCell = new Map<number, DeathVictim[]>()
+  const deathRegistry: { [playerID: string]: UnitDeath } = turn.deaths ?? {}
+  const hasRegistry = turn.deaths != null
+  Object.entries(deathRegistry).forEach(([playerID, death]) => {
+    if (!death || typeof death.cell !== "number") {
+      recordNotes.push(
+        `${identityOf(playerID).teamName} ${identityOf(playerID).letter} is recorded as dead with no cell.`,
+      )
+      return
+    }
+    const cause = boardKind(death.cause)
+    const identity = identityOf(playerID)
+    const victim: DeathVictim = {
+      id: playerID,
+      letter: identity.letter,
+      teamName: identity.teamName,
+      color: identity.color,
+      cause,
+      style: deathStyle(cause),
+      subStep: death.subStep ?? 1,
+    }
+    const list = deathsByCell.get(death.cell)
+    if (list) list.push(victim)
+    else deathsByCell.set(death.cell, [victim])
+    if (cause === "unknown") {
+      noteAt(
+        indexToCell(death.cell, width, height),
+        `A death here was recorded with a cause this board does not know${
+          typeof death.cause === "string" ? ` ("${death.cause}")` : ""
+        }.`,
+      )
+    }
+  })
+
+  const deaths: DeathMark[] = [...deathsByCell.entries()].map(
+    ([index, victims]) => ({
+      cell: indexToCell(index, width, height),
+      victims: [...victims].sort((a, b) => a.subStep - b.subStep),
+    }),
+  )
+
+  // ── Units that left with no death written for them ────────────────────────
+  // A unit on the board last turn and gone from playerPieces this turn either
+  // died — in which case the registry says so — or the record is incomplete.
+  // The board marks its LAST-KNOWN cell as uncertain: that is not a claim about
+  // what happened, it is a pointer at where the record stops.
+  const previous = turnIndex > 0 ? gameState.turns[turnIndex - 1] : undefined
+  gameState.setup.gamePlayers.forEach((gamePlayer) => {
+    const playerID = gamePlayer.id
+    if (aliveNow.has(playerID) || deathRegistry[playerID]) return
+    const before = previous?.playerPieces?.[playerID]
+    if (!before || before.length === 0) return // Already gone before this turn.
+    const identity = identityOf(playerID)
+    noteAt(
+      indexToCell(before[0], width, height),
+      hasRegistry
+        ? `${identity.teamName} ${identity.letter} left the board with no death recorded.`
+        : `This turn carries no death registry, and ${identity.teamName} ${identity.letter} left the board.`,
+    )
+  })
+
+  // ── Clash records ─────────────────────────────────────────────────────────
+  // Every adjudicated event, mapped into renderer coordinates once, here: the
+  // rings on the board and the inspector both read these, so neither has to
+  // know how the wire numbers a square. A record missing its kind or its victim
+  // list is carried through MARKED INCOMPLETE rather than patched up.
+  const clashes: BoardClash[] = (turn.clashes ?? []).map((clash) => {
+    const cell = indexToCell(clash.index, width, height)
+    const kind = boardKind(clash.kind)
+    const victimIDs = Array.isArray(clash.victimIDs) ? clash.victimIDs : []
+    const complete = kind !== "unknown" && Array.isArray(clash.victimIDs)
+    if (kind === "unknown") {
+      noteAt(
+        cell,
+        `An event here was recorded as "${String(clash.kind)}", which this board does not know how to read.`,
+      )
+    } else if (!Array.isArray(clash.victimIDs)) {
+      noteAt(cell, "An event here was recorded without saying who died.")
+    }
+    return {
+      cell,
+      kind,
+      playerIDs: Array.isArray(clash.playerIDs) ? clash.playerIDs : [],
+      victimIDs,
+      survivorID: clash.survivorID,
+      subStep: clash.subStep ?? 1,
+      reason: clash.reason ?? "",
+      complete,
+    }
+  })
+
+  // ── Sever damage ──────────────────────────────────────────────────────────
+  // Cells cut from units that are STILL ALIVE — the one outcome the old board
+  // could not show at all, because a cut cell is empty and an empty cell used
+  // to be read as a grave.
+  const severed: SeverMark[] = []
+  Object.entries(turn.severedCells ?? {}).forEach(([ownerID, cells]) => {
+    const identity = identityOf(ownerID)
+    ;(cells ?? []).forEach((index) => {
+      severed.push({
+        cell: indexToCell(index, width, height),
+        ownerID,
+        letter: identity.letter,
+        teamName: identity.teamName,
+        color: identity.color,
+      })
+    })
+  })
+
+  // ── Near-deaths ───────────────────────────────────────────────────────────
+  // An exhaustion record naming NO victim is a unit that ran out of health,
+  // halted short of where it was going, ate what was on its halt square and
+  // finished the turn alive. The death registry is what settles it: a unit
+  // named there stayed down and gets a grave, and only a unit the registry does
+  // NOT name gets the recovery mark. Where the two disagree — a record says
+  // nobody died here, the registry says this unit did — the registry wins,
+  // because it is the authority, and the disagreement is reported rather than
+  // quietly resolved.
+  const recoveries: RecoveryMark[] = []
+  clashes.forEach((clash) => {
+    if (!clash.complete) return
+    if (clash.kind !== "exhaustion" && clash.kind !== "hazard") return
+    if (clash.victimIDs.length > 0) return
+    clash.playerIDs.forEach((playerID) => {
+      const identity = identityOf(playerID)
+      if (deathRegistry[playerID]) {
+        const note = `${identity.teamName} ${identity.letter} is recorded as recovering here and as dying this turn.`
+        if (!recordNotes.includes(note)) recordNotes.push(note)
+        return
+      }
+      recoveries.push({
+        cell: clash.cell,
+        playerID,
+        letter: identity.letter,
+        teamName: identity.teamName,
+        color: identity.color,
+        cause: clash.kind,
+      })
+    })
+  })
 
   const winningSquares = options?.showWinningSquares
     ? mapIndices(
@@ -209,6 +429,10 @@ export const turnToBoard = (
     units,
     deaths,
     clashes,
+    severed,
+    recoveries,
+    uncertainties,
+    recordNotes,
     deadUnits,
   }
 }
