@@ -18,6 +18,10 @@ import { Clash, UnitType } from "@shared/types/Game"
  * - A surviving mover stops on any square where a kill happened.
  * - Two pieces exchanging squares through the same edge collide in flight
  *   (knights jump and never swap; snakes resolve via their swept-in body).
+ *   The edge is contested before either piece can be charged for its
+ *   destination: the winner completes onto its target square and stops, the
+ *   loser never crosses the edge and dies on the square it started the
+ *   sub-step on (a tie kills both, each on its own square).
  * - Hazards deal hazardDamage per square entered, at any sub-step (snakes:
  *   head entry). A mover whose health hits zero or below dies on the square
  *   where it happened; a survivor keeps going.
@@ -48,8 +52,10 @@ export interface ChessTurnSimResult {
   traversed: Map<string, number[]>
   /**
    * Final square of every piece (truncated sliders stop early). Authoritative
-   * for dead pieces too: a piece that dies mid-path records the square it
-   * died on — never its origin or staged destination.
+   * for dead pieces too: a piece records the square it died on — the last
+   * square it actually reached, never a staged destination it was blocked
+   * from entering. A piece blocked in flight before it ever left its start
+   * square (an edge-swap loser at sub-step 1) dies on that start square.
    */
   finalSquare: Map<string, number>
   /** Post-hazard health of every unit (the food phase settles movement costs). */
@@ -97,15 +103,25 @@ export const runChessTurnSim = (
   }
 
   // Tier first, then weight; at most one survivor. Returns whether anyone died.
-  const contestSquare = (participants: RuntimeUnit[], subStep: number): boolean => {
+  // `beforeKill` runs on each loser just before it dies, so a caller can put
+  // the unit on the square it should die on first (see edge swaps).
+  const contestSquare = (
+    participants: RuntimeUnit[],
+    subStep: number,
+    beforeKill?: (unit: RuntimeUnit) => void,
+  ): boolean => {
     if (participants.length < 2) return false
     const ids = participants.map((u) => u.id)
     const maxTier = Math.max(...participants.map((u) => u.tier))
     let anyDeath = false
+    const die = (u: RuntimeUnit, reason: string): void => {
+      if (beforeKill) beforeKill(u)
+      kill(u, reason, ids, subStep)
+      anyDeath = true
+    }
     participants.forEach((u) => {
       if (u.tier < maxTier) {
-        kill(u, "Head-on collision (lower invulnerability level died)", ids, subStep)
-        anyDeath = true
+        die(u, "Head-on collision (lower invulnerability level died)")
       }
     })
     const top = participants.filter((u) => u.alive && u.tier === maxTier)
@@ -115,11 +131,19 @@ export const runChessTurnSim = (
       const survivor = heaviest.length === 1 ? heaviest[0] : null
       top.forEach((u) => {
         if (u === survivor) return
-        kill(u, "Head-on collision (lighter unit(s) died)", ids, subStep)
-        anyDeath = true
+        die(u, "Head-on collision (lighter unit(s) died)")
       })
     }
     return anyDeath
+  }
+
+  // An edge-swap loser never crossed the edge: undo the advance step 1 staged
+  // for it so its body, clash marks, traversed list and final square all land
+  // on the square it occupied at the start of the sub-step.
+  const revertToSubStepStart = (unit: RuntimeUnit): void => {
+    if (unit.movedFrom === null) return
+    unit.body.fill(unit.movedFrom)
+    unit.traversed.pop()
   }
 
   const maxSubSteps = Math.max(1, ...units.map((u) => (u.isSnake ? 1 : u.path.length)))
@@ -147,14 +171,36 @@ export const runChessTurnSim = (
       }
     })
 
-    // 2. Wall collisions (snakes only — piece destinations are pre-validated).
+    // 2. In-flight edge swaps between pieces (knights jump; snakes leave a
+    // swept-in body behind, which the square contest below handles). This is
+    // adjudicated before hazards so a loser is never dosed for a square it
+    // never entered — and never dies to a hazard it never reached. The loser
+    // is reverted to the square it started the sub-step on and dies there;
+    // the winner keeps its target square and stops (a kill happened there).
+    for (let i = 0; i < movers.length; i++) {
+      for (let j = i + 1; j < movers.length; j++) {
+        const a = movers[i]
+        const b = movers[j]
+        if (!a.alive || !b.alive) continue
+        if (a.isSnake || b.isSnake || a.type === "knight" || b.type === "knight") continue
+        if (a.movedFrom === b.body[0] && b.movedFrom === a.body[0]) {
+          const anyDeath = contestSquare([a, b], subStep, revertToSubStepStart)
+          if (anyDeath) {
+            if (a.alive) a.stopped = true
+            if (b.alive) b.stopped = true
+          }
+        }
+      }
+    }
+
+    // 3. Wall collisions (snakes only — piece destinations are pre-validated).
     movers.forEach((m) => {
       if (m.alive && m.isSnake && wallSet.has(m.body[0])) {
         kill(m, "Collided with wall", [m.id], subStep)
       }
     })
 
-    // 3. Hazards: every hazard square entered costs hazardDamage on the
+    // 4. Hazards: every hazard square entered costs hazardDamage on the
     // spot. A mover at zero or below dies on that square; a survivor keeps
     // going (and pays again for each further hazard square it enters).
     movers.forEach((m) => {
@@ -166,30 +212,12 @@ export const runChessTurnSim = (
       }
     })
 
-    // 4. Self-collisions (snakes only; a piece stack cannot self-collide).
+    // 5. Self-collisions (snakes only; a piece stack cannot self-collide).
     movers.forEach((m) => {
       if (m.alive && m.isSnake && m.body.slice(1).includes(m.body[0])) {
         kill(m, "Collided with own body", [m.id], subStep)
       }
     })
-
-    // 5. In-flight edge swaps between pieces (knights jump; snakes leave a
-    // swept-in body behind, which the square contest below handles).
-    for (let i = 0; i < movers.length; i++) {
-      for (let j = i + 1; j < movers.length; j++) {
-        const a = movers[i]
-        const b = movers[j]
-        if (!a.alive || !b.alive) continue
-        if (a.isSnake || b.isSnake || a.type === "knight" || b.type === "knight") continue
-        if (a.movedFrom === b.body[0] && b.movedFrom === a.body[0]) {
-          const anyDeath = contestSquare([a, b], subStep)
-          if (anyDeath) {
-            if (a.alive) a.stopped = true
-            if (b.alive) b.stopped = true
-          }
-        }
-      }
-    }
 
     // 6. Per-square contests wherever a mover arrived this sub-step.
     const arrivalSquares = new Set<number>()

@@ -305,6 +305,156 @@ describe("chess pieces: within-turn movement and collisions", () => {
   })
 })
 
+describe("chess pieces: in-flight edge swaps", () => {
+  // Two pieces trading squares through one edge never pass through each other.
+  // The edge is contested BEFORE either piece is credited with entering its
+  // destination: the winner completes onto its target (the loser's start
+  // square) and stops; the loser dies on the square it started the sub-step
+  // on, and that square is what its body, clash, path and move all record.
+  //
+  // Head-on rook setup used below: t1 slides right from (2,5), t2 slides left
+  // from (5,5). Sub-step 1 puts them on (3,5) and (4,5); sub-step 2 is the
+  // swap through the (3,5)|(4,5) edge.
+  const swapRooks = (
+    t1Body: number[],
+    t2Body: number[],
+    turnOverrides: Partial<Turn> = {},
+    setupOverrides: Partial<StartedGameSetup> = {}
+  ): Turn =>
+    run(
+      [gp("t1", "t1", "A", "rook"), gp("t2", "t2", "A", "rook")],
+      { t1: t1Body, t2: t2Body },
+      [mv("t1", at(9, 5)), mv("t2", at(1, 5))],
+      turnOverrides,
+      setupOverrides
+    )
+
+  it("unequal weight: the heavier piece completes the step, the loser dies on its own square", () => {
+    const a = at(3, 5) // t1's square at the start of sub-step 2
+    const b = at(4, 5) // t2's square at the start of sub-step 2
+    const start = at(2, 5)
+    const next = swapRooks([start, start], [at(5, 5)]) // weight 2 vs 1
+
+    expect(next.alivePlayers).toEqual(["t1"])
+    // Winner: onto the loser's square, and stopped there (its ray is cut short).
+    expect(next.playerPieces.t1).toEqual([b, b])
+    expect(next.moves.t1).toBe(b)
+    expect(next.paths?.t1).toEqual([a, b])
+    expect(next.playerHealth.t1).toBe(98) // 2 squares traversed
+
+    // Loser: dead on b, the square it was blocked on — never on a, the square
+    // it tried to swap into.
+    expect(next.moves.t2).toBe(b)
+    expect(next.paths?.t2).toEqual([b]) // the sub-step-2 entry is undone
+    expect(next.clashes.some((c) => c.index === a)).toBe(false)
+    const clash = next.clashes.find((c) => c.index === b)
+    expect(clash!.reason).toBe("Head-on collision (lighter unit(s) died)")
+    expect(clash!.playerIDs.sort()).toEqual(["t1", "t2"])
+    expect(clash!.subStep).toBe(2)
+  })
+
+  it("equal weight and tier: both die, each on its own square, neither passes through", () => {
+    const a = at(3, 5)
+    const b = at(4, 5)
+    const next = swapRooks([at(2, 5)], [at(5, 5)]) // weight 1 vs 1
+
+    expect(next.alivePlayers).toEqual([])
+    expect(next.playerPieces).toEqual({})
+    // Each records the adjacent square it was standing on, not the swapped one.
+    expect(next.moves.t1).toBe(a)
+    expect(next.moves.t2).toBe(b)
+    expect(next.paths?.t1).toEqual([a])
+    expect(next.paths?.t2).toEqual([b])
+    const onA = next.clashes.find((c) => c.index === a)
+    const onB = next.clashes.find((c) => c.index === b)
+    expect(onA!.subStep).toBe(2)
+    expect(onB!.subStep).toBe(2)
+    expect(onA!.playerIDs.sort()).toEqual(["t1", "t2"])
+    expect(onB!.playerIDs.sort()).toEqual(["t1", "t2"])
+  })
+
+  it("tier beats weight: the lighter invulnerable piece wins and the heavy loser dies where it stood", () => {
+    const a = at(3, 5)
+    const b = at(4, 5)
+    const heavy = at(5, 5)
+    const next = swapRooks([at(2, 5)], [heavy, heavy, heavy], {
+      playerInvulnerabilityLevel: { t1: 1, t2: 0 },
+    })
+
+    expect(next.alivePlayers).toEqual(["t1"])
+    expect(next.playerPieces.t1).toEqual([b])
+    expect(next.moves.t1).toBe(b)
+    expect(next.moves.t2).toBe(b) // its own start square, not a
+    expect(next.paths?.t2).toEqual([b])
+    expect(next.clashes.some((c) => c.index === a)).toBe(false)
+    const clash = next.clashes.find((c) => c.index === b)
+    expect(clash!.reason).toBe("Head-on collision (lower invulnerability level died)")
+    expect(clash!.subStep).toBe(2)
+  })
+
+  it("a swap loser is not dosed by a hazard on the square it never entered", () => {
+    const a = at(3, 5) // t1's square, hazardous — t2 stages into it and dies first
+    const b = at(4, 5)
+    const start = at(2, 5)
+    const next = swapRooks(
+      [start, start],
+      [at(5, 5)],
+      { hazards: [a], playerHealth: { t1: 100, t2: 10 } },
+      { hazardDamage: 30 }
+    )
+
+    // The swap is adjudicated before the hazard charge, so t2 dies to the
+    // collision on its own square — not to a hazard on a square it never
+    // reached.
+    expect(next.alivePlayers).toEqual(["t1"])
+    expect(next.clashes.some((c) => c.reason === "Entered hazard")).toBe(false)
+    expect(next.clashes.some((c) => c.index === a)).toBe(false)
+    const clash = next.clashes.find((c) => c.index === b)
+    expect(clash!.reason).toBe("Head-on collision (lighter unit(s) died)")
+    expect(clash!.playerIDs.sort()).toEqual(["t1", "t2"])
+    expect(next.moves.t2).toBe(b)
+  })
+
+  it("the swap winner still pays the hazard dose for the square it lands on", () => {
+    const b = at(4, 5)
+    const start = at(2, 5)
+    const next = swapRooks(
+      [start, start],
+      [at(5, 5)],
+      { hazards: [b] },
+      { hazardDamage: 30 }
+    )
+
+    expect(next.alivePlayers).toEqual(["t1"])
+    expect(next.playerPieces.t1).toEqual([b, b])
+    expect(next.playerHealth.t1).toBe(68) // one 30 dose on entry + 2 squares
+  })
+
+  it("regression: a head-on meeting on ONE square is unchanged — no revert", () => {
+    // t1 (2,5) and t2 (6,5) slide toward each other over an even gap, so they
+    // land on the same square instead of trading squares. The loser keeps the
+    // meeting square as its death square, exactly as before.
+    const meet = at(4, 5)
+    const start = at(2, 5)
+    const next = run(
+      [gp("t1", "t1", "A", "rook"), gp("t2", "t2", "A", "rook")],
+      { t1: [start, start], t2: [at(6, 5)] }, // weight 2 vs 1
+      [mv("t1", at(9, 5)), mv("t2", at(1, 5))]
+    )
+
+    expect(next.alivePlayers).toEqual(["t1"])
+    expect(next.playerPieces.t1).toEqual([meet, meet])
+    expect(next.moves.t1).toBe(meet)
+    expect(next.paths?.t1).toEqual([at(3, 5), meet])
+    // The loser died where it arrived — its path still ends on the shared square.
+    expect(next.moves.t2).toBe(meet)
+    expect(next.paths?.t2).toEqual([at(5, 5), meet])
+    const clash = next.clashes.find((c) => c.index === meet)
+    expect(clash!.reason).toBe("Head-on collision (lighter unit(s) died)")
+    expect(clash!.subStep).toBe(2)
+  })
+})
+
 describe("chess pieces: death squares on the wire", () => {
   // The client's death rendering relies on this contract: for EVERY unit that
   // dies during a turn, `moves[dead]` is the square it actually died on
@@ -330,7 +480,7 @@ describe("chess pieces: death squares on the wire", () => {
     expect(clash!.subStep).toBe(2)
   })
 
-  it("a piece that dies exchanging squares in flight records its landing square", () => {
+  it("a piece that dies exchanging squares in flight records the square it was blocked on", () => {
     const players = [gp("t1", "t1", "A", "king"), gp("t2", "t2", "A", "king")]
     const a = at(4, 5)
     const b = at(5, 5)
@@ -341,9 +491,12 @@ describe("chess pieces: death squares on the wire", () => {
     )
 
     expect(next.alivePlayers).toEqual(["t1"])
-    expect(next.moves.t2).toBe(a)
-    expect(next.paths?.t2).toEqual([a])
-    const clash = next.clashes.find((c) => c.index === a)
+    // t2 never crossed the edge: it dies on b, its own start square (which is
+    // also where the winner comes to rest), NOT on a.
+    expect(next.moves.t2).toBe(b)
+    expect(next.paths?.t2).toBeUndefined()
+    expect(next.clashes.some((c) => c.index === a)).toBe(false)
+    const clash = next.clashes.find((c) => c.index === b)
     expect(clash!.playerIDs.sort()).toEqual(["t1", "t2"])
     expect(clash!.subStep).toBe(1)
   })

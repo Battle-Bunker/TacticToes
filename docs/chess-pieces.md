@@ -147,8 +147,22 @@ the longest path staged this turn.
   tier severs the snake at the contacted segment. A severing slider stops on
   that square (capture-stops).
 - **Edge swaps**: two pieces exchanging squares through the same edge in the
-  same sub-step collide in flight (tier, then weight; winner finishes on its
-  target square and stops; tie kills both). Knights never swap — a jump does
+  same sub-step collide in flight, adjudicated the usual way — tier first,
+  then weight. Neither piece passes through the other: the edge is contested
+  before either can enter its destination, so a loser is never dosed by a
+  hazard on a square it never reached.
+  - **Unique winner**: it finishes on its target square (the loser's start
+    square) and stops there — the usual "a survivor stops where a kill
+    happened" rule. The **loser dies on the square it started the sub-step
+    on**, having been blocked from crossing the edge: its body, its clash
+    record, its `paths` entry and its `moves` square are all that square,
+    never the one it tried to swap into. (Its `paths` entry therefore does
+    not include the swap square; a loser blocked at sub-step 1 traversed
+    nothing at all and is absent from `Turn.paths`.)
+  - **Tie** (same tier *and* same weight): both die, each on its own
+    start-of-sub-step square — the two adjacent cells. Neither crosses.
+
+  Knights never swap — a jump does
   not traverse edges. Snake-vs-piece and snake-vs-snake swaps need no rule:
   the snake's body sweeps in behind its head, so the piece (or other snake)
   hits a body segment, which resolves by the body rules above.
@@ -191,14 +205,19 @@ sub-steps to order.
 - `Turn.paths?: { [playerID]: number[] }` — squares each piece actually
   traversed this turn (for animation/inspection). A dead piece's path ends
   at the square it died on. Snakes are not included, and neither is a
-  piece that did not move (it has no traversed squares).
+  piece that did not move (it has no traversed squares) — including an
+  edge-swap loser blocked at sub-step 1, which never entered a square.
 - `Clash.subStep?: number` — which sub-step an in-flight clash happened on.
 - `turn.moves` remains one integer per player: the square the unit actually
   ended its move on (a truncated slider records its stop square). This is
   the death-square guarantee for clients: a piece that dies mid-path
-  records the square it died on — never its origin or staged destination —
-  and the clash recording the death carries the same square (with its
-  `subStep`). A dead snake records its attempted head square.
+  records the square it died on — the last square it actually reached,
+  never a staged destination it was blocked from entering — and the clash
+  recording the death carries the same square (with its `subStep`). A piece
+  blocked in flight before it ever left the square it started the sub-step
+  on (an edge-swap loser) died on that square, so that is what it records;
+  at sub-step 1 that is its turn origin. A dead snake records its attempted
+  head square.
 
 ## Scoring & elimination
 
