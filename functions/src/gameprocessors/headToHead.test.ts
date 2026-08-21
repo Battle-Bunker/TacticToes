@@ -8,6 +8,7 @@ import {
 } from "@shared/types/Game"
 import { expandTeams } from "../utils/expandTeams"
 import { TeamSnekProcessor } from "./TeamSnekProcessor"
+import { REASON } from "./engine/turnEngine"
 
 // 7x7 board: index = y * 7 + x, perimeter is wall. Collision cell is 24.
 
@@ -54,6 +55,7 @@ const mkTurn = (
     hazards: [],
     playerPieces,
     clashes: [],
+    deaths: {},
     moves: {},
     winners: [],
     // Every unit carries an orientation; irrelevant here (every test stages all
@@ -107,7 +109,7 @@ describe("head-to-head collision resolution", () => {
     expect(next.playerPieces).toEqual({ t3: [24, 31, 38, 37, 36] })
     expect(occupantsOf(next, 24)).toEqual(["t3"])
     const deathReasons = next.clashes.map((c) => c.reason)
-    expect(deathReasons).toContain("Head-on collision (shortest snake(s) died)")
+    expect(deathReasons).toContain(REASON.weight)
   })
 
   it("(a2) three snakes with a tie for longest: all die", () => {
@@ -149,9 +151,7 @@ describe("head-to-head collision resolution", () => {
     expect(next.playerPieces).toEqual({ t3: [24, 31, 38, 37, 36] })
     expect(occupantsOf(next, 24)).toEqual(["t3"])
     const deathReasons = next.clashes.map((c) => c.reason)
-    expect(deathReasons).toContain(
-      "Head-on collision (lower invulnerability level died)"
-    )
+    expect(deathReasons).toContain(REASON.tier)
   })
 
   it("(b2) all snakes at the same elevated tier: only the unique longest survives", () => {
@@ -175,7 +175,7 @@ describe("head-to-head collision resolution", () => {
     expect(next.playerPieces).toEqual({ t3: [24, 31, 38, 37, 36] })
     expect(occupantsOf(next, 24)).toEqual(["t3"])
     const deathReasons = next.clashes.map((c) => c.reason)
-    expect(deathReasons).toContain("Head-on collision (shortest snake(s) died)")
+    expect(deathReasons).toContain(REASON.weight)
   })
 
   it("(c) two equal-length snakes head-on: both die", () => {
@@ -223,7 +223,7 @@ describe("head-to-head collision resolution", () => {
     const t1Clashes = next.clashes.filter((c) => c.playerIDs.includes("t1"))
     expect(t1Clashes.length).toBeGreaterThan(0)
     t1Clashes.forEach((c) => {
-      expect(c.reason).toBe("Collided with own body")
+      expect(c.reason).toBe(REASON.self)
     })
   })
 })

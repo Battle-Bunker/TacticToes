@@ -151,6 +151,7 @@ const mkTurn = (
     hazards: [],
     playerPieces,
     clashes: [],
+    deaths: {},
     moves: {},
     winners: [],
     // Every unit carries an orientation; irrelevant here (every test stages all

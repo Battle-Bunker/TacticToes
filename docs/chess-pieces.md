@@ -1,256 +1,299 @@
-# Chess pieces in Team Snek
+# The turn engine (spec v2)
 
-Chess pieces are optional unit types that coexist with snakes on the board.
-Game config allows any number of each unit type per team, including zero
-snakes (the pure chess variant).
+Every game — snake-only, pure chess, or mixed — resolves its turn in ONE
+engine: `functions/src/gameprocessors/engine/turnEngine.ts`. There is no
+snake path and no piece path. Game config allows any number of each unit type
+per team, including zero snakes (the pure chess variant) and zero pieces (the
+classic variant).
 
 ## Owner decisions (locked)
 
 - **Roster**: pawn, knight, bishop, rook, queen, king — plus snakes.
-- **Stationary pieces are contested by weight** ("piece = head"): any unit
-  entering a piece's square fights it by invulnerability tier first, then
-  weight. Snake *bodies* remain absolute walls exactly as today (equal-tier
-  mover dies; strictly-higher-tier mover severs).
-- **A mid-path winner stops on the kill square**: capture ends the move, and
-  the mover pays health only for squares actually traversed.
-- **Food is eaten at the destination only**: a slider passing over food
-  leaves it on the board. Eating happens in the existing post-collision food
-  phase.
-- **Regicide**: a team whose config includes kings is eliminated when its
-  last king dies — all its remaining units are removed that turn. Teams
-  configured without kings play pure attrition, as today.
+- **One engine, property-driven**: the engine never asks what KIND a unit is.
+  Unit-kind names survive only in the movement grammar
+  (`engine/moveGrammar.ts`), spawn config, regicide (kings) and promotion
+  (pawns).
+- **Stationary units are contested by weight** ("piece = head"): any unit
+  entering an occupied cell fights the occupant by invulnerability tier first,
+  then weight. Trail (snake) *bodies* are walls: an equal-or-lower-tier mover
+  dies on them, a strictly-higher-tier mover severs.
+- **A mid-path winner stops on the kill cell**: capture ends the move, and the
+  mover pays health only for cells actually entered.
+- **Food is eaten at the destination only**: a slider passing over food leaves
+  it on the board. Eating happens in the end-of-turn food phase.
+- **Regicide**: a team whose config includes kings is eliminated when its last
+  king dies — all its remaining units are removed that turn. Teams configured
+  without kings play pure attrition.
 
 ## Unit model
 
-- A chess piece occupies one square, represented in `Turn.playerPieces` as a
-  stack: `weight` copies of that square (the engine's existing idiom for
-  "mass on one cell" — snakes spawn as `[pos, pos, pos]`). Weight = array
-  length, so scoring, team scores, winner adjudication, and the wire format
-  all work unchanged.
-- Pieces start at weight 1. Eating food: +1 weight (push a duplicate) and
-  health restored to 100, same as snakes. A promoting pawn is the one place
-  weight goes down without a death: it returns to weight 1 as a queen.
-- A snake's weight is its length, including stacked tail segments. Severing
-  reduces it automatically.
-- Weight never decays. Nothing is gained from a kill. Dead units vanish
-  without a drop.
+The engine sees one kind of thing, a unit with behavioural properties:
 
-## Movement
+- `leavesTrail` — occupancy trails the head, and the trail cells are
+  body-walls that can be severed. True for snakes only.
+- `traversesEdges` — false for jumps (knights), which therefore never contest
+  an edge.
+- `path` — the cells to enter, ONE PER SUB-STEP. "Snakes move only in
+  sub-step 1" is not a rule: it is what a path of length 1 means.
+- `weightAtTurnStart`, `tier` — frozen for the whole turn (see below).
+- `health` — the only thing that advances within the turn.
+- `status` — `active | stopped | starved | dead`.
 
-Moves stay a single destination square index on the wire (`Move.move`).
-The path is derived: unique straight ray for rook/bishop/queen, single jump
-for the knight, single step for king/pawn.
+Occupancy on the wire (`Turn.playerPieces`) is unchanged: a snake's body
+(index 0 = head), or a piece's weight-stack (`weight` copies of its cell).
+Weight = array length, so scoring, team scores, winner adjudication and the
+wire format all work unchanged.
 
-Every unit in every game carries an orientation (`Turn.orientation`) —
-snake-only games included. At spawn every unit faces toward the board
-centre, chosen from its type's legal orientation set; each turn
-thereafter a unit that moved faces the way it moved, a unit that held
-keeps its orientation, and pawns change orientation only via their rotation action.
-For pawns alone, orientation is also engine-legality-bearing (see below).
+Pieces start at weight 1, snakes at 3. Eating: +1 weight and health restored
+to the type's configured max. A promoting pawn is the one place weight goes
+down without a death: it returns to weight 1 as a queen. Weight never decays.
+Nothing is gained from a kill.
 
+## Frozen state
+
+**All collision adjudication reads the tier and weight each unit held at the
+START of the turn.**
+
+Board occupancy changes within the turn ONLY through movement (a trail sweep
+including the tail pop, a piece stack teleporting) and halting — **never
+through removal**. Dead units, starved units and severed segments all stay on
+the board as collision objects until the collision phase (every sub-step) has
+finished.
+
+Consequences worth stating outright:
+
+- A corpse still blocks, and still fights, for the rest of the turn.
+- A snake severed at sub-step 2 still fights at its pre-sever weight at
+  sub-step 7, and its cut segments still block until the turn ends.
+- Growth and promotion happen after the collision phase, so nothing this turn
+  is ever adjudicated against a weight that changed this turn.
+
+## Sub-step loop: snapshot → resolve → apply
+
+Sub-step count = the longest path staged this turn. Per sub-step:
+
+1. **Advance** every mover with a cell for this sub-step (trail units pop the
+   tail before the head lands; piece stacks teleport).
+2. **Detect** every collision event against the post-advance snapshot: edge
+   exchanges, cell co-arrivals, arrivals onto living body/trail cells,
+   arrivals onto persistent collision objects.
+3. **Adjudicate** each event against that snapshot and the frozen tier/weight
+   ALONE. No adjudication may read anything a sibling adjudication wrote, so
+   the outcome is identical under any unit ordering.
+4. **Apply** the whole batch at once: deaths (victims halt in place and
+   persist as collision objects), edge-loser fallbacks, capture-stops, sever
+   registrations, durable-cell registrations.
+5. **Health phase**, strictly after the collisions (see below).
+
+Adjudication proceeds in fixed TIERS within one sub-step — edge exchanges
+(they decide who actually completed a crossing), then walls, then
+self-collisions, then arrivals, then living bodies. Each tier is a pure
+function of the snapshot plus the tiers before it; within a tier, every event
+sees the board as that tier found it. That is what makes a whole sub-step
+order-independent rather than iteration-order dependent.
+
+### Collision rules
+
+Tier first, then frozen weight; **at most one unique strict maximum
+survives**, and any tie leaves nobody standing.
+
+- **Edge exchange** — two units traversing the same edge in opposite
+  directions in one sub-step. Exempt: non-edge-traversers (knights), and trail
+  units whose post-advance occupancy still holds their origin (their body
+  swept in behind the head, so the body rules resolve the meeting instead). A
+  length-1 trail unit leaves nothing behind and contests the edge exactly like
+  a piece; length-1 snakes are reachable in ordinary play, because severing
+  bottoms out there.
+  - Unique winner: it completes into the loser's origin cell and
+    capture-stops. The loser falls back to the cell it started the sub-step on
+    and dies there — its occupancy, its clash record, its `paths` entry and
+    its `moves` cell are all that cell, never the one it tried to swap into.
+  - Tie: both fall back and die on their own two cells, one clash record each.
+- **Cell contest** — every head-class occupant of a cell somebody arrived at
+  (arrivers and stationary units alike) plus everything the cell's pile holds.
+  The unique maximum survives (and stops, if it was mid-path); everyone else
+  dies there.
+- **Living body/trail cells** — an arriving unit at tier ≤ the owner's tier
+  dies there (`bodyBlock`). A strictly higher tier SEVERS (`sever`,
+  non-fatal — the owner is not a victim) and capture-stops. Severed segments
+  REMAIN blocking as the owner's body for the rest of the collision phase; the
+  truncation and the weight loss apply only at end of turn. Several severs on
+  one owner: each is recorded, and at end of turn the LOWEST cut index wins —
+  the deepest bite. `Turn.severedCells` lists the cells actually removed from
+  survivors. Every owner at a cell is judged together, and "living owner"
+  means living as the body tier found the board — so two snakes that run into
+  each other's necks both die, whichever order the roster lists them in.
+- **Persistent collision objects (the wrestling rule)** — from the moment a
+  unit dies or starves, its ENTIRE remaining occupancy becomes durable
+  collision cells, as does any cell where a fatal contest happened. A unit
+  arriving at such a cell on a later sub-step joins that cell's CUMULATIVE
+  contest against every prior participant there, on frozen tier and weight. It
+  survives only as the unique strict maximum of the whole pile (and then
+  capture-stops there); otherwise it dies there and joins the pile. Units that
+  crossed the cell before its first death are unaffected.
+- **Walls** kill any mover that enters one (checked for every mover, though in
+  practice only trail units can: piece destinations are grammar-validated).
+  **Self-collision** applies to trail units only — a piece stack is all on one
+  cell by construction.
+
+### Health, per sub-step
+
+Health loss is tied to movement, not turns. There is no per-turn tick, and
+nothing is settled at end of turn any more.
+
+- **Movement cost**: 1 health per cell entered, charged in the sub-step where
+  it is entered. A snake enters exactly one cell per turn, so it still pays
+  1/turn. A knight's jump is one cell entered, so a flat 1. Staying or
+  rotating enters nothing and costs nothing.
+- **Hazard damage**: `GameSetup.hazardDamage` (default 100 — usually lethal,
+  configurable) per hazard cell entered, charged the same sub-step. A unit
+  that does not move at all and stands on a hazard pays exactly one dose, at
+  sub-step 1.
+- **Starving**: health ≤ 0 makes the unit `starved`. It halts immediately at
+  the cell it reached, its body persists as a collision incumbent — a dying
+  animal that still defeats a lower-frozen-weight arrival for the rest of the
+  turn — and it is removed at end of turn. It appears in `Turn.deaths` with
+  cause `"hazard"` (a hazard dose finished it) or `"starvation"`.
+- **Units die mid-ray from running out of health.** A slider that cannot
+  afford its ray halts where the health ran out; it never reaches its staged
+  destination, and food waiting there does not rescue it. There is no
+  mid-ray food rescue at all: cost is charged as it is spent.
+- An edge-contest loser is never charged for the cell it did not enter.
+
+### Eating
+
+Eating happens in the end-of-turn food phase: a SURVIVOR standing on food
+consumes it, restores health to its current kind's configured max
+(`maxHealthPerUnit`, default 100) and gains one weight/length. It no longer
+replaces the movement cost — that was already charged in-sim.
+
+## Movement grammar
+
+Moves stay a single destination cell index on the wire (`Move.move`). The path
+is derived: a unique straight ray for rook/bishop/queen, a single jump for the
+knight, a single step for king/pawn, a single orthogonal step for a snake.
+
+Every unit carries an orientation (`Turn.orientation`). At spawn every unit
+faces toward the board centre, chosen from its kind's legal orientation set;
+each turn thereafter a unit that moved faces the direction of its FIRST step,
+a unit that held keeps its orientation, and pawns change orientation only via
+their rotation action. For pawns alone, orientation is also
+engine-legality-bearing.
+
+- **Snake**: one orthogonal step. It is the one kind allowed to stage a wall
+  cell — walking into the perimeter is a legal, fatal move. Staging its own
+  cell is not a move. Its default action (nothing legal staged) is to
+  **continue straight** one step along its orientation, wherever that leads.
 - **Rook**: any distance along a row/column. **Bishop**: along a diagonal.
   **Queen**: either. Range is unlimited (health cost is the limiter).
 - **Knight**: the 8 L-jumps; touches only its destination.
 - **King**: 1 step in any of the 8 directions.
-- **Pawn**: has an orientation, assigned at spawn (toward the board centre, like
-  every unit). Each turn a pawn may do exactly one of:
-  - step 1 square **straight forward**;
-  - step 1 square **diagonal-forward**, but only to attack or eat — legal
-    only when that square holds food or another unit at the start of the
-    turn (if the occupant moves away in flight, the pawn still completes
-    the staged step onto the vacated square — moves are simultaneous);
-  - **rotate 90°** left or right, a full-turn action with no movement and
-    no movement health cost. On the wire this is staged as the pawn's
-    left/right *side* square (never a legal step for a pawn), meaning
-    "face that way"; `turn.moves` records the pawn's own square (it did
-    not move) and the new orientation appears in `Turn.orientation`. Turning
-    around fully costs two turns;
+- **Pawn**: each turn exactly one of —
+  - step 1 cell **straight forward**;
+  - step 1 cell **diagonal-forward**, to attack or eat only — legal only when
+    that cell holds food or another unit at the start of the turn (if the
+    occupant moves away in flight, the pawn still completes the staged step
+    onto the vacated cell: moves are simultaneous);
+  - **rotate 90°** left or right: a full-turn action, no movement, no
+    movement health cost. Staged on the wire as the pawn's left/right *side*
+    cell, meaning "face that way". **Rotation is signalling, and the side cell
+    is never entered, so it is legal wherever that cell falls — including onto
+    the perimeter wall.** Turning around fully costs two turns;
   - stay (also the default).
-  The square directly behind is never a legal destination.
-  **Promotion**: at weight ≥ `pawnPromotionWeight` (config, default 10) a
-  pawn becomes a queen. It keeps id, letter, orientation and current health
-  (clamped down to the queen's configured max if it was carrying more), and
-  **resets to weight 1** — its stack collapses to the single square it
-  occupies. The accumulated mass is the price of the queen's mobility. The
-  queen's `maxHealthPerUnit` entry therefore applies to any game with pawns,
-  whether or not queens are fielded at spawn.
-- **Staying still is legal and free** of movement cost. It is also the
-  default when a piece stages nothing or stages an illegal destination
-  (pieces have no momentum; the snake default of "continue straight" has no
-  analog). The applied move is recorded in `turn.moves` as the piece's own
-  square.
-- A destination is illegal if it is not on a legal ray/jump/step, or if any
-  traversed square is out of bounds or a wall. Illegal → stay.
-- Chess-style blocking does not exist at staging time: moves are
-  simultaneous and hidden, so a "blocker" may itself move away. Whether a
-  path is actually blocked is discovered in flight. There is no friendly
-  exemption anywhere, matching the engine.
 
-## Health
+  The cell directly behind is never legal. **Promotion**: at weight ≥
+  `pawnPromotionWeight` (config, default 10) a pawn becomes a queen, keeping
+  id, letter, orientation and current health (clamped down to the queen's
+  configured max) and **resetting to weight 1**.
+- **Pieces have no momentum**: staying is legal, free, and the default when a
+  piece stages nothing or stages an illegal destination.
+- A piece destination is illegal if it is not on a legal ray/jump/step, or if
+  it is not interior. Illegal → the kind's default action.
+- Chess-style blocking does not exist at staging time: moves are simultaneous
+  and hidden, so a "blocker" may itself move away. Whether a path is actually
+  blocked is discovered in flight. There is **no friendly exemption anywhere**.
 
-Health loss is tied to movement, not turns — there is no universal per-turn
-tick.
+## End of turn
 
-- **Snakes** always move exactly 1 cell per turn, so a snake pays 1 health
-  on every non-eating turn (the same net drain as before).
-- **Pieces** pay 1 health per square actually traversed: sliders pay 1 per
-  square entered, the knight's jump costs a flat 1 total, a king/pawn step
-  costs 1, and staying or rotating costs 0. A stationary piece spends
-  nothing — low-max-health kings are cheap to hold and risky to move.
-- **Eating** at the final square restores health to the unit type's
-  configured max (`maxHealthPerUnit`, default 100) instead of paying costs.
-- All of this resolves in one **central health-accounting function** shared
-  by the snake-only path and the chess path (the food phase at the end of
-  the turn): eat → restore to type max, else
-  `health -= movementCost + stationaryHazardDose`, and ≤ 0 dies on its
-  final square with the "Died due to zero health" clash. (A piece may
-  therefore complete a move it cannot afford and die on arrival.) The
-  snake-only path calls the same function with no chess state and reduces
-  exactly to the original 1/turn starvation tick.
+After the collision phase, in this order:
 
-### Hazard damage
+1. dead and starved units leave the board (severs already truncated survivors
+   inside the engine, writing `Turn.severedCells`);
+2. ally buff expiry for vulnerable units — see below;
+3. food and growth;
+4. regicide;
+5. orientation rewrite (so dead units drop out, and a pawn promoting this turn
+   keeps its pawn orientation);
+6. potion collection, food/potion spawning, effect expiry;
+7. pawn promotion;
+8. winners, then turn assembly.
 
-- Hazards deal `GameSetup.hazardDamage` (default 100 — usually lethal, but
-  configurable 1..1000) instead of certain death.
-- **Per-square entry dose**: a mover pays one dose for every hazard square
-  it enters, deducted immediately at the sub-step where it happens. Snakes
-  pay on head entry, as before — they always move, so the entry dose is the
-  only hazard charge they ever pay.
-- **Mid-flight death**: a mover whose health hits ≤ 0 on a hazard square
-  dies right there (the "Entered hazard" clash records the square and
-  sub-step). A mover that survives the dose keeps going — a slider can
-  cross a hazard field and come out the other side, paying per square.
-- **Stationary dose**: a piece that did not move this turn and sits on a
-  hazard square takes exactly one dose in the central health function.
-  There is no double-dosing: a mover that stopped ON a hazard square
-  already paid on entry and pays nothing extra that turn.
-
-## Within-turn sub-step simulation
-
-Piece games resolve each turn as a sequence of sub-steps; sub-step count =
-the longest path staged this turn.
-
-- **Sub-step 1**: snakes make their entire move (tail pops first, exactly as
-  today), knights land, kings/pawns step, sliders advance their first
-  square.
-- **Sub-steps 2..k**: sliders advance one square each; everything else is a
-  stationary occupant.
-- Dead units vacate immediately: their squares are free from the moment they
-  die, including for later arrivals in the same turn.
-- **Same-square meeting**: all units on a square where someone arrived this
-  sub-step are adjudicated together — invulnerability tier first (everyone
-  below the top tier dies), then weight among the top tier: the unique
-  heaviest survives, any tie kills all (the existing at-most-one-survivor
-  rule).
-- **Snake bodies** (segments behind the head, including stacked tails) stay
-  walls: an equal-or-lower-tier unit entering one dies; a strictly higher
-  tier severs the snake at the contacted segment. A severing slider stops on
-  that square (capture-stops).
-- **Edge swaps**: two units exchanging squares through the same edge in the
-  same sub-step collide in flight, adjudicated the usual way — tier first,
-  then weight. Neither passes through the other: the edge is contested
-  before either can enter its destination, so a loser is never dosed by a
-  hazard on a square it never reached.
-  - **Unique winner**: it finishes on its target square (the loser's start
-    square) and stops there — the usual "a survivor stops where a kill
-    happened" rule. The **loser dies on the square it started the sub-step
-    on**, having been blocked from crossing the edge: its body, its clash
-    record, its `paths` entry and its `moves` square are all that square,
-    never the one it tried to swap into. (Its `paths` entry therefore does
-    not include the swap square; a loser blocked at sub-step 1 traversed
-    nothing at all and is absent from `Turn.paths`.)
-  - **Tie** (same tier *and* same weight): both die, each on its own
-    start-of-sub-step square — the two adjacent cells. Neither crosses.
-
-  Knights never swap — a jump does not traverse edges.
-
-  **Which snakes swap**: a snake is exempt only when it actually leaves
-  something behind. Normally it does — its body sweeps in behind its head, so
-  the piece (or other snake) hits a body segment and the body rules above
-  resolve it, no swap rule needed. A **length-1 snake leaves nothing behind**:
-  its only segment pops before the head lands, genuinely clearing the square.
-  It therefore contests the edge exactly like a piece — same tier-then-weight
-  adjudication, same revert-and-die-on-your-own-square outcome for the loser
-  (its weight is 1, so it can only win the edge on tier). Length-1 snakes are
-  reachable in normal play: severing bottoms out there. A losing snake records
-  the square it was blocked on in `moves`, not its attempted head square —
-  it never reached that square.
-- Perpendicular diagonal crossings that never share a square do not collide;
-  collisions are square-based.
-- Two units crossing the same square at different sub-steps do not collide.
-- **Hazards** dose a mover `hazardDamage` per hazard square entered, at any
-  sub-step (mid-flight); ≤ 0 health dies on that square, survivors keep
-  going. Snakes are dosed on head entry. See "Hazard damage" above.
-- Weights are fixed for the whole simulation (growth happens in the food
-  phase, after collisions — same as today's snakes; promotion's weight reset
-  is later still, after regicide and orientation, so nothing this turn is
-  adjudicated against the reset weight).
-
-Snake-only games (no piece units configured) resolve in a single pass:
-every snake moves exactly one square per turn, so there is nothing for
-sub-steps to order.
+**Vulnerable-collision buff expiry**: when a unit whose frozen tier is below
+zero DIES — for any cause — or SURVIVES A SEVER, its team-mates'
+invulnerability buffs are rescheduled to expire at the end of this turn. One
+encoding, fed by the engine's typed events, covering every game. (Previously
+the piece path never fired it for a severed snake.)
 
 ## Wire format
 
-- `GameSetup.unitsPerTeam?: { snake?, pawn?, knight?, bishop?, rook?,
-  queen?, king? }` — counts per team. Absent → `snakesPerTeam` snakes.
-  When present, `snakesPerTeam` is ignored by expansion.
+- `GameSetup.unitsPerTeam?: { snake?, pawn?, knight?, bishop?, rook?, queen?,
+  king? }` — counts per team. Absent → `snakesPerTeam` snakes.
 - `GamePlayer.unitType?: UnitType` — absent means `"snake"`.
-- `Turn.unitTypes?: { [playerID]: UnitType }` — current type per unit
-  (changes on pawn promotion); absent in snake-only games.
-- `Turn.orientation: { [playerID]: { dx, dy } }` — per-unit orientation,
-  written for **every** unit in **every** game, snake-only games
-  included. Rewritten every turn: a unit that moved faces
-  the direction it moved — sliders/king the unit step (e.g. `{1,0}`,
-  `{1,1}`), knight its exact L-offset (e.g. `{1,-2}`), snake head minus
-  neck — while units that stayed keep their previous orientation and dead units
-  drop out. Pawns are the exception: forward and diagonal steps never
-  rotate them; only their rotation action changes orientation. Spawn (turn 0):
-  every unit faces toward the board centre, chosen from its type's legal
-  orientation set (snake/rook/pawn: the 4 orthogonals; bishop: the 4
-  diagonals; queen/king: all 8; knight: its 8 L-offsets) — the candidate
-  with minimal angle to the spawn→centre vector, ties (spawn on a symmetry
-  axis, or exactly at centre) resolved uniformly at random.
-- `Turn.paths?: { [playerID]: number[] }` — squares each piece actually
-  traversed this turn (for animation/inspection). A dead piece's path ends
-  at the square it died on. Snakes are not included, and neither is a
-  piece that did not move (it has no traversed squares) — including an
-  edge-swap loser blocked at sub-step 1, which never entered a square.
-- `Clash.subStep?: number` — which sub-step an in-flight clash happened on.
-- `turn.moves` remains one integer per player: the square the unit actually
-  ended its move on (a truncated slider records its stop square). This is
-  the death-square guarantee for clients: a piece that dies mid-path
-  records the square it died on — the last square it actually reached,
-  never a staged destination it was blocked from entering — and the clash
-  recording the death carries the same square (with its `subStep`). A piece
-  blocked in flight before it ever left the square it started the sub-step
-  on (an edge-swap loser) died on that square, so that is what it records;
-  at sub-step 1 that is its turn origin. A dead snake records its attempted
-  head square — unless it too was blocked in flight losing an edge swap, in
-  which case it records the square it was blocked on.
+- `Turn.unitTypes?` — current kind per unit (changes on pawn promotion);
+  written only for games that field pieces.
+- `Turn.orientation` — per-unit orientation, every unit in every game. Dead
+  units drop out.
+- `Turn.paths?` — cells each PIECE actually entered this turn, in order (for
+  animation/inspection). A dead piece's path ends at the cell it died on.
+  Trail units are excluded, and so is any piece that entered nothing.
+- **`Turn.deaths: { [playerID]: { cell, subStep, cause } }`** — the
+  authoritative death registry, and the ONLY source renderers use to draw
+  deaths. Every unit removed this turn appears here, starved units included.
+  `cause` is a `ClashKind`.
+- **`Turn.severedCells?: { [playerID]: number[] }`** — cells cut from each
+  SURVIVING trail unit this turn (non-fatal damage, for damage indicators).
+  Absent when no sever truncated anything. A sever whose owner died the same
+  turn is recorded as a clash but truncates nothing, so it never appears here.
+- **`Turn.clashes: Clash[]`** — one adjudicated event at one cell:
+  - `index` — the cell;
+  - `subStep` — which sub-step it happened on (1 for whole-move units);
+  - `kind` — `contest | edge | bodyBlock | sever | hazard | starvation | wall
+    | self | regicide`;
+  - `playerIDs` — every unit involved, survivors included;
+  - `victimIDs` — the subset that died (or starved) HERE. Empty for a sever;
+  - `survivorID?` — the unique unit left standing at this cell, when there is
+    one. Withdrawn when the named unit was condemned in the same sub-step (two
+    snakes can annihilate each other simultaneously);
+  - `reason` — display text ONLY. Rendering decisions key on `kind` and the id
+    lists, never on this string.
+  An edge-contest tie spans two cells and emits one record per cell.
+- `turn.moves` remains one integer per player: **the cell the unit actually
+  ended its move on**. This is the death-square guarantee: anything that died
+  records the cell it died on — the last cell it actually reached, never a
+  staged destination it was blocked from entering — and `Turn.deaths[id].cell`
+  agrees.
 
 ## Scoring & elimination
 
-- Piece score = weight (`playerPieces[id].length`), so team score = sum of
-  weights, and turn-limit/MMR adjudication work unchanged. Note the start
-  asymmetry: a snake spawns worth 3, a piece worth 1.
+- Score = weight (`playerPieces[id].length`), so team score = sum of weights.
+  Note the start asymmetry: a snake spawns worth 3, a piece worth 1.
 - Promotion costs score: the promoting team's score drops by
-  `pawnPromotionWeight - 1` on that turn. Adjudication reads the post-promotion
-  board, so a promotion on the final turn is scored at weight 1.
-- A team is alive while any of its units is alive — plus the regicide rule
-  for teams configured with kings. Weight never reaches 0 by promotion (the
-  queen stands on its square at weight 1), so promoting can never eliminate a
-  unit or a team.
+  `pawnPromotionWeight - 1` that turn, and adjudication reads the
+  post-promotion board.
+- A team is alive while any of its units is alive — plus regicide for teams
+  configured with kings. Weight never reaches 0 by promotion, so promoting can
+  never eliminate a unit or a team.
 
 ## Implementer judgment calls (reported, not escalated)
 
 - Spawning uses the shared placement machinery (radial team slices when team
-  clusters are on), with pieces interleaved among snakes. Chess-style
-  formations can come later.
+  clusters are on), with pieces interleaved among snakes.
 - Pieces participate fully in the invulnerability system (potions at the
-  destination square, ally buffs, debuffs, tiers).
-- Knight movement health cost is a flat 1 total for the jump (there is no
-  universal per-turn tick to add on top).
-- Self-collision checks skip pieces (a stack is all on one square by
+  destination cell, ally buffs, debuffs, tiers).
+- Self-collision checks skip pieces (a stack is all on one cell by
   construction).
-- Board capacity guard now counts total units per team.
+- Board capacity guard counts total units per team.
+- A unit that never moves pays its stationary hazard dose inside the engine,
+  at sub-step 1, so ALL health accounting lives in one place — and a piece
+  that starves on a hazard while standing still becomes a collision incumbent
+  like any other starved unit.

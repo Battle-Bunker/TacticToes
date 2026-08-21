@@ -22,6 +22,7 @@ import {
 } from "@shared/types/Game"
 import { expandTeams } from "../utils/expandTeams"
 import { TeamSnekProcessor } from "./TeamSnekProcessor"
+import { REASON } from "./engine/turnEngine"
 
 // 7x7 board (index = y * 7 + x) unless a test overrides; perimeter is wall.
 
@@ -61,6 +62,7 @@ const mkTurn = (
     hazards: [],
     playerPieces,
     clashes: [],
+    deaths: {},
     moves: {},
     winners: [],
     // Every unit carries an orientation; irrelevant here (every test stages all
@@ -250,7 +252,7 @@ describe("invulnerability effect expiry", () => {
     expect(next.alivePlayers).toEqual(["t1"])
     expect(next.playerPieces).toEqual({ t1: [24, 23, 16] })
     expect(next.clashes.map((c) => c.reason)).toContain(
-      "Head-on collision (lower invulnerability level died)"
+      REASON.tier
     )
     expect(next.playerInvulnerabilityLevel).toEqual({ t1: 0 })
     expect(next.activeEffects).toEqual([])

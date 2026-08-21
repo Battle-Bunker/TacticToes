@@ -9,7 +9,8 @@ import {
   UnitType,
 } from "@shared/types/Game"
 import { TeamSnekProcessor } from "./TeamSnekProcessor"
-import { spawnOrientationCandidates } from "./chess/pieceMoves"
+import { spawnOrientationCandidates } from "./engine/moveGrammar"
+import { REASON } from "./engine/turnEngine"
 
 // 11x11 board: index = y * 11 + x, perimeter is wall (interior 1..9).
 const W = 11
@@ -53,6 +54,7 @@ const mkTurn = (
     hazards: [],
     playerPieces,
     clashes: [],
+    deaths: {},
     moves: {},
     winners: [],
     ...overrides,
@@ -148,9 +150,15 @@ describe("chess pieces: within-turn movement and collisions", () => {
     expect(next.paths?.t1).toEqual([at(2, 5), at(3, 5), blocker])
     // 3 squares traversed, no base tick
     expect(next.playerHealth.t1).toBe(97)
-    expect(
-      next.clashes.some((c) => c.index === blocker && c.reason.includes("lighter unit"))
-    ).toBe(true)
+    const clash = next.clashes.find((c) => c.index === blocker)
+    expect(clash).toMatchObject({
+      kind: "contest",
+      reason: REASON.weight,
+      victimIDs: ["t2"],
+      survivorID: "t1",
+    })
+    expect(clash!.playerIDs.sort()).toEqual(["t1", "t2"])
+    expect(next.deaths.t2).toEqual({ cell: blocker, subStep: 3, cause: "contest" })
   })
 
   it("equal-weight mover vs stationary piece: tie kills both", () => {
@@ -176,7 +184,7 @@ describe("chess pieces: within-turn movement and collisions", () => {
 
     expect(next.alivePlayers).toEqual(["t2"])
     expect(
-      next.clashes.some((c) => c.reason === "Collided with another snake's body" && c.playerIDs.includes("t1"))
+      next.clashes.some((c) => c.reason === REASON.bodyBlock && c.playerIDs.includes("t1"))
     ).toBe(true)
   })
 
@@ -195,7 +203,7 @@ describe("chess pieces: within-turn movement and collisions", () => {
     expect(next.playerPieces.t1).toEqual([at(5, 5)])
     expect(next.playerPieces.t2).toEqual([at(5, 2), at(5, 3), at(5, 4)])
     expect(
-      next.clashes.some((c) => c.reason === "Body severed by invulnerable snake")
+      next.clashes.some((c) => c.reason === REASON.sever)
     ).toBe(true)
     expect(next.playerHealth.t1).toBe(96) // 4 squares traversed
   })
@@ -278,7 +286,7 @@ describe("chess pieces: within-turn movement and collisions", () => {
 
     expect(next.alivePlayers).toEqual(["t2"])
     const clash = next.clashes.find((c) => c.playerIDs.includes("t1"))
-    expect(clash!.reason).toBe("Entered hazard")
+    expect(clash!.reason).toBe(REASON.hazard)
     expect(clash!.index).toBe(hazard)
     expect(clash!.subStep).toBe(3)
     // Death-square guarantee: the move and path end on the hazard square.
@@ -348,7 +356,7 @@ describe("chess pieces: in-flight edge swaps", () => {
     expect(next.paths?.t2).toEqual([b]) // the sub-step-2 entry is undone
     expect(next.clashes.some((c) => c.index === a)).toBe(false)
     const clash = next.clashes.find((c) => c.index === b)
-    expect(clash!.reason).toBe("Head-on collision (lighter unit(s) died)")
+    expect(clash!.reason).toBe(REASON.weight)
     expect(clash!.playerIDs.sort()).toEqual(["t1", "t2"])
     expect(clash!.subStep).toBe(2)
   })
@@ -388,7 +396,7 @@ describe("chess pieces: in-flight edge swaps", () => {
     expect(next.paths?.t2).toEqual([b])
     expect(next.clashes.some((c) => c.index === a)).toBe(false)
     const clash = next.clashes.find((c) => c.index === b)
-    expect(clash!.reason).toBe("Head-on collision (lower invulnerability level died)")
+    expect(clash!.reason).toBe(REASON.tier)
     expect(clash!.subStep).toBe(2)
   })
 
@@ -407,10 +415,10 @@ describe("chess pieces: in-flight edge swaps", () => {
     // collision on its own square — not to a hazard on a square it never
     // reached.
     expect(next.alivePlayers).toEqual(["t1"])
-    expect(next.clashes.some((c) => c.reason === "Entered hazard")).toBe(false)
+    expect(next.clashes.some((c) => c.reason === REASON.hazard)).toBe(false)
     expect(next.clashes.some((c) => c.index === a)).toBe(false)
     const clash = next.clashes.find((c) => c.index === b)
-    expect(clash!.reason).toBe("Head-on collision (lighter unit(s) died)")
+    expect(clash!.reason).toBe(REASON.weight)
     expect(clash!.playerIDs.sort()).toEqual(["t1", "t2"])
     expect(next.moves.t2).toBe(b)
   })
@@ -450,7 +458,7 @@ describe("chess pieces: in-flight edge swaps", () => {
     expect(next.moves.t2).toBe(meet)
     expect(next.paths?.t2).toEqual([at(5, 5), meet])
     const clash = next.clashes.find((c) => c.index === meet)
-    expect(clash!.reason).toBe("Head-on collision (lighter unit(s) died)")
+    expect(clash!.reason).toBe(REASON.weight)
     expect(clash!.subStep).toBe(2)
   })
 
@@ -484,7 +492,7 @@ describe("chess pieces: in-flight edge swaps", () => {
     expect(next.moves.t1).toBe(snakeAt)
     expect(next.clashes.some((c) => c.index === rookAt)).toBe(false)
     const clash = next.clashes.find((c) => c.index === snakeAt)
-    expect(clash!.reason).toBe("Head-on collision (lighter unit(s) died)")
+    expect(clash!.reason).toBe(REASON.weight)
     expect(clash!.playerIDs.sort()).toEqual(["t1", "t2"])
     expect(clash!.subStep).toBe(1)
   })
@@ -518,7 +526,7 @@ describe("chess pieces: in-flight edge swaps", () => {
     expect(next.moves.t2).toBe(rookAt) // the loser dies where it stood
     expect(next.clashes.some((c) => c.index === snakeAt)).toBe(false)
     const clash = next.clashes.find((c) => c.index === rookAt)
-    expect(clash!.reason).toBe("Head-on collision (lower invulnerability level died)")
+    expect(clash!.reason).toBe(REASON.tier)
   })
 
   it("two length-1 snakes swapping: tie kills both, each on its own square", () => {
@@ -558,7 +566,7 @@ describe("chess pieces: in-flight edge swaps", () => {
     expect(next.moves.t2).toBe(head) // the rook did enter the square
     expect(next.paths?.t2).toEqual([head])
     const clash = next.clashes.find((c) => c.index === head)
-    expect(clash!.reason).toBe("Collided with another snake's body")
+    expect(clash!.reason).toBe(REASON.bodyBlock)
   })
 })
 
@@ -608,21 +616,28 @@ describe("chess pieces: death squares on the wire", () => {
     expect(clash!.subStep).toBe(1)
   })
 
-  it("a piece that starves on arrival records the arrival square as its death square", () => {
+  // INVERTED against the pre-engine behavior. Movement cost used to be
+  // settled once, in the food phase, so a piece could complete a ray it could
+  // not afford and die on the staged destination. The engine now charges each
+  // cell as it is entered, so the piece starves MID-RAY and halts where its
+  // health ran out — three cells short of where it was going.
+  it("a piece that starves mid-ray halts and dies on the cell that drained it", () => {
     const players = [gp("t1", "t1", "A", "rook"), gp("t2", "t2", "A", "king")]
     const dest = at(5, 5)
+    const drained = at(4, 5) // the third cell entered: 3 health, 1 per cell
     const next = run(
       players,
       { t1: [at(1, 5)], t2: [at(9, 9)] },
       [mv("t1", dest)],
-      { playerHealth: { t1: 3, t2: 100 } } // 4 squares traversed > 3 health
+      { playerHealth: { t1: 3, t2: 100 } }
     )
 
     expect(next.alivePlayers).toEqual(["t2"])
-    expect(next.moves.t1).toBe(dest)
-    expect(next.paths?.t1).toEqual([at(2, 5), at(3, 5), at(4, 5), dest])
+    expect(next.moves.t1).toBe(drained)
+    expect(next.paths?.t1).toEqual([at(2, 5), at(3, 5), drained])
+    expect(next.deaths.t1).toEqual({ cell: drained, subStep: 3, cause: "starvation" })
     expect(
-      next.clashes.some((c) => c.index === dest && c.reason === "Died due to zero health")
+      next.clashes.some((c) => c.index === drained && c.reason === REASON.starvation)
     ).toBe(true)
   })
 
@@ -804,7 +819,7 @@ describe("chess pieces: regicide and winners", () => {
 
     expect(next.alivePlayers).toEqual(["t2"])
     expect(
-      next.clashes.some((c) => c.reason === "Team eliminated: king fell" && c.playerIDs.includes("t1#2"))
+      next.clashes.some((c) => c.reason === REASON.regicide && c.playerIDs.includes("t1#2"))
     ).toBe(true)
     // t2 is the last team standing — it wins.
     expect(next.winners.length).toBeGreaterThan(0)
@@ -1091,7 +1106,7 @@ describe("configurable hazard damage", () => {
 
     expect(next.alivePlayers).toEqual(["t2"])
     const clash = next.clashes.find((c) => c.playerIDs.includes("t1"))
-    expect(clash!.reason).toBe("Entered hazard")
+    expect(clash!.reason).toBe(REASON.hazard)
     expect(clash!.index).toBe(at(5, 5)) // second hazard square: 50 - 30 - 30 ≤ 0
     expect(clash!.subStep).toBe(4)
   })
@@ -1297,7 +1312,7 @@ describe("chess pieces: snake bodies are walls for allies too", () => {
     expect(clash).toBeDefined()
     expect(clash!.index).toBe(at(4, 4))
     expect(clash!.subStep).toBe(2)
-    expect(clash!.reason).toBe("Collided with another snake's body")
+    expect(clash!.reason).toBe(REASON.bodyBlock)
 
     // It never reaches the food: no eat, no weight, no health restore.
     expect(next.food).toContain(at(6, 6))
@@ -1360,7 +1375,7 @@ describe("chess pieces: snake bodies are walls for allies too", () => {
     expect(next.food).toContain(at(6, 6))
     expect(next.playerHealth.b).toBe(98) // 2 squares traversed, no restore
     expect(
-      next.clashes.some((c) => c.reason === "Body severed by invulnerable snake")
+      next.clashes.some((c) => c.reason === REASON.sever)
     ).toBe(true)
   })
 

@@ -146,6 +146,19 @@ export interface Turn {
   hazards: number[]
   playerPieces: { [playerID: string]: number[] } // Snake body (index 0 = head) or a chess piece's weight-stack (N copies of its square)
   clashes: Clash[]
+  /**
+   * Authoritative death registry for this turn — the ONLY source renderers
+   * use to draw deaths. Every unit removed this turn appears here, including
+   * starved units (health exhausted mid-turn: they halt where they are,
+   * remain collision objects until the collision phase ends, and are removed
+   * at end of turn). Empty object when nobody died.
+   */
+  deaths: { [playerID: string]: UnitDeath }
+  /**
+   * Cells cut from each SURVIVING snake this turn by a sever — non-fatal
+   * damage, for damage indicators. Absent when no sever happened.
+   */
+  severedCells?: { [playerID: string]: number[] }
   moves: { [playerID: string]: number } // Square each unit actually ended its move on (truncated sliders record their stop square)
   winners: Winner[]
   teamScores?: { [teamID: string]: number }
@@ -167,11 +180,42 @@ export interface ActiveEffect {
   sourcePlayerID: string
 }
 
+/**
+ * What produced a clash record (and, in UnitDeath, what killed the unit).
+ * Rendering decisions key on this and on the explicit id lists — never on
+ * the display `reason` string.
+ */
+export type ClashKind =
+  | "contest" // same-cell (or durable collision cell) tier-then-weight contest
+  | "edge" // in-flight edge exchange contest (units swapping cells mid-sub-step)
+  | "bodyBlock" // died entering a cell occupied by a unit's body/trail
+  | "sever" // body cut by a strictly-higher-tier unit — non-fatal for the owner
+  | "hazard" // health exhausted by hazard damage (starved where it stood)
+  | "starvation" // health exhausted by movement cost (starved where it stood)
+  | "wall" // hit a boundary wall
+  | "self" // collided with own body
+  | "regicide" // removed with its team when the team's last king fell
+
+/**
+ * One adjudicated event at one cell. A single collision that spans two cells
+ * (an edge-contest tie) emits one record per cell. Non-fatal records (sever)
+ * have an empty victimIDs.
+ */
 export interface Clash {
   index: number
-  playerIDs: string[]
-  reason: string
-  subStep?: number // Which within-turn sub-step an in-flight clash happened on (piece games only)
+  subStep: number // Within-turn sub-step the event happened on (1 for whole-move units)
+  kind: ClashKind
+  playerIDs: string[] // Every unit involved in this record, survivors included
+  victimIDs: string[] // The subset of playerIDs that died (or starved) here
+  survivorID?: string // The unique unit left standing at this cell, when there is one
+  reason: string // Display text only — never load-bearing for rendering
+}
+
+/** Where, when, and how a unit died this turn. */
+export interface UnitDeath {
+  cell: number
+  subStep: number
+  cause: ClashKind
 }
 
 export interface GameResult {

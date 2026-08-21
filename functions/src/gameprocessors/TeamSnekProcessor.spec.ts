@@ -8,6 +8,7 @@ import {
 } from "@shared/types/Game"
 import { expandTeams } from "../utils/expandTeams"
 import { TeamSnekProcessor } from "./TeamSnekProcessor"
+import { REASON } from "./engine/turnEngine"
 
 const teams: Team[] = [
   { id: "t1", name: "Team One", color: "#ff0000" },
@@ -47,6 +48,7 @@ const mkTurn = (
     hazards: [],
     playerPieces,
     clashes: [],
+    deaths: {},
     moves: {},
     winners: [],
     ...overrides,
@@ -252,7 +254,7 @@ describe("TeamSnekProcessor default moves (nothing staged at resolution)", () =>
       .map((c) => c.reason)
     expect(t2Reasons.length).toBeGreaterThan(0)
     t2Reasons.forEach((reason) =>
-      expect(reason).toBe("Collided with another snake's body")
+      expect(reason).toBe(REASON.bodyBlock)
     )
   })
 })
