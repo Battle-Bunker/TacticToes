@@ -9,6 +9,7 @@ import {
   DeathMark,
   DeathStyle,
   DeathVictim,
+  RecoveryMark,
   RosterUnit,
   SeverMark,
   UncertaintyMark,
@@ -44,21 +45,26 @@ const KNOWN_KINDS: ReadonlySet<string> = new Set<ClashKind>([
   "bodyBlock",
   "sever",
   "hazard",
-  "starvation",
+  "exhaustion",
   "wall",
   "self",
   "regicide",
 ])
 
 /**
- * The two causes that are not a killing: the unit's health ran out mid-move, it
- * halted where it stood as a dying incumbent, and it was cleared at the end of
- * the turn. Nobody beat it, and the board should not draw as though somebody
- * had.
+ * The two causes that are not a killing: the unit's health ran out mid-move and
+ * it halted where it stood. Nobody beat it, and the board should not draw as
+ * though somebody had.
+ *
+ * Exhaustion is a PROVISIONAL death. A unit that is still at or below zero when
+ * the turn ends is in the death registry and gets the hollow exhaustion mark;
+ * one that ate on its halt square recovered, is NOT in the registry, and gets
+ * the recovery mark instead. Which of the two happened is never guessed here —
+ * the registry decides it.
  */
-const STARVED_CAUSES: ReadonlySet<string> = new Set<ClashKind>([
+const EXHAUSTION_CAUSES: ReadonlySet<string> = new Set<ClashKind>([
   "hazard",
-  "starvation",
+  "exhaustion",
 ])
 
 const boardKind = (kind: unknown): BoardClashKind =>
@@ -68,7 +74,7 @@ const boardKind = (kind: unknown): BoardClashKind =>
 
 const deathStyle = (cause: BoardClashKind): DeathStyle => {
   if (cause === "unknown" || cause === "sever") return "unknown"
-  return STARVED_CAUSES.has(cause) ? "starved" : "combat"
+  return EXHAUSTION_CAUSES.has(cause) ? "exhausted" : "combat"
 }
 
 /**
@@ -360,6 +366,38 @@ export const turnToBoard = (
     })
   })
 
+  // ── Near-deaths ───────────────────────────────────────────────────────────
+  // An exhaustion record naming NO victim is a unit that ran out of health,
+  // halted short of where it was going, ate what was on its halt square and
+  // finished the turn alive. The death registry is what settles it: a unit
+  // named there stayed down and gets a grave, and only a unit the registry does
+  // NOT name gets the recovery mark. Where the two disagree — a record says
+  // nobody died here, the registry says this unit did — the registry wins,
+  // because it is the authority, and the disagreement is reported rather than
+  // quietly resolved.
+  const recoveries: RecoveryMark[] = []
+  clashes.forEach((clash) => {
+    if (!clash.complete) return
+    if (clash.kind !== "exhaustion" && clash.kind !== "hazard") return
+    if (clash.victimIDs.length > 0) return
+    clash.playerIDs.forEach((playerID) => {
+      const identity = identityOf(playerID)
+      if (deathRegistry[playerID]) {
+        const note = `${identity.teamName} ${identity.letter} is recorded as recovering here and as dying this turn.`
+        if (!recordNotes.includes(note)) recordNotes.push(note)
+        return
+      }
+      recoveries.push({
+        cell: clash.cell,
+        playerID,
+        letter: identity.letter,
+        teamName: identity.teamName,
+        color: identity.color,
+        cause: clash.kind,
+      })
+    })
+  })
+
   const winningSquares = options?.showWinningSquares
     ? mapIndices(
         turn.winners.flatMap((winner) => winner.winningSquares),
@@ -392,6 +430,7 @@ export const turnToBoard = (
     deaths,
     clashes,
     severed,
+    recoveries,
     uncertainties,
     recordNotes,
     deadUnits,

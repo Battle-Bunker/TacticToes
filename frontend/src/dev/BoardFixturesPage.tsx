@@ -53,6 +53,7 @@ const legendBoard = (partial: Partial<BoardModel>): BoardModel => ({
   deaths: [],
   clashes: [],
   severed: [],
+  recoveries: [],
   uncertainties: [],
   recordNotes: [],
   deadUnits: [],
@@ -94,12 +95,29 @@ const LEGEND: { label: string; board: BoardModel }[] = [
     }),
   },
   {
-    label: "Starvation death — hollow ring, drained middle, flat bar",
+    label: "Fatal exhaustion — hollow ring, drained middle, FLAT bar",
     board: legendBoard({
       deaths: [
         {
           cell: ORIGIN,
-          victims: [victim("a", "#d32f2f", "starved", "starvation")],
+          victims: [victim("a", "#d32f2f", "exhausted", "exhaustion")],
+        },
+      ],
+    }),
+  },
+  {
+    label:
+      "Exhausted and RECOVERED — same drained middle, bar kicking up, on a unit still standing",
+    board: legendBoard({
+      units: [{ ...LIVING_UNIT, color: "#d32f2f" }],
+      recoveries: [
+        {
+          cell: ORIGIN,
+          playerID: "a",
+          letter: "A",
+          teamName: "Team",
+          color: "#d32f2f",
+          cause: "exhaustion",
         },
       ],
     }),

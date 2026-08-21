@@ -23,6 +23,7 @@ import {
   BoardModel,
   Cell,
   DeathMark,
+  RecoveryMark,
   SeverMark,
   UncertaintyMark,
 } from "./renderer"
@@ -45,6 +46,12 @@ export const clashesAtCell = (board: BoardModel, cell: Cell): BoardClash[] =>
 /** The deaths recorded on one cell — one mark, holding every unit that fell there. */
 export const deathsAtCell = (board: BoardModel, cell: Cell): DeathMark | null =>
   board.deaths.find((d) => sameCell(d.cell, cell)) ?? null
+
+/** The near-deaths recorded on one cell: units that exhausted here and got back up. */
+export const recoveriesAtCell = (
+  board: BoardModel,
+  cell: Cell,
+): RecoveryMark[] => board.recoveries.filter((r) => sameCell(r.cell, cell))
 
 /** The sever damage recorded on one cell (one per owner whose body was cut there). */
 export const seversAtCell = (board: BoardModel, cell: Cell): SeverMark[] =>
@@ -91,6 +98,7 @@ export const inspectableCellKeys = (board: BoardModel): Set<string> => {
   board.clashes.forEach((c) => add(c.cell))
   board.deaths.forEach((d) => add(d.cell))
   board.severed.forEach((s) => add(s.cell))
+  board.recoveries.forEach((r) => add(r.cell))
   board.uncertainties.forEach((u) => add(u.cell))
   return keys
 }
@@ -100,6 +108,7 @@ export const isInspectable = (board: BoardModel, cell: Cell): boolean =>
   clashesAtCell(board, cell).length > 0 ||
   deathsAtCell(board, cell) !== null ||
   seversAtCell(board, cell).length > 0 ||
+  recoveriesAtCell(board, cell).length > 0 ||
   uncertaintiesAtCell(board, cell).length > 0
 
 /**
@@ -140,9 +149,9 @@ export const clashHeadline = (kind: BoardClashKind): string => {
     case "sever":
       return "Body severed"
     case "hazard":
-      return "Starved on a hazard"
-    case "starvation":
-      return "Starved out of health"
+      return "Exhausted by hazard damage"
+    case "exhaustion":
+      return "Exhausted — out of health"
     case "wall":
       return "Hit the wall"
     case "self":
@@ -164,9 +173,9 @@ export const deathHeadline = (cause: BoardClashKind): string => {
     case "bodyBlock":
       return "Ran into a body"
     case "hazard":
-      return "Health exhausted by hazard damage — halted here"
-    case "starvation":
-      return "Health exhausted — halted here"
+      return "Hazard damage emptied its health — collapsed here"
+    case "exhaustion":
+      return "Ran out of health and collapsed here"
     case "wall":
       return "Hit the wall"
     case "self":
@@ -182,8 +191,26 @@ export const deathHeadline = (cause: BoardClashKind): string => {
   }
 }
 
+/**
+ * The two kinds that empty a unit's health where it stands. Neither is fatal on
+ * its own: exhaustion is a PROVISIONAL death — the unit halts, stays a
+ * collision object, and dies only if it is still at or below zero when the turn
+ * ends. One that eats on its halt square lives, and the record it leaves behind
+ * is one of these kinds with an EMPTY victim list.
+ */
+export const EXHAUSTION_KINDS: ReadonlySet<BoardClashKind> = new Set<BoardClashKind>([
+  "exhaustion",
+  "hazard",
+])
+
 /** One participant's fate in one record: read off the record, never off the board. */
-export type ParticipantStatus = "died" | "stood" | "shortened" | "survived" | "unknown"
+export type ParticipantStatus =
+  | "died"
+  | "stood"
+  | "shortened"
+  | "recovered"
+  | "survived"
+  | "unknown"
 
 export const participantStatus = (
   clash: BoardClash,
@@ -192,6 +219,11 @@ export const participantStatus = (
 ): ParticipantStatus => {
   if (clash.victimIDs.includes(playerID)) return "died"
   if (!clash.complete) return "unknown"
+  // An exhaustion record that names no victim is a unit that went down here and
+  // got back up: it ate on its halt square and finished the turn alive.
+  if (EXHAUSTION_KINDS.has(clash.kind) && clash.victimIDs.length === 0) {
+    return "recovered"
+  }
   if (clash.survivorID === playerID) return "stood"
   // The owner of a severed body walked away from this one — shorter.
   if (clash.kind === "sever" && severedOwnerIDs.has(playerID)) return "shortened"
@@ -202,6 +234,7 @@ export const STATUS_LABEL: Record<ParticipantStatus, string> = {
   died: "died",
   stood: "stood",
   shortened: "cut short",
+  recovered: "recovered",
   survived: "survived",
   unknown: "not recorded",
 }

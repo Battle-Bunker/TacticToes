@@ -19,6 +19,7 @@ import {
   deathsAtCell,
   distinctClashes,
   participantStatus,
+  recoveriesAtCell,
   seversAtCell,
   uncertaintiesAtCell,
 } from "../../board/clashes"
@@ -55,6 +56,7 @@ const STATUS_COLOR: Record<ParticipantStatus, string> = {
   died: "#c62828",
   stood: "#2e7d32",
   shortened: "#e65100",
+  recovered: "#00695c",
   survived: "#2e7d32",
   unknown: UNCERTAIN_RING_COLOR,
 }
@@ -196,10 +198,15 @@ const ClashDialog: React.FC<ClashDialogProps> = ({
   const clashes = cell ? distinctClashes(clashesAtCell(board, cell)) : []
   const deathMark = cell ? deathsAtCell(board, cell) : null
   const severs = cell ? seversAtCell(board, cell) : []
+  const recoveries = cell ? recoveriesAtCell(board, cell) : []
   const doubts = cell ? uncertaintiesAtCell(board, cell) : []
   const severedOwnerIDs = new Set(board.severed.map((s) => s.ownerID))
   const hasAnything =
-    clashes.length > 0 || !!deathMark || severs.length > 0 || doubts.length > 0
+    clashes.length > 0 ||
+    !!deathMark ||
+    severs.length > 0 ||
+    recoveries.length > 0 ||
+    doubts.length > 0
 
   return (
     <Dialog
@@ -260,6 +267,25 @@ const ClashDialog: React.FC<ClashDialogProps> = ({
                   sx={{ fontSize: 13, color: "text.secondary", pl: 2.5 }}
                 >
                   {deathHeadline(victim.cause)}
+                </Typography>
+              </Box>
+            ))}
+          </Section>
+        )}
+
+        {recoveries.length > 0 && (
+          <Section title="Exhausted here">
+            {recoveries.map((recovery) => (
+              <Box
+                key={recovery.playerID}
+                sx={{ display: "flex", alignItems: "center", gap: 1, py: 0.25 }}
+              >
+                <Swatch color={recovery.color} />
+                <Typography sx={{ fontSize: 14, flex: 1, minWidth: 0 }}>
+                  {`${recovery.teamName} ${recovery.letter}`.trim()} ran out of
+                  health{recovery.cause === "hazard" ? " on hazard damage" : ""}{" "}
+                  and halted here — recovered by eating, and finished the turn
+                  alive.
                 </Typography>
               </Box>
             ))}

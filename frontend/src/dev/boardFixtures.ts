@@ -339,16 +339,17 @@ const sever: Fixture = {
   inspect: { col: 4, row: 2 },
 }
 
-// ── 5. Mid-ray starvation ───────────────────────────────────────────────────
-// A slider ran out of health part-way along its ray, halted on the square it
-// had reached, and was cleared at end of turn. Nobody killed it.
-const midRayStarvation: Fixture = {
-  id: "05-starvation-mid-ray",
-  title: "5. Mid-ray starvation — halted on the third square of its ray",
+// ── 5. Mid-ray exhaustion, fatal ────────────────────────────────────────────
+// A slider ran out of health part-way along its ray and halted on the square it
+// had reached. Nothing on that square to eat, so it was still at zero when the
+// turn ended and the registry names it. Nobody killed it.
+const midRayExhaustion: Fixture = {
+  id: "05-exhaustion-mid-ray-fatal",
+  title: "5. Mid-ray exhaustion, fatal — halted on the third square of its ray",
   blurb:
-    "deaths: { red: cell 30, sub-step 3, starvation } · clash: starvation, victims [red]",
+    "deaths: { red: cell 30, sub-step 3, exhaustion } · clash: exhaustion, victims [red]",
   expected:
-    "Hollow RED ring with a drained middle and a flat bar, on the square the rook halted on — not the solid disc a killing gets.",
+    "Hollow RED ring with a drained middle and a FLAT bar, on the square the rook halted on — not the solid disc a killing gets, and not the rising bar a recovery gets.",
   gameState: makeGame(
     [
       { id: "red", team: "red", letter: "A", unitType: "rook" },
@@ -366,17 +367,17 @@ const midRayStarvation: Fixture = {
       {
         pieces: { blue: [at(5, 4), at(6, 4), at(6, 3)] },
         health: { blue: 64 },
-        deaths: { red: { cell: at(3, 3), subStep: 3, cause: "starvation" } },
+        deaths: { red: { cell: at(3, 3), subStep: 3, cause: "exhaustion" } },
         paths: { red: [at(1, 3), at(2, 3), at(3, 3)] },
         clashes: [
           {
             index: at(3, 3),
             subStep: 3,
-            kind: "starvation",
+            kind: "exhaustion",
             playerIDs: ["red"],
             victimIDs: ["red"],
             reason:
-              "Red A ran out of health on the third square of its ray and halted there",
+              "Red A ran out of health on the third square of its ray, halted there, and was still at zero at end of turn",
           },
         ],
       },
@@ -385,16 +386,17 @@ const midRayStarvation: Fixture = {
   inspect: { col: 3, row: 3 },
 }
 
-// ── 6. Hazard starvation ────────────────────────────────────────────────────
+// ── 6. Hazard exhaustion, fatal ─────────────────────────────────────────────
 // The same ending by another route: hazard damage emptied the unit's health and
-// it went down where it stood, on the hazard square itself.
-const hazardStarvation: Fixture = {
-  id: "06-starvation-hazard",
-  title: "6. Hazard starvation — went down on the hazard square",
+// it went down where it stood, on the hazard square itself, with nothing there
+// to bring it back.
+const hazardExhaustion: Fixture = {
+  id: "06-exhaustion-hazard-fatal",
+  title: "6. Hazard exhaustion, fatal — went down on the hazard square",
   blurb:
     "deaths: { blue: cell 41, sub-step 1, hazard } · clash: hazard, victims [blue]",
   expected:
-    "Hollow BLUE starvation mark, legible over the hazard lattice; the cause reads as hazard damage in the inspector.",
+    "Hollow BLUE exhaustion mark, legible over the hazard lattice; the cause reads as hazard damage in the inspector.",
   gameState: makeGame(
     [
       { id: "blue", team: "blue", letter: "A" },
@@ -422,7 +424,7 @@ const hazardStarvation: Fixture = {
             playerIDs: ["blue"],
             victimIDs: ["blue"],
             reason:
-              "Blue A took 100 hazard damage entering this square and halted there",
+              "Blue A took 100 hazard damage entering this square, halted there, and was still at zero at end of turn",
           },
         ],
       },
@@ -544,15 +546,72 @@ const incompleteRecord: Fixture = {
   inspect: { col: 5, row: 4 },
 }
 
+// ── 9. Mid-ray exhaustion, recovered ────────────────────────────────────────
+// The other ending of the same event, and the reason exhaustion cannot be drawn
+// as a death on sight: the rook ran out on the third square of its ray, halted
+// there — and there was food on that square. It ate, its health came back, and
+// it finished the turn alive. The registry names nobody, and the record it left
+// is an exhaustion with an EMPTY victim list.
+const exhaustionRecovered: Fixture = {
+  id: "09-exhaustion-recovered",
+  title: "9. Mid-ray exhaustion, recovered — it went down and got back up",
+  blurb:
+    "deaths: {} · clash: exhaustion at cell 30, sub-step 3, victims [] · the halt square held food",
+  expected:
+    "No death mark. A small RED near-death badge in the top-right of the square the rook is still standing on, its bar kicking UP — the food that was there is gone.",
+  gameState: makeGame(
+    [
+      { id: "red", team: "red", letter: "A", unitType: "rook" },
+      { id: "blue", team: "blue", letter: "A" },
+    ],
+    [
+      {
+        pieces: {
+          red: Array(4).fill(at(1, 3)),
+          blue: [at(6, 4), at(6, 3), at(6, 2)],
+        },
+        health: { red: 9, blue: 70 },
+        unitTypes: { red: "rook" },
+        food: [at(3, 3), at(6, 1)],
+      },
+      {
+        pieces: {
+          red: Array(4).fill(at(3, 3)),
+          blue: [at(5, 4), at(6, 4), at(6, 3)],
+        },
+        health: { red: 55, blue: 64 },
+        unitTypes: { red: "rook" },
+        // Eaten off the halt square; the other one is still out there.
+        food: [at(6, 1)],
+        deaths: {},
+        paths: { red: [at(1, 3), at(2, 3), at(3, 3)] },
+        clashes: [
+          {
+            index: at(3, 3),
+            subStep: 3,
+            kind: "exhaustion",
+            playerIDs: ["red"],
+            victimIDs: [],
+            reason:
+              "Red A ran out of health on the third square of its ray and halted there; it ate the food on that square and recovered",
+          },
+        ],
+      },
+    ],
+  ),
+  inspect: { col: 3, row: 3 },
+}
+
 export const FIXTURES: Fixture[] = [
   contest,
   edgeUnequal,
   edgeTie,
   sever,
-  midRayStarvation,
-  hazardStarvation,
+  midRayExhaustion,
+  hazardExhaustion,
   corpsePile,
   incompleteRecord,
+  exhaustionRecovered,
 ]
 
 /** The turn every fixture is displayed at: the second, so a "before" exists. */

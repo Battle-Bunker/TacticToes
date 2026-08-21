@@ -56,7 +56,7 @@ export type BoardClashKind =
   | "regicide"
   | "sever"
   | "hazard"
-  | "starvation"
+  | "exhaustion"
   | "wall"
   | "self"
   | "unknown"
@@ -64,16 +64,22 @@ export type BoardClashKind =
 /**
  * How a death is DRAWN. Two causes of death look nothing alike on this board:
  *   - `combat` — killed in a fight (contest, edge exchange, body block, wall,
- *     its own body): a solid disc in the victim's colour with a white ✗.
- *   - `starved` — health ran out (movement cost or hazard damage) and the unit
- *     halted where it stood, to be removed at end of turn: a HOLLOW ring in the
- *     victim's colour around a drained, ash-pale middle, barred through. Solid
- *     versus hollow is the difference a reader sees before they see anything
- *     else, which is the point: nobody killed this one.
+ *     its own body, a king's fall taking its team with it): a solid disc in the
+ *     victim's colour with a white ✗.
+ *   - `exhausted` — health ran out (movement cost or hazard damage), the unit
+ *     halted where it stood, and it was STILL at or below zero when the turn
+ *     ended: a HOLLOW ring in the victim's colour around a drained, ash-pale
+ *     middle, barred through. Solid versus hollow is the difference a reader
+ *     sees before they see anything else, which is the point: nobody killed
+ *     this one.
  *   - `unknown` — the record named a cause this board does not know. Drawn as
  *     uncertainty, never as either of the above.
+ *
+ * Exhaustion is a PROVISIONAL death, so this style is only ever reached through
+ * the death registry: a unit that exhausted and then recovered never appears
+ * there, and wears the recovery mark below instead.
  */
-export type DeathStyle = "combat" | "starved" | "unknown"
+export type DeathStyle = "combat" | "exhausted" | "unknown"
 
 /** One unit that died this turn, as the board draws it. */
 export interface DeathVictim {
@@ -109,6 +115,22 @@ export interface SeverMark {
   letter: string
   teamName: string
   color: string
+}
+
+/**
+ * A cell a unit ran out of health on and GOT BACK UP from: it exhausted
+ * mid-move, halted short of where it was going, ate what was on the square and
+ * ended the turn alive. A near-death, not a death — the death registry never
+ * names it, and neither does any mark that looks like a grave.
+ */
+export interface RecoveryMark {
+  cell: Cell
+  playerID: string
+  letter: string
+  teamName: string
+  color: string
+  /** `exhaustion` or `hazard`: what emptied its health before it recovered. */
+  cause: BoardClashKind
 }
 
 /**
@@ -199,6 +221,8 @@ export interface BoardModel {
   clashes: BoardClash[]
   /** Non-fatal sever damage: cells cut from units that are still alive. */
   severed: SeverMark[]
+  /** Units that exhausted, halted, ate and lived: near-deaths, not deaths. */
+  recoveries: RecoveryMark[]
   /** Cells the turn record cannot account for. */
   uncertainties: UncertaintyMark[]
   /**
@@ -909,7 +933,7 @@ export function invulnerabilityTurnsRemaining(
   return remaining >= 1 ? remaining : null
 }
 
-// Health-bar fill colour by remaining fraction: red when nearly starved, orange
+// Health-bar fill colour by remaining fraction: red when nearly spent, orange
 // when low, green otherwise. Shared by the board bar and the stat plates so the
 // two readouts always agree.
 export function healthBarColor(frac: number): string {
@@ -1804,23 +1828,35 @@ function drawClashMarker(
   ctx.restore()
 }
 
-// ── Deaths, damage and doubt ────────────────────────────────────────────────
+// ── Deaths, damage, near-misses and doubt ───────────────────────────────────
 //
-// Three marks, three different things to say, and none of them derived from
-// where units happen to be standing at the end of the turn:
+// Four marks, four different things to say, and none of them derived from where
+// units happen to be standing at the end of the turn:
 //
 //   DEATH      a disc at the cell the death registry names, in the VICTIM's
 //              colour. Solid with a white ✗ when something killed it; a hollow
 //              ring around a drained, ash-pale middle, barred through, when it
-//              starved where it stood. A cell that holds several deaths splits
-//              the disc between them and carries the count.
+//              exhausted where it stood and never came back. A cell that holds
+//              several deaths splits the disc between them and carries the
+//              count.
+//   RECOVERY   the same drained middle, small, in the corner of a cell a unit
+//              is still standing on — with the bar KICKING UP at its end. It
+//              ran out, it went down, it ate, it got up. Exhaustion is only a
+//              provisional death, and this is what surviving one looks like.
 //   SEVER      a cut length of body: the owner's colour, hatched and dashed,
 //              bitten at the edges. Damage, in the colour of who took it.
 //   UNCERTAIN  a muted dashed ring with a "?". The record is incomplete and the
 //              board says so instead of inventing the missing half.
+//
+// The death mark and the recovery mark are deliberately built from the same
+// parts — drained middle, team-coloured ring, a bar across it — because they
+// are the same event with two endings. What separates them is what a reader
+// should be reading: the ending. Flat bar, no unit, full size in the middle of
+// the cell: it stayed down. Rising bar, small, in the corner of a cell that
+// still holds its unit: it got up.
 
-/** The drained middle of a starvation mark: the colour has gone out of it. */
-const STARVED_INTERIOR = "#eceae4"
+/** The drained middle of an exhaustion mark: the colour has gone out of it. */
+const DRAINED_INTERIOR = "#eceae4"
 /** The rim every death mark wears, so a mark reads on any terrain. */
 const DEATH_RIM = "#101418"
 /** The ink of the doubt mark, and of the ring it wears. */
@@ -1838,24 +1874,34 @@ interface MarkGeometry {
  *   - Nobody standing here: the middle of the cell, full size. The cell is the
  *     grave and it can look like one.
  *   - A survivor standing here — which is exactly what a head-on contest leaves
- *     behind — the mark shrinks to a corner badge in the bottom-left, clear of
- *     the body's inset square and of the numbers written on it. The survivor
- *     keeps its cell; the badge says someone else did not walk away from it.
+ *     behind — the mark shrinks to a corner badge, clear of the body's inset
+ *     square and of the numbers written on it. The survivor keeps its cell; the
+ *     badge says what else the square is carrying.
+ *
+ * The two corners are spoken for: a DEATH badge takes the top-left, a RECOVERY
+ * badge the top-right, so a cell that somehow carries both shows both. The
+ * bottom edge belongs to the health bar and the middle to the unit's letter,
+ * which is why neither is offered.
  */
+type MarkCorner = "topLeft" | "topRight"
+
 function markGeometry(
   cell: Cell,
   boardHeight: number,
   cellSize: number,
   occupied: boolean,
+  corner: MarkCorner = "topLeft",
 ): MarkGeometry {
   const x = cell.x * cellSize
   const y = (boardHeight - 1 - cell.y) * cellSize
   if (occupied) {
-    // Top-left. The bottom edge of a head cell is the health bar's, and the
-    // middle is where a unit writes its letter — the top-left corner is the one
-    // that costs a living unit nothing.
     const r = cellSize * 0.23
-    return { cx: x + r + cellSize * 0.03, cy: y + r + cellSize * 0.03, r }
+    const pad = r + cellSize * 0.03
+    return {
+      cx: corner === "topLeft" ? x + pad : x + cellSize - pad,
+      cy: y + pad,
+      r,
+    }
   }
   return { cx: x + cellSize / 2, cy: y + cellSize / 2, r: cellSize * 0.34 }
 }
@@ -1890,8 +1936,8 @@ function fillWedge(
 /**
  * One cell's deaths. The victims' colours divide the disc between them, each
  * wedge drawn in the treatment its own cause earned — so a pile-up of a
- * killed unit and a starved one shows both at once — and the count rides on top
- * whenever there is more than one. Every one of them is listed by the
+ * killed unit and an exhausted one shows both at once — and the count rides on
+ * top whenever there is more than one. Every one of them is listed by the
  * inspector; the disc is the handle, not the whole account.
  */
 function drawDeathMarker(
@@ -1910,16 +1956,16 @@ function drawDeathMarker(
   ctx.lineJoin = "round"
   ctx.lineCap = "round"
 
-  // The pale ground every mark sits on: it is what a starved wedge's middle is
-  // drained TO, and it keeps a mark from taking the colour of the terrain.
-  fillWedge(ctx, g, 0, Math.PI * 2, STARVED_INTERIOR, true)
+  // The pale ground every mark sits on: it is what an exhausted wedge's middle
+  // is drained TO, and it keeps a mark from taking the colour of the terrain.
+  fillWedge(ctx, g, 0, Math.PI * 2, DRAINED_INTERIOR, true)
 
   mark.victims.forEach((victim, i) => {
     const { from, to } = victimWedge(n, i)
     const color = victim.color || "#888888"
     if (victim.style === "combat") {
       fillWedge(ctx, g, from, to, color, single)
-    } else if (victim.style === "starved") {
+    } else if (victim.style === "exhausted") {
       // Hollow: the colour survives only as the rim, and the middle is drained.
       fillWedge(ctx, g, from, to, hexWithAlpha(color, 0.18), single)
       ctx.strokeStyle = color
@@ -1950,7 +1996,7 @@ function drawDeathMarker(
       ctx.moveTo(g.cx + d, g.cy - d)
       ctx.lineTo(g.cx - d, g.cy + d)
       ctx.stroke()
-    } else if (victim.style === "starved") {
+    } else if (victim.style === "exhausted") {
       // One flat bar through a drained middle: nothing struck this unit, it
       // simply ran out.
       ctx.strokeStyle = DEATH_RIM
@@ -1999,6 +2045,77 @@ function drawQueryGlyph(
   ctx.textBaseline = "middle"
   ctx.font = `700 ${Math.max(8, size)}px "Roboto Mono", monospace`
   ctx.fillText("?", cx, cy + size * 0.04)
+  ctx.restore()
+}
+
+/**
+ * A near-death: the unit ran out of health here, halted where it stood, ate
+ * what was on the square and finished the turn alive.
+ *
+ * It is built from the fatal exhaustion mark's own parts — the drained middle,
+ * the team-coloured ring — and then differs in the two ways that carry the
+ * ending. The bar KICKS UP at its right end instead of lying flat: the fatal
+ * mark is a flatline, and this is the beat after it. And it is small, in the
+ * top-right corner of a cell whose unit is still standing on it, rather than a
+ * full-size disc in the middle of an empty one — a grave takes the whole
+ * square, a near-miss takes a corner of it.
+ *
+ * Nothing here is hatched or dashed: that vocabulary belongs to sever damage,
+ * which is a piece of a unit that is gone. This unit lost nothing but the rest
+ * of its move.
+ */
+function drawRecoveryMark(
+  ctx: CanvasRenderingContext2D,
+  cell: Cell,
+  boardHeight: number,
+  cellSize: number,
+  color: string,
+) {
+  if (!cell) return
+  // Always the corner badge: a recovered unit is standing on this cell, and a
+  // mark about a unit that LIVED must never take the cell away from it.
+  const full = markGeometry(cell, boardHeight, cellSize, true, "topRight")
+  // Tucked a little tighter than a death badge: this one shares its cell with a
+  // unit that is alive and worth looking at, so it keeps out of the middle where
+  // the body's glyph and letter are.
+  const r = full.r * 0.88
+  const g = { cx: full.cx + (full.r - r), cy: full.cy - (full.r - r), r }
+  const ink = color || "#888888"
+
+  ctx.save()
+  ctx.lineJoin = "round"
+  ctx.lineCap = "round"
+  ctx.beginPath()
+  ctx.arc(g.cx, g.cy, g.r, 0, Math.PI * 2)
+  ctx.fillStyle = DRAINED_INTERIOR
+  ctx.fill()
+
+  // The team's colour survives as the ring — the unit is still theirs.
+  ctx.strokeStyle = ink
+  ctx.lineWidth = Math.max(1.6, g.r * 0.24)
+  ctx.beginPath()
+  ctx.arc(g.cx, g.cy, g.r - Math.max(1, g.r * 0.12), 0, Math.PI * 2)
+  ctx.stroke()
+
+  ctx.strokeStyle = DEATH_RIM
+  ctx.lineWidth = Math.max(1, cellSize * 0.03)
+  ctx.beginPath()
+  ctx.arc(g.cx, g.cy, g.r, 0, Math.PI * 2)
+  ctx.stroke()
+
+  // The beat: a short flat run, then a steep kick up out of it. Two strokes,
+  // which is all this size can hold and all the difference needs — the fatal
+  // mark's bar never leaves the horizontal.
+  const w = g.r * 0.56
+  ctx.strokeStyle = DEATH_RIM
+  ctx.lineWidth = Math.max(1.4, g.r * 0.24)
+  ctx.beginPath()
+  // Most of the glyph is the flatline itself, so the mark still reads as the
+  // exhaustion bar; only its last third lifts.
+  ctx.moveTo(g.cx - w, g.cy + g.r * 0.24)
+  ctx.lineTo(g.cx + w * 0.2, g.cy + g.r * 0.24)
+  ctx.lineTo(g.cx + w, g.cy - g.r * 0.34)
+  ctx.stroke()
   ctx.restore()
 }
 
@@ -2711,6 +2828,11 @@ export function renderBoard(
       cellSize,
       occupiedCells.has(`${mark.cell.x},${mark.cell.y}`),
     )
+  })
+
+  // Near-deaths beside them, on the units that walked out of one.
+  board.recoveries.forEach((mark) => {
+    drawRecoveryMark(ctx, mark.cell, board.height, cellSize, mark.color)
   })
 
   // And doubt after even that: where the record ran out, the last word on the
