@@ -16,9 +16,13 @@ import { Clash, UnitType } from "@shared/types/Game"
  * - Snake body segments (index > 0) stay walls: equal-or-lower-tier movers
  *   die on them, strictly-higher-tier movers sever the snake and stop.
  * - A surviving mover stops on any square where a kill happened.
- * - Two pieces exchanging squares through the same edge collide in flight
- *   (knights jump and never swap; snakes resolve via their swept-in body).
- *   The edge is contested before either piece can be charged for its
+ * - Two units exchanging squares through the same edge collide in flight.
+ *   Knights never do — a jump traverses no edge — and neither does a snake
+ *   that sweeps a body segment in behind its head: the swapper meets that
+ *   segment and the body rules resolve it. A snake that leaves nothing
+ *   behind (length 1: its only segment pops before the head lands) truly
+ *   clears its square, so it contests the edge exactly like a piece.
+ *   The edge is contested before either unit can be charged for its
  *   destination: the winner completes onto its target square and stops, the
  *   loser never crosses the edge and dies on the square it started the
  *   sub-step on (a tie kills both, each on its own square).
@@ -56,6 +60,8 @@ export interface ChessTurnSimResult {
    * square it actually reached, never a staged destination it was blocked
    * from entering. A piece blocked in flight before it ever left its start
    * square (an edge-swap loser at sub-step 1) dies on that start square.
+   * Snakes are absent (they report their attempted head square), except a
+   * snake blocked in flight, which never reached that square.
    */
   finalSquare: Map<string, number>
   /** Post-hazard health of every unit (the food phase settles movement costs). */
@@ -66,6 +72,10 @@ interface RuntimeUnit extends SimUnit {
   alive: boolean
   stopped: boolean
   movedFrom: number | null // square vacated this sub-step (movers only)
+  /** Tail this sub-step's advance popped off a snake, for an exact revert. */
+  poppedTail: number | null
+  /** Set when a blocked-in-flight revert put the unit back on movedFrom. */
+  reverted: boolean
   traversed: number[]
 }
 
@@ -88,6 +98,8 @@ export const runChessTurnSim = (
     alive: true,
     stopped: false,
     movedFrom: null,
+    poppedTail: null,
+    reverted: false,
     traversed: [],
   }))
 
@@ -142,8 +154,29 @@ export const runChessTurnSim = (
   // on the square it occupied at the start of the sub-step.
   const revertToSubStepStart = (unit: RuntimeUnit): void => {
     if (unit.movedFrom === null) return
-    unit.body.fill(unit.movedFrom)
-    unit.traversed.pop()
+    unit.reverted = true
+    if (unit.isSnake) {
+      // Exact inverse of the advance: drop the head it unshifted, restore the
+      // tail it popped. Only a snake that left no segment behind can reach
+      // here (see swapsThroughEdges), but the inverse holds at any length.
+      unit.body.shift()
+      if (unit.poppedTail !== null) unit.body.push(unit.poppedTail)
+    } else {
+      unit.body.fill(unit.movedFrom)
+      unit.traversed.pop()
+    }
+  }
+
+  // Whether a mover contests the edge it crossed this sub-step. Knights never
+  // do — a jump does not traverse edges. A snake normally does not either: its
+  // body sweeps in behind the head, so a would-be swapper meets a body segment
+  // and the segment rules resolve it. But a snake that leaves NOTHING behind —
+  // a length-1 snake, whose only segment pops before the head lands — really
+  // does clear its square, so it contests the edge exactly like a piece.
+  const swapsThroughEdges = (m: RuntimeUnit): boolean => {
+    if (m.type === "knight" || m.movedFrom === null) return false
+    if (!m.isSnake) return true
+    return m.body.indexOf(m.movedFrom, 1) === -1
   }
 
   const maxSubSteps = Math.max(1, ...units.map((u) => (u.isSnake ? 1 : u.path.length)))
@@ -163,7 +196,7 @@ export const runChessTurnSim = (
       const to = m.path[subStep - 1]
       m.movedFrom = m.body[0]
       if (m.isSnake) {
-        m.body.pop()
+        m.poppedTail = m.body.pop() ?? null
         m.body.unshift(to)
       } else {
         m.body.fill(to)
@@ -171,18 +204,19 @@ export const runChessTurnSim = (
       }
     })
 
-    // 2. In-flight edge swaps between pieces (knights jump; snakes leave a
-    // swept-in body behind, which the square contest below handles). This is
-    // adjudicated before hazards so a loser is never dosed for a square it
-    // never entered — and never dies to a hazard it never reached. The loser
-    // is reverted to the square it started the sub-step on and dies there;
-    // the winner keeps its target square and stops (a kill happened there).
+    // 2. In-flight edge swaps between units that really do vacate the square
+    // they came from (see swapsThroughEdges: knights jump, and a snake that
+    // swept a body segment in behind its head is left to the segment rules).
+    // This is adjudicated before hazards so a loser is never dosed for a
+    // square it never entered — and never dies to a hazard it never reached.
+    // The loser is reverted to the square it started the sub-step on and dies
+    // there; the winner keeps its target square and stops (a kill happened).
     for (let i = 0; i < movers.length; i++) {
       for (let j = i + 1; j < movers.length; j++) {
         const a = movers[i]
         const b = movers[j]
         if (!a.alive || !b.alive) continue
-        if (a.isSnake || b.isSnake || a.type === "knight" || b.type === "knight") continue
+        if (!swapsThroughEdges(a) || !swapsThroughEdges(b)) continue
         if (a.movedFrom === b.body[0] && b.movedFrom === a.body[0]) {
           const anyDeath = contestSquare([a, b], subStep, revertToSubStepStart)
           if (anyDeath) {
@@ -278,7 +312,13 @@ export const runChessTurnSim = (
   const healths = new Map<string, number>()
   units.forEach((u) => {
     healths.set(u.id, u.health)
-    if (u.isSnake) return
+    if (u.isSnake) {
+      // Snakes otherwise report their attempted head square, which the caller
+      // already holds. A snake blocked in flight never reached that square, so
+      // it must report the one it actually died on.
+      if (u.reverted) finalSquare.set(u.id, u.body[0])
+      return
+    }
     traversed.set(u.id, u.traversed)
     finalSquare.set(u.id, u.body[0])
   })

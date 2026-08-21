@@ -146,9 +146,9 @@ the longest path staged this turn.
   walls: an equal-or-lower-tier unit entering one dies; a strictly higher
   tier severs the snake at the contacted segment. A severing slider stops on
   that square (capture-stops).
-- **Edge swaps**: two pieces exchanging squares through the same edge in the
+- **Edge swaps**: two units exchanging squares through the same edge in the
   same sub-step collide in flight, adjudicated the usual way — tier first,
-  then weight. Neither piece passes through the other: the edge is contested
+  then weight. Neither passes through the other: the edge is contested
   before either can enter its destination, so a loser is never dosed by a
   hazard on a square it never reached.
   - **Unique winner**: it finishes on its target square (the loser's start
@@ -162,10 +162,19 @@ the longest path staged this turn.
   - **Tie** (same tier *and* same weight): both die, each on its own
     start-of-sub-step square — the two adjacent cells. Neither crosses.
 
-  Knights never swap — a jump does
-  not traverse edges. Snake-vs-piece and snake-vs-snake swaps need no rule:
-  the snake's body sweeps in behind its head, so the piece (or other snake)
-  hits a body segment, which resolves by the body rules above.
+  Knights never swap — a jump does not traverse edges.
+
+  **Which snakes swap**: a snake is exempt only when it actually leaves
+  something behind. Normally it does — its body sweeps in behind its head, so
+  the piece (or other snake) hits a body segment and the body rules above
+  resolve it, no swap rule needed. A **length-1 snake leaves nothing behind**:
+  its only segment pops before the head lands, genuinely clearing the square.
+  It therefore contests the edge exactly like a piece — same tier-then-weight
+  adjudication, same revert-and-die-on-your-own-square outcome for the loser
+  (its weight is 1, so it can only win the edge on tier). Length-1 snakes are
+  reachable in normal play: severing bottoms out there. A losing snake records
+  the square it was blocked on in `moves`, not its attempted head square —
+  it never reached that square.
 - Perpendicular diagonal crossings that never share a square do not collide;
   collisions are square-based.
 - Two units crossing the same square at different sub-steps do not collide.
@@ -217,7 +226,8 @@ sub-steps to order.
   blocked in flight before it ever left the square it started the sub-step
   on (an edge-swap loser) died on that square, so that is what it records;
   at sub-step 1 that is its turn origin. A dead snake records its attempted
-  head square.
+  head square — unless it too was blocked in flight losing an edge swap, in
+  which case it records the square it was blocked on.
 
 ## Scoring & elimination
 

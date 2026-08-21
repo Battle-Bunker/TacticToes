@@ -453,6 +453,113 @@ describe("chess pieces: in-flight edge swaps", () => {
     expect(clash!.reason).toBe("Head-on collision (lighter unit(s) died)")
     expect(clash!.subStep).toBe(2)
   })
+
+  // A snake is exempt from the edge contest only while it leaves a body
+  // segment behind for the swapper to hit. A LENGTH-1 snake pops its only
+  // segment before its head lands, so it genuinely clears its square — it
+  // must contest the edge like a piece, or it glides straight through.
+  // Length-1 snakes are reachable in normal play: severing bottoms out there.
+  const snakeSwap = (
+    snakeBody: number[],
+    pieceBody: number[],
+    turnOverrides: Partial<Turn> = {}
+  ): Turn =>
+    run(
+      [gp("t1", "t1", "A", "snake"), gp("t2", "t2", "A", "rook")],
+      { t1: snakeBody, t2: pieceBody },
+      [mv("t1", at(6, 5)), mv("t2", at(5, 5))],
+      turnOverrides
+    )
+
+  it("a length-1 snake swapping with a heavier piece dies on its own square", () => {
+    const snakeAt = at(5, 5)
+    const rookAt = at(6, 5)
+    const next = snakeSwap([snakeAt], [rookAt, rookAt]) // weight 1 vs 2
+
+    expect(next.alivePlayers).toEqual(["t2"])
+    expect(next.playerPieces.t2).toEqual([snakeAt, snakeAt]) // winner completes
+    expect(next.moves.t2).toBe(snakeAt)
+    // The snake never reached its attempted head square, so it records the
+    // square it was blocked on instead.
+    expect(next.moves.t1).toBe(snakeAt)
+    expect(next.clashes.some((c) => c.index === rookAt)).toBe(false)
+    const clash = next.clashes.find((c) => c.index === snakeAt)
+    expect(clash!.reason).toBe("Head-on collision (lighter unit(s) died)")
+    expect(clash!.playerIDs.sort()).toEqual(["t1", "t2"])
+    expect(clash!.subStep).toBe(1)
+  })
+
+  it("a length-1 snake swapping with an equal-weight piece: tie kills both where they stood", () => {
+    const snakeAt = at(5, 5)
+    const rookAt = at(6, 5)
+    const next = snakeSwap([snakeAt], [rookAt]) // weight 1 vs 1
+
+    expect(next.alivePlayers).toEqual([])
+    expect(next.moves.t1).toBe(snakeAt)
+    expect(next.moves.t2).toBe(rookAt)
+    expect(next.paths?.t2).toBeUndefined() // the rook never entered a square
+    const onSnake = next.clashes.find((c) => c.index === snakeAt)
+    const onRook = next.clashes.find((c) => c.index === rookAt)
+    expect(onSnake!.playerIDs.sort()).toEqual(["t1", "t2"])
+    expect(onRook!.playerIDs.sort()).toEqual(["t1", "t2"])
+    expect(onSnake!.subStep).toBe(1)
+    expect(onRook!.subStep).toBe(1)
+  })
+
+  it("a length-1 snake wins the edge on tier, however heavy the piece is", () => {
+    const snakeAt = at(5, 5)
+    const rookAt = at(6, 5)
+    const next = snakeSwap([snakeAt], [rookAt, rookAt, rookAt], {
+      playerInvulnerabilityLevel: { t1: 1, t2: 0 },
+    }) // weight 1 vs 3, but tier 1 vs 0
+
+    expect(next.alivePlayers).toEqual(["t1"])
+    expect(next.playerPieces.t1).toEqual([rookAt]) // the snake completed its move
+    expect(next.moves.t2).toBe(rookAt) // the loser dies where it stood
+    expect(next.clashes.some((c) => c.index === snakeAt)).toBe(false)
+    const clash = next.clashes.find((c) => c.index === rookAt)
+    expect(clash!.reason).toBe("Head-on collision (lower invulnerability level died)")
+  })
+
+  it("two length-1 snakes swapping: tie kills both, each on its own square", () => {
+    const a = at(5, 5)
+    const b = at(6, 5)
+    // A bystander bishop per team, parked and holding: it makes this a piece
+    // game (so the sub-step simulation runs at all) and keeps both teams alive,
+    // out of the way of the swap.
+    const next = run(
+      [
+        gp("t1", "t1", "A", "snake"),
+        gp("t2", "t2", "A", "snake"),
+        gp("t1b", "t1", "B", "bishop"),
+        gp("t2b", "t2", "B", "bishop"),
+      ],
+      { t1: [a], t2: [b], t1b: [at(1, 1)], t2b: [at(9, 9)] },
+      [mv("t1", b), mv("t2", a)]
+    )
+
+    expect(next.alivePlayers.sort()).toEqual(["t1b", "t2b"])
+    expect(next.moves.t1).toBe(a)
+    expect(next.moves.t2).toBe(b)
+    expect(next.clashes.find((c) => c.index === a)!.playerIDs.sort()).toEqual(["t1", "t2"])
+    expect(next.clashes.find((c) => c.index === b)!.playerIDs.sort()).toEqual(["t1", "t2"])
+  })
+
+  it("regression: a longer snake still exempts the swap — its swept-in body resolves it", () => {
+    const head = at(5, 5)
+    const rookAt = at(6, 5)
+    // Length 2: the tail pops but the old head stays as a segment on (5,5),
+    // so the rook meets a body segment there — the body rules, not the edge
+    // contest, and weight does not save it.
+    const next = snakeSwap([head, at(4, 5)], [rookAt, rookAt, rookAt])
+
+    expect(next.alivePlayers).toEqual(["t1"])
+    expect(next.playerPieces.t1).toEqual([rookAt, head]) // swept in behind the head
+    expect(next.moves.t2).toBe(head) // the rook did enter the square
+    expect(next.paths?.t2).toEqual([head])
+    const clash = next.clashes.find((c) => c.index === head)
+    expect(clash!.reason).toBe("Collided with another snake's body")
+  })
 })
 
 describe("chess pieces: death squares on the wire", () => {
