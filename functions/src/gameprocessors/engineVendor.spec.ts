@@ -20,13 +20,21 @@ const importsOf = (source: string): string[] =>
 const engineFiles = readdirSync(ENGINE_DIR).filter((f) => f.endsWith(".ts"))
 
 describe("engine/ is vendorable", () => {
-  it("contains the files VENDOR.md promises", () => {
+  it("contains the files VENDOR.md promises, and nothing else", () => {
     expect(engineFiles.sort()).toEqual([
       "moveGrammar.ts",
       "resolveTurn.ts",
       "turnEngine.ts",
     ])
-    expect(readdirSync(ENGINE_DIR)).toContain("VENDOR.md")
+    // Exactly these, because vendoring copies the whole directory. Anything
+    // else that lands here travels with it — a stale compiled .js beside its
+    // .ts is the easy accident (running the VENDOR.md compile check without
+    // --noEmit leaves three), and in the destination it can shadow the source
+    // it was built from.
+    expect(readdirSync(ENGINE_DIR).sort()).toEqual([
+      "VENDOR.md",
+      ...engineFiles.sort(),
+    ])
   })
 
   it.each(engineFiles)("%s imports nothing outside engine/ or the wire types", (file) => {
