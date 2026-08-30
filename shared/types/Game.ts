@@ -78,7 +78,13 @@ export interface GameSetup {
   startRequested: boolean
   started: boolean // Set true when GameState is created to avoid double handling
   timeCreated: Timestamp | FieldValue
-  maxTurns?: number
+  /**
+   * The turn limit the game is adjudicated at. Every game plays to a limit:
+   * ABSENT means the enforced default of 100 turns, not "unlimited". The one
+   * way to play without a limit is to say so explicitly with `null`, and a
+   * game that does never ends on turn count — only on a last team standing.
+   */
+  maxTurns?: number | null
   hazardPercentage?: number // Percentage of the board to fill with hazards (defaults to 0)
   hazardDamage?: number // health lost per hazard square entered (default 100)
   teamClustersEnabled?: boolean

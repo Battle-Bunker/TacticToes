@@ -74,17 +74,33 @@ interface TeamBoardView {
   pieces: Record<string, number[]>
 }
 
+/**
+ * Every game is played to a turn limit; this is the one a setup that names
+ * none is played to. The limit is enforced, not optional: only an explicit
+ * `maxTurns: null` opts a game out of it (see GameSetup.maxTurns).
+ */
+export const DEFAULT_MAX_TURNS = 100
+
+/**
+ * The limit a setup actually plays to. `null` — and only a written-out `null`
+ * — means no limit at all; a setup that says nothing gets the default.
+ */
+export const resolveMaxTurns = (
+  maxTurns: number | null | undefined,
+): number | null => (maxTurns === undefined ? DEFAULT_MAX_TURNS : maxTurns)
+
 export class TeamSnekProcessor {
   protected gameSetup: StartedGameSetup
   protected gameState: GameState
   private foodSpawnRate: number
-  protected maxTurns?: number
+  /** Turns this game is adjudicated at, or null when it runs unlimited. */
+  protected maxTurns: number | null
   private fertileTiles: number[] = []
 
   constructor(gameState: GameState) {
     this.gameSetup = gameState.setup
     this.gameState = gameState
-    this.maxTurns = gameState.setup.maxTurns
+    this.maxTurns = resolveMaxTurns(gameState.setup.maxTurns)
     const rawRate = gameState.setup.foodSpawnRate ?? 0.5
     this.foodSpawnRate = rawRate > 5 ? rawRate / 100 : rawRate
   }
@@ -699,7 +715,7 @@ export class TeamSnekProcessor {
   // Team-based end conditions
   protected calculateWinners(gameState: SnakeGameState): Winner[] {
     const currentTurnNumber = this.gameState.turns.length
-    const reachedTurnLimit = this.maxTurns !== undefined && currentTurnNumber >= this.maxTurns
+    const reachedTurnLimit = this.maxTurns !== null && currentTurnNumber >= this.maxTurns
 
     const board = TeamSnekProcessor.liveBoard(gameState)
     const aliveTeams = this.getAliveTeams(board)

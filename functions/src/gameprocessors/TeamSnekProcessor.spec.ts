@@ -7,7 +7,7 @@ import {
   Turn,
 } from "@shared/types/Game"
 import { expandTeams } from "../utils/expandTeams"
-import { TeamSnekProcessor } from "./TeamSnekProcessor"
+import { DEFAULT_MAX_TURNS, TeamSnekProcessor } from "./TeamSnekProcessor"
 import { REASON } from "./engine/turnEngine"
 
 const teams: Team[] = [
@@ -61,9 +61,16 @@ const mkTurn = (
   }
 }
 
-const mkGameState = (setup: StartedGameSetup, turn: Turn): GameState => ({
+// `turnsPlayed` is how many turns the game has already committed — the number
+// the turn limit is measured against. The history before the last turn is
+// never read except by count, so it is padded with the same turn.
+const mkGameState = (
+  setup: StartedGameSetup,
+  turn: Turn,
+  turnsPlayed = 1
+): GameState => ({
   setup,
-  turns: [turn],
+  turns: [...Array(turnsPlayed - 1).fill(turn), turn],
   walls: [],
   timeCreated: Timestamp.fromMillis(0),
   timeFinished: null,
@@ -161,6 +168,94 @@ describe("TeamSnekProcessor win conditions", () => {
     const byTeam = Object.fromEntries(next.winners.map((w) => [w.teamID, w]))
     expect(byTeam.t1.teamScore).toBe(3)
     expect(byTeam.t2.teamScore).toBe(3)
+  })
+
+  it("declares the highest-scoring team the winner at the DEFAULT turn limit", () => {
+    // No maxTurns in the setup at all: the engine plays it to its default
+    // limit, and the game is adjudicated on arrival there like any other.
+    const turn = mkTurn(
+      {
+        t1: [24, 23, 22],
+        t2: [8, 9, 10],
+      },
+      { food: [25] }
+    )
+    const processor = new TeamSnekProcessor(
+      mkGameState(mkSetup(), turn, DEFAULT_MAX_TURNS)
+    )
+
+    // t1 eats and grows to 4; t2 survives at length 3.
+    const next = processor.applyMoves(turn, [mv("t1", 25), mv("t2", 15)])
+
+    expect(next.winners).toEqual([
+      {
+        playerID: "t1",
+        score: 4,
+        winningSquares: [25, 24, 23, 23],
+        teamID: "t1",
+        teamScore: 4,
+      },
+    ])
+  })
+
+  it("plays on one turn short of the default limit", () => {
+    const turn = mkTurn(
+      {
+        t1: [24, 23, 22],
+        t2: [8, 9, 10],
+      },
+      { food: [25] }
+    )
+    const processor = new TeamSnekProcessor(
+      mkGameState(mkSetup(), turn, DEFAULT_MAX_TURNS - 1)
+    )
+
+    const next = processor.applyMoves(turn, [mv("t1", 25), mv("t2", 15)])
+
+    expect(next.winners).toEqual([])
+  })
+
+  it("settles a mutual wipe at the default limit on the previous turn's weights", () => {
+    const turn = mkTurn({
+      t1: [24, 23, 22, 22],
+      t2: [8, 9, 10],
+    })
+    const processor = new TeamSnekProcessor(
+      mkGameState(mkSetup(), turn, DEFAULT_MAX_TURNS)
+    )
+
+    // Both teams die on the limit turn: t1 bites its own body, t2 drives into
+    // the top wall. The outcome comes off the previous turn's board, where t1
+    // carried the greater weight.
+    const next = processor.applyMoves(turn, [mv("t1", 23), mv("t2", 1)])
+
+    expect(next.alivePlayers).toEqual([])
+    expect(next.winners).toEqual([
+      {
+        playerID: "t1",
+        score: 4,
+        winningSquares: [24, 23, 22, 22],
+        teamID: "t1",
+        teamScore: 4,
+      },
+    ])
+  })
+
+  it("runs past the default limit only when the setup opts out with null", () => {
+    const turn = mkTurn(
+      {
+        t1: [24, 23, 22],
+        t2: [8, 9, 10],
+      },
+      { food: [25] }
+    )
+    const processor = new TeamSnekProcessor(
+      mkGameState(mkSetup({ maxTurns: null }), turn, DEFAULT_MAX_TURNS * 2)
+    )
+
+    const next = processor.applyMoves(turn, [mv("t1", 25), mv("t2", 15)])
+
+    expect(next.winners).toEqual([])
   })
 
   it("falls back to the previous turn's outcome when every team dies at once", () => {

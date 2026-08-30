@@ -61,6 +61,12 @@ const MIN_BOARD_DIMENSION = 5;
 const MAX_BOARD_DIMENSION = 99;
 const MAX_TEAMS = 10;
 
+// Games are played to a turn limit by default, and the engine enforces this
+// same number for a setup that names none (DEFAULT_MAX_TURNS in
+// functions/src/gameprocessors/TeamSnekProcessor.ts). Turning the limit off
+// writes an explicit null — the only way to ask for an unlimited game.
+const DEFAULT_MAX_TURNS = 100;
+
 type BoardSize = keyof typeof BOARD_SIZE_MAPPING | "custom";
 
 const UNIT_COUNT_OPTIONS = [0, 1, 2, 3, 4, 5, 6, 7, 8];
@@ -323,10 +329,14 @@ const GameSetup: React.FC = () => {
 
   const [boardSize, setBoardSize] = useState<BoardSize>("medium");
   const [centaurSearchQuery, setCentaurSearchQuery] = useState("");
+  // A setup that names no limit is played to the default, so the checkbox
+  // starts ON; only an explicit null (the opt-out) shows it off.
   const [maxTurnsEnabled, setMaxTurnsEnabled] = useState<boolean>(
-    gameSetup?.maxTurns !== undefined,
+    gameSetup?.maxTurns !== null,
   );
-  const [maxTurns, setMaxTurns] = useState<number>(gameSetup?.maxTurns ?? 100);
+  const [maxTurns, setMaxTurns] = useState<number>(
+    gameSetup?.maxTurns ?? DEFAULT_MAX_TURNS,
+  );
   const [addingCentaur, setAddingCentaur] = useState<boolean>(false);
   const [hazardPercentage, setHazardPercentage] = useState<number>(
     gameSetup?.hazardPercentage ?? 0,
@@ -508,11 +518,11 @@ const GameSetup: React.FC = () => {
       } else {
         setBoardSize("custom");
       }
-      if (gameSetup.maxTurns !== undefined) {
-        setMaxTurns(gameSetup.maxTurns);
-        setMaxTurnsEnabled(true);
-      } else {
+      if (gameSetup.maxTurns === null) {
         setMaxTurnsEnabled(false);
+      } else {
+        setMaxTurns(gameSetup.maxTurns ?? DEFAULT_MAX_TURNS);
+        setMaxTurnsEnabled(true);
       }
 
       if (gameSetup.hazardPercentage !== undefined) {
@@ -728,8 +738,10 @@ const GameSetup: React.FC = () => {
         maxTurns: sanitizedValue,
       });
     } else {
+      // Not deleteField(): an absent maxTurns is the enforced default now, so
+      // opting out of the limit has to be written down.
       await updateDoc(gameDocRef, {
-        maxTurns: deleteField(),
+        maxTurns: null,
       });
     }
   };

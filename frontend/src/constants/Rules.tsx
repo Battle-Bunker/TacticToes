@@ -26,7 +26,8 @@ export const TeamSnekRules: React.FC = () => {
       </Typography>
       <Typography>
         The game ends when at most one team has snakes left, or when the turn
-        limit is reached — highest team score wins.
+        limit is reached — highest team score wins. Every game has a turn
+        limit: 100 unless the setup says otherwise.
       </Typography>
       <Typography>
         Teams may also field chess pieces ♟♞♝♜♛♚. Pieces move like in chess,
