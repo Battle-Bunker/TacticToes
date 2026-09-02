@@ -25,8 +25,10 @@ import { EngineUnit, ExhaustionEvent, REASON, runTurnEngine } from "./turnEngine
  *
  * Deliberately NOT here: the end-of-turn effect bookkeeping — the ally-buff
  * cancel and effect expiry — which reads the turn number and the effect
- * schedule and so lives one layer up, in `settleTurn`, the module's entry
- * point. Nor spawning food, hazards or potions; the orientation rewrite; pawn
+ * schedule, nor the orientation rewrite, which needs the roster the deaths
+ * left behind. All three live one layer up, in `settleTurn`, the module's
+ * entry point; this file reports the raw `rotations` and `traversed` the
+ * rewrite is computed from. Nor spawning food, hazards or potions; pawn
  * promotion; scoring, winners and MMR; anything Firestore.
  */
 

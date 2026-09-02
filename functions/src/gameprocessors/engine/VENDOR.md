@@ -11,7 +11,7 @@ Copy exactly these, together, keeping their relative layout:
 
 | File | What it is |
 | --- | --- |
-| `settleTurn.ts` | **The public entry point.** One pure function, `settleTurn`, covering everything from "the staged moves are known" to "the turn has closed" — `resolveTurn` plus the end-of-turn effect bookkeeping. |
+| `settleTurn.ts` | **The public entry point.** One pure function, `settleTurn`, covering everything from "the staged moves are known" to "the turn has closed" — `resolveTurn` plus the end-of-turn effect bookkeeping and the orientation rewrite. |
 | `resolveTurn.ts` | The board half of settlement, callable on its own: grammar, collisions, food, exhaustion, sever, regicide. |
 | `turnEngine.ts` | The snapshot-adjudicated sub-step collision engine. |
 | `moveGrammar.ts` | The movement grammar: staged cell → the path a unit of that kind walks, plus spawn orientation and the per-kind property flags. |
@@ -61,8 +61,6 @@ These need game-level state the module does not carry, and stay in
 - SPAWNING food, hazards and potions (all of it random — collecting a potion
   is a rule and lives here; putting one on the board is a die roll and does
   not);
-- the per-turn orientation rewrite (the module does report `rotations`, since
-  choosing to rotate is a grammar outcome);
 - pawn promotion;
 - scoring, winners, MMR;
 - anything Firestore, and the `Turn` wire assembly.
@@ -94,6 +92,7 @@ settled.eliminatedTeamIDs
 settled.effects        // the schedule as the turn closed
 settled.tiers          // per-unit tier the NEXT turn starts from
 settled.potions        // potion cells left once every collector has taken one
+settled.orientation    // facing per surviving unit, rewritten for the turn
 ```
 
 **`tier` is an input AND an output.** A caller hands settlement the tiers a
@@ -102,8 +101,14 @@ Deriving the second set yourself — charging a pickup, giving a level back on
 expiry — is writing a second encoding of the rules, which is the one thing
 this directory exists to prevent. Read `tiers`.
 
+**Take `orientation` whole.** It is rebuilt each turn from the units still
+standing, with rotations folded in and the dead dropped. Carrying the previous
+turn's map forward and patching the units that moved is the per-kind facing
+rule written a second time — sliders sign their ray, knights keep their exact
+L-offset, and pawns turn only through their rotation action.
+
 `resolveTurn` remains exported for a caller that wants the board half alone;
-it does not touch effects or tiers.
+it does not touch effects, tiers or facing.
 
 Pass `path` instead of `stagedMove` on a unit if you have already planned it.
 Read outcomes off `board` and `deaths` — they are authoritative, and they are
