@@ -48,6 +48,12 @@
 // Promotion lands on the same turn as an orientation rewrite, which is the
 // interleaving worth pinning: the rewrite runs FIRST, so a pawn that promotes
 // this turn is still a pawn when its facing is decided and keeps it.
+//
+// THE SECOND RUN. Promotion is also the one settlement phase the processor
+// runs AFTER the food and potion spawners, which read weight. So the same
+// game is replayed a second time with a food spawning every turn, and pinned
+// to its own fixture, which makes the interaction between promotion and the
+// spawners checkable rather than argued.
 
 import { readFileSync, writeFileSync } from "fs"
 import { join } from "path"
@@ -289,6 +295,14 @@ const serialise = (stream: Turn[]): string =>
   `${JSON.stringify(canonical(stream), null, 2)}\n`
 
 const GOLDEN = join(__dirname, "pieceReplay.golden.json")
+const GOLDEN_SPAWNER_ON = join(__dirname, "pieceReplay.spawner.golden.json")
+
+/**
+ * One food per turn, spawned on a free cell the seeded LCG picks. Exactly
+ * one: the rate's integer part is 1 and its fraction is 0, so the count is
+ * not itself a draw.
+ */
+const SPAWNER_ON: Partial<StartedGameSetup> = { foodSpawnRate: 1 }
 
 /** Set UPDATE_GOLDEN=1 to re-record. Only ever legitimate before a move. */
 const check = (actual: string, path: string): void => {
@@ -362,6 +376,57 @@ describe("golden piece replay", () => {
     // Turn 4 onward it is a queen, and reports a slider's signed facing.
     expect(turnOf(4).orientation["t1#5"]).toEqual({ dx: -1, dy: -1 })
     expect(turnOf(5).orientation["t1#5"]).toEqual({ dx: 0, dy: 1 })
+  })
+
+  it("promotes the pawn at the threshold: weight 1, queen health, still alive", () => {
+    const stream = runReplay()
+    const turnOf = (n: number): Turn => stream[n - 1]
+
+    // It eats its way up to the threshold, one square at a time. A piece's
+    // occupancy is a STACK on one square, so weight is the array's length and
+    // every entry is the same cell.
+    expect(turnOf(1).playerPieces["t1#5"]).toEqual([at(6, 10)])
+    expect(turnOf(2).playerPieces["t1#5"]).toEqual([FIRST_MEAL, FIRST_MEAL])
+    expect(turnOf(2).unitTypes?.["t1#5"]).toBe("pawn")
+
+    // Turn 3 is the meal that reaches PROMOTION_WEIGHT. The stack collapses
+    // to the single square it stands on — weight 1, never 0, so the unit is
+    // not eliminated by promoting; only its score drops.
+    expect(turnOf(PROMOTION_TURN).playerPieces["t1#5"]).toEqual([SECOND_MEAL])
+    expect(turnOf(PROMOTION_TURN).scores["t1#5"]).toBe(1)
+    expect(turnOf(PROMOTION_TURN).alivePlayers).toContain("t1#5")
+    expect(turnOf(PROMOTION_TURN).deaths["t1#5"]).toBeUndefined()
+
+    // Health: the meal topped it up to the PAWN's max, and promotion then
+    // clamped it to the QUEEN's. Nothing else in the game touches health but
+    // movement cost, so the clamp is the only way to read 40 here.
+    expect(turnOf(2).playerHealth["t1#5"]).toBe(PAWN_MAX_HEALTH)
+    expect(turnOf(PROMOTION_TURN).playerHealth["t1#5"]).toBe(QUEEN_MAX_HEALTH)
+
+    // And it goes on playing as a queen: two rays a pawn could not have
+    // staged, so a fixture where promotion silently stopped happening would
+    // show the unit standing still instead.
+    expect(turnOf(4).playerPieces["t1#5"]).toEqual([at(6, 7)])
+    expect(turnOf(5).playerPieces["t1#5"]).toEqual([at(6, 10)])
+    expect(turnOf(5).playerHealth["t1#5"]).toBe(QUEEN_MAX_HEALTH - 5)
+  })
+
+  it("plays the same game with the food spawner running", () => {
+    // Promotion is the one settlement phase the processor still runs AFTER
+    // spawning, and it is about to move inside settlement — ahead of both
+    // spawners. What makes that safe is what a piece's occupancy IS: N copies
+    // of the one square it stands on, never a body. Collapsing a weight-3
+    // pawn to weight 1 therefore frees no cell, and the free-cell set the
+    // spawner draws from is the same set on either side of the phase.
+    //
+    // Claiming that is cheap; pinning it is not. This run has a food spawning
+    // every turn, its cell drawn from that set with the replay's own seed, so
+    // if the claim were wrong the promotion turn's spawn would land on a
+    // different square and every turn after it would diverge.
+    const stream = runReplay(SPAWNER_ON)
+    const promotedStack = stream[PROMOTION_TURN - 1].playerPieces["t1#5"]
+    expect(new Set(promotedStack).size).toBe(1)
+    check(serialise(stream), GOLDEN_SPAWNER_ON)
   })
 
   it("kills nobody, so every branch above is read off a full board", () => {
