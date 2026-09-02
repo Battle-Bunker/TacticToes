@@ -1,6 +1,6 @@
 import { UnitType } from "@shared/types/Game"
 import { ORTHOGONALS, Orientation, leavesTrail, traversesEdges } from "./moveGrammar"
-import { BoardShape, GrammarUnit, actionOf, coverOf, legalTargets } from "./queries"
+import { BoardShape, GrammarUnit, actionOf, coverOf, legalActions } from "./queries"
 import { DEFAULT_FOOD_ENERGY, ResolveUnit } from "./resolveTurn"
 import { SettleInput } from "./settleTurn"
 
@@ -224,13 +224,9 @@ const stepsFrom = (
     occupancy: [state.cell],
     orientation: ORTHOGONALS[state.ori],
   }
-  const targets = options
-    ? legalTargets(unit, shape).filter((t) => options.includes(t))
-    : legalTargets(unit, shape)
   const steps: Step[] = []
-  targets.forEach((target) => {
-    const action = actionOf(unit, target, shape)
-    if (!action) return
+  legalActions(unit, shape).forEach(({ target, action }) => {
+    if (options && !options.includes(target)) return
     if (action.kind === "move") {
       steps.push({ to: action.path[action.path.length - 1], path: action.path, ori: state.ori })
       return

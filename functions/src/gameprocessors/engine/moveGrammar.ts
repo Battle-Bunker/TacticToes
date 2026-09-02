@@ -162,16 +162,22 @@ export const planUnitAction = (
   pawnTargets?: Set<number>,
 ): UnitAction | null => {
   if (!Number.isInteger(dest) || dest < 0 || dest >= boardWidth * boardHeight) return null
-  const o = toXY(origin, boardWidth)
-  const d = toXY(dest, boardWidth)
-  const dx = d.x - o.x
-  const dy = d.y - o.y
+  // Read as scalars rather than through `toXY`. This is the innermost call of
+  // every query in the module — a board sweep per unit per turn — and the two
+  // coordinate objects it used to allocate here were the module's largest
+  // source of garbage, for arithmetic that fits in four numbers.
+  const ox = origin % boardWidth
+  const oy = Math.floor(origin / boardWidth)
+  const dxCell = dest % boardWidth
+  const dyCell = Math.floor(dest / boardWidth)
+  const dx = dxCell - ox
+  const dy = dyCell - oy
   const adx = Math.abs(dx)
   const ady = Math.abs(dy)
   // Origins are always interior and the interior is convex, so a straight ray
   // between interior squares never touches the perimeter wall — only the
   // destination needs the check.
-  const interior = isInterior(d.x, d.y, boardWidth, boardHeight)
+  const interior = isInterior(dxCell, dyCell, boardWidth, boardHeight)
 
   // Trail units: one orthogonal step, walls included. They have no "stay":
   // staging their own square is not a move, so the default (continue straight)
@@ -191,15 +197,15 @@ export const planUnitAction = (
       return interior && Math.max(adx, ady) === 1 ? { kind: "move", path: [dest] } : null
     case "rook":
       return interior && (dx === 0) !== (dy === 0)
-        ? { kind: "move", path: rayPath(o, d, boardWidth) }
+        ? { kind: "move", path: rayPath(ox, oy, dx, dy, boardWidth) }
         : null
     case "bishop":
       return interior && adx === ady && adx > 0
-        ? { kind: "move", path: rayPath(o, d, boardWidth) }
+        ? { kind: "move", path: rayPath(ox, oy, dx, dy, boardWidth) }
         : null
     case "queen":
       return interior && ((dx === 0) !== (dy === 0) || (adx === ady && adx > 0))
-        ? { kind: "move", path: rayPath(o, d, boardWidth) }
+        ? { kind: "move", path: rayPath(ox, oy, dx, dy, boardWidth) }
         : null
     case "pawn": {
       if (dx === orientation.dx && dy === orientation.dy) {
@@ -248,13 +254,19 @@ export const defaultAction = (
   return { kind: "move", path: [toIndex(nx, ny, boardWidth)] }
 }
 
-const rayPath = (o: { x: number; y: number }, d: { x: number; y: number }, boardWidth: number): number[] => {
-  const steps = Math.max(Math.abs(d.x - o.x), Math.abs(d.y - o.y))
-  const sx = Math.sign(d.x - o.x)
-  const sy = Math.sign(d.y - o.y)
-  const path: number[] = []
+const rayPath = (
+  ox: number,
+  oy: number,
+  dx: number,
+  dy: number,
+  boardWidth: number,
+): number[] => {
+  const steps = Math.max(Math.abs(dx), Math.abs(dy))
+  const sx = Math.sign(dx)
+  const sy = Math.sign(dy)
+  const path: number[] = new Array(steps)
   for (let i = 1; i <= steps; i++) {
-    path.push(toIndex(o.x + sx * i, o.y + sy * i, boardWidth))
+    path[i - 1] = toIndex(ox + sx * i, oy + sy * i, boardWidth)
   }
   return path
 }

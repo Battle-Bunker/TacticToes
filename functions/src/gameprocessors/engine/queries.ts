@@ -141,10 +141,31 @@ export const actionOf = (
  * does not always mean the unit goes anywhere.
  */
 export const legalTargets = (unit: GrammarUnit, board: BoardShape): number[] => {
+  const targets: number[] = []
+  legalActions(unit, board).forEach((entry) => targets.push(entry.target))
+  return targets
+}
+
+/**
+ * Every legal target WITH the action it produces, in board order.
+ *
+ * `legalTargets`, `coverOf`, `rotationTargets` and every caller that dilates a
+ * unit's reach are all this one question with something thrown away, and each
+ * of them used to ask the grammar twice — once for the target list, once again
+ * for the action behind each target — rebuilding the board's pawn-target set
+ * on every single call as it went. That is a board sweep and a set build per
+ * cell, and on a crowded board it was the largest line in the profile of
+ * anything that reads a claim. One sweep, one set, and the shapes above keep
+ * their signatures.
+ */
+export const legalActions = (
+  unit: GrammarUnit,
+  board: BoardShape,
+): { target: number; action: UnitAction }[] => {
   const pawnTargets = pawnTargetsOf(board)
   const origin = unit.occupancy[0]
-  const targets: number[] = []
   const cells = board.boardWidth * board.boardHeight
+  const out: { target: number; action: UnitAction }[] = []
   for (let cell = 0; cell < cells; cell++) {
     const action = planUnitAction(
       unit.type,
@@ -155,9 +176,9 @@ export const legalTargets = (unit: GrammarUnit, board: BoardShape): number[] => 
       unit.orientation,
       pawnTargets,
     )
-    if (action) targets.push(cell)
+    if (action) out.push({ target: cell, action })
   }
-  return targets
+  return out
 }
 
 /**
@@ -201,9 +222,9 @@ export const coverOf = (unit: GrammarUnit, board: BoardShape): number[] => {
   board.occupancy.forEach((u) => u.cells.forEach((cell) => bodies.add(cell)))
 
   const covered = new Set<number>()
-  legalTargets(unit, board).forEach((target) => {
-    const path = pathOf(unit, target, board) ?? []
-    for (const cell of path) {
+  legalActions(unit, board).forEach(({ action }) => {
+    if (action.kind !== "move") return
+    for (const cell of action.path) {
       if (walls.has(cell)) break
       covered.add(cell)
       if (bodies.has(cell)) break
@@ -224,9 +245,8 @@ export const rotationTargets = (
   board: BoardShape,
 ): { target: number; orientation: Orientation }[] => {
   const rotations: { target: number; orientation: Orientation }[] = []
-  legalTargets(unit, board).forEach((target) => {
-    const action = actionOf(unit, target, board)
-    if (action?.kind === "rotate") rotations.push({ target, orientation: action.orientation })
+  legalActions(unit, board).forEach(({ target, action }) => {
+    if (action.kind === "rotate") rotations.push({ target, orientation: action.orientation })
   })
   return rotations
 }

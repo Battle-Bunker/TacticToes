@@ -889,6 +889,87 @@ const bench = (units: ResolveUnit[], overrides: Partial<PartialSettleInput> = {}
   return input
 }
 
+// ------------------------------------------------------- the cost of a node
+//
+// A caller sweeping candidates pays for one `settlePartial` per node, so the
+// per-call allocation is a search parameter and not a detail. Printed rather
+// than asserted: a number that fails the build on a shared runner is a number
+// nobody can keep, and ts-jest's instrumentation inflates all three by about
+// five times over the same code run plainly.
+//
+// The allocation pass that removed the per-sub-step ghost sets, the per-pair
+// reach sets, the per-cell pawn-target rebuild and the coordinate objects in
+// `planUnitAction` moved these, on this board and this machine:
+//
+//                        under ts-jest        plain node
+//   settlePartial        3.10 -> 2.01 ms      —
+//   ...claims hoisted    1.11 -> 0.48 ms      0.173 -> 0.110 ms
+//   computeClaims        1.70 -> 1.39 ms      0.210 -> 0.100 ms
+//
+// The hoisted line is the one a search pays per node; the rest of that call
+// is `settleTurn` itself, which was 0.098 ms of it before and is untouched.
+
+describe("what a settlement costs", () => {
+  it("prints the per-call time on a twelve-unit board", () => {
+    const units: ResolveUnit[] = []
+    const teamOf: { [unitID: string]: string } = {}
+    const kinds: UnitType[] = ["queen", "rook", "bishop", "knight", "pawn", "snake"]
+    for (let i = 0; i < 12; i++) {
+      const type = kinds[i % kinds.length]
+      const teamID = i % 2 === 0 ? "A" : "B"
+      const x = 1 + (i % 7)
+      const y = 1 + Math.floor(i / 7) * 2
+      const occupancy = type === "snake" ? [at(x, y), at(x, y + 1)] : [at(x, y), at(x, y)]
+      const id = `n${i}`
+      teamOf[id] = teamID
+      units.push({
+        id,
+        type,
+        teamID,
+        isKing: false,
+        tier: (i % 3) - 1,
+        energy: 40 + i,
+        occupancy,
+        orientation: i % 2 === 0 ? { dx: 1, dy: 0 } : { dx: 0, dy: 1 },
+        stagedMove: at(1 + ((i + 3) % 7), 5),
+      })
+    }
+    const input: PartialSettleInput = {
+      ...bench(units, {
+        food: [at(3, 5), at(6, 3)],
+        potions: [at(5, 6)],
+        potionsEnabled: true,
+        hazards: [at(2, 5)],
+      }),
+      teamOf,
+      held: [
+        { id: "n1", observedTurn: 3 },
+        { id: "n3", observedTurn: 3 },
+      ],
+    }
+
+    const time = (runs: number, run: () => void): number => {
+      for (let i = 0; i < 20; i++) run() // warm
+      const started = process.hrtime.bigint()
+      for (let i = 0; i < runs; i++) run()
+      return Number(process.hrtime.bigint() - started) / 1e6 / runs
+    }
+
+    const hoisted = computeClaims(input)
+    const whole = time(400, () => settlePartial(input, NO_SPAWN))
+    const reused = time(400, () => settlePartial(input, NO_SPAWN, hoisted))
+    const claimsOnly = time(400, () => computeClaims(input))
+    process.stdout.write(
+      `  12 units, 2 held: settlePartial ${whole.toFixed(3)} ms/call, ` +
+        `${reused.toFixed(3)} ms/call with claims hoisted, ` +
+        `computeClaims ${claimsOnly.toFixed(3)} ms/call\n`,
+    )
+    expect(settlePartial(input, NO_SPAWN, hoisted).ledger).toEqual(
+      settlePartial(input, NO_SPAWN).ledger,
+    )
+  })
+})
+
 describe("the regicide cascade is conditional on the king", () => {
   // A team that plays under regicide loses everything with its last king, so
   // every unit of it CAN be taken off the board by a king it never met. That
