@@ -279,20 +279,18 @@ export class TeamSnekProcessor {
       // 2. Settle the turn: grammar, collision phase, collision deaths, food
       //    and growth, exhaustion deaths, sever truncation, regicide — then
       //    the ally-buff cancel for vulnerable units that died or were
-      //    severed, potion collection, effect expiry and the orientation
-      //    rewrite, all of which the module now owns.
+      //    severed, potion collection, effect expiry, the orientation rewrite
+      //    and pawn promotion, all of which the module now owns.
       this.applySettlement(gameState, settleTurn(this.settleInput(gameState)))
 
-      // 3. Spawns
+      // 3. Spawns. They read weight through the free-cell set, and promotion
+      //    has already run — which changes nothing, because a piece's
+      //    occupancy is N copies of one square and collapsing the stack frees
+      //    no cell.
       this.generateNewFood(gameState)
       this.generateNewInvulnerabilityPotions(gameState)
 
-      // 4. Pawns that grew to the threshold promote after the food phase, so a
-      //    pawn that eats into the threshold promotes the same turn. The weight
-      //    reset lands after every phase that reads weight and before winners.
-      this.applyPawnPromotions(gameState)
-
-      // 5. Winners and turn assembly
+      // 4. Winners and turn assembly
       const winners = this.calculateWinners(gameState)
       return this.createNewTurn(currentTurn, gameState, winners)
     } catch (error) {
@@ -333,6 +331,8 @@ export class TeamSnekProcessor {
       potionsEnabled: this.gameSetup.invulnerabilityPotionEnabled === true,
       potionWindowTurns:
         this.gameSetup.invulnerabilityPotionWindowTurns ?? DEFAULT_POTION_WINDOW_TURNS,
+      pawnPromotionWeight:
+        this.gameSetup.pawnPromotionWeight ?? DEFAULT_PAWN_PROMOTION_WEIGHT,
       units: gameState.newAlivePlayers.map((playerID) => ({
         id: playerID,
         type: gameState.unitTypes[playerID],
@@ -390,6 +390,15 @@ export class TeamSnekProcessor {
     // here instead would be the same rule written a second time.
     gameState.orientation = resolution.orientation
 
+    // Promotion arrives already applied to the board and the health above;
+    // what is left is the kind map, which the processor keeps for every
+    // CONFIGURED unit rather than only the standing ones, so the settled kinds
+    // are folded in rather than swapped for.
+    resolution.promoted.forEach((playerID) => {
+      gameState.unitTypes[playerID] = resolution.unitTypes[playerID]
+      logger.info(`Snek: Pawn ${playerID} promoted to queen at weight 1.`)
+    })
+
     resolution.vulnerableCollided.forEach((playerID) => {
       const teamID = this.gameSetup.gamePlayers.find((p) => p.id === playerID)?.teamID
       if (!teamID) return
@@ -433,31 +442,6 @@ export class TeamSnekProcessor {
   // one, for stationary pieces). Default 100: usually lethal.
   private hazardDamage(): number {
     return this.gameSetup.hazardDamage ?? 100
-  }
-
-  private applyPawnPromotions(gameState: SnakeGameState): void {
-    const threshold = this.gameSetup.pawnPromotionWeight ?? DEFAULT_PAWN_PROMOTION_WEIGHT
-    gameState.newAlivePlayers.forEach((playerID) => {
-      if (
-        gameState.unitTypes[playerID] === "pawn" &&
-        (gameState.newSnakes[playerID]?.length ?? 0) >= threshold
-      ) {
-        gameState.unitTypes[playerID] = "queen"
-        // Promotion trades the accumulated mass for the queen's mobility: the
-        // stack collapses to the single square the unit occupies, weight 1.
-        // The unit stays on the board (weight 1, not 0), so it is never
-        // eliminated by promoting — only its score drops.
-        gameState.newSnakes[playerID] = [gameState.newSnakes[playerID][0]]
-        // A promoted pawn may carry more health than a queen is allowed:
-        // clamp to the queen's configured max. Health is not otherwise
-        // touched — only eating restores it.
-        const queenMax = this.maxHealthFor("queen")
-        if (gameState.newPlayerHealth[playerID] > queenMax) {
-          gameState.newPlayerHealth[playerID] = queenMax
-        }
-        logger.info(`Snek: Pawn ${playerID} promoted to queen at weight 1.`)
-      }
-    })
   }
 
   private initializeGameState(currentTurn: Turn): SnakeGameState {

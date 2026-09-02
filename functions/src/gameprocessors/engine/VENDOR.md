@@ -11,7 +11,7 @@ Copy exactly these, together, keeping their relative layout:
 
 | File | What it is |
 | --- | --- |
-| `settleTurn.ts` | **The public entry point.** One pure function, `settleTurn`, covering everything from "the staged moves are known" to "the turn has closed" — `resolveTurn` plus the end-of-turn effect bookkeeping and the orientation rewrite. |
+| `settleTurn.ts` | **The public entry point.** One pure function, `settleTurn`, covering everything from "the staged moves are known" to "the turn has closed" — `resolveTurn` plus the end-of-turn effect bookkeeping, the orientation rewrite and pawn promotion. |
 | `resolveTurn.ts` | The board half of settlement, callable on its own: grammar, collisions, food, exhaustion, sever, regicide. |
 | `turnEngine.ts` | The snapshot-adjudicated sub-step collision engine. |
 | `moveGrammar.ts` | The movement grammar: staged cell → the path a unit of that kind walks, plus spawn orientation and the per-kind property flags. |
@@ -61,7 +61,6 @@ These need game-level state the module does not carry, and stay in
 - SPAWNING food, hazards and potions (all of it random — collecting a potion
   is a rule and lives here; putting one on the board is a die roll and does
   not);
-- pawn promotion;
 - scoring, winners, MMR;
 - anything Firestore, and the `Turn` wire assembly.
 
@@ -84,6 +83,7 @@ const settled = settleTurn({
   potions,            // potion cells on the board as the turn opened
   potionsEnabled,     // off: potions are inert scenery
   potionWindowTurns,  // how long a pickup's debuff and ally buffs last (3)
+  pawnPromotionWeight, // the weight at which a pawn becomes a queen (10)
 })
 
 settled.board          // survivors: final occupancy and health
@@ -93,6 +93,8 @@ settled.effects        // the schedule as the turn closed
 settled.tiers          // per-unit tier the NEXT turn starts from
 settled.potions        // potion cells left once every collector has taken one
 settled.orientation    // facing per surviving unit, rewritten for the turn
+settled.unitTypes      // kind per surviving unit, promotion applied
+settled.promoted       // units that became queens this turn
 ```
 
 **`tier` is an input AND an output.** A caller hands settlement the tiers a
@@ -100,6 +102,18 @@ turn is adjudicated at and reads back the tiers the next turn starts from.
 Deriving the second set yourself — charging a pickup, giving a level back on
 expiry — is writing a second encoding of the rules, which is the one thing
 this directory exists to prevent. Read `tiers`.
+
+**`type` is an input AND an output, exactly like `tier`.** Promotion is the
+only kind change in the game, and settlement is where it happens: the kinds a
+caller sends in are the kinds the turn was played at, and `unitTypes` is the
+kinds the next turn opens with. A caller that promotes for itself has written
+the threshold, the weight-1 collapse and the queen health clamp a second time.
+
+Promotion runs LAST, after the food phase (so a pawn that ate its way to the
+threshold promotes on that turn) and after the orientation rewrite (so it was
+still a pawn when its facing was decided). A caller that spawns items of its
+own may still do so after settlement: a piece's occupancy is N copies of one
+square, so the collapse frees no cell and the free-cell set is unchanged.
 
 **Take `orientation` whole.** It is rebuilt each turn from the units still
 standing, with rotations folded in and the dead dropped. Carrying the previous
