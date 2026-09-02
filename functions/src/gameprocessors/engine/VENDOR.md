@@ -17,6 +17,7 @@ Copy exactly these, together, keeping their relative layout:
 | `adjudicate.ts` | Who has won, on which board, and at what weight — plus the turn limit a setup is played to. |
 | `spawn.ts` | Where a food or a potion may land and how many arrive, behind an injected RNG. |
 | `moveGrammar.ts` | The movement grammar: staged cell → the path a unit of that kind walks, plus spawn orientation and the per-kind property flags. |
+| `queries.ts` | The grammar asked questions instead of applied: which cells may be staged, what a unit would walk, what it covers. |
 | `VENDOR.md` | This file. |
 
 Plus the one type module they depend on:
@@ -62,14 +63,21 @@ npx tsc --noEmit -p /tmp/vendorcheck/tsconfig.json   # must be silent
 
 ## What is deliberately NOT in the module
 
-These need game-level state the module does not carry, and stay in
-`TeamSnekProcessor`:
+Two things, and they are not rules:
 
-- SPAWNING food, hazards and potions (all of it random — collecting a potion
-  is a rule and lives here; putting one on the board is a die roll and does
-  not);
-- scoring, winners, MMR;
-- anything Firestore, and the `Turn` wire assembly.
+- **Placement and MMR.** Building the board before turn 1 — where each unit
+  starts, where the hazards go, which tiles are fertile — is one pass over a
+  board with nothing on it yet, driven by the setup's geometry rather than by
+  any rule of play; nothing in it happens again while the game runs. And what
+  a league does with a finished game — the winner ROWS, per-player scores,
+  placements, MMR — is a ranking policy, not a rule: WHICH teams won is
+  `adjudicate`'s and lives here, what that is worth to a player does not.
+- **Firestore, and the `Turn` wire assembly.** Documents, timestamps and
+  transactions. The module takes plain numbers and hands plain numbers back.
+
+Everything else a turn does is in here, including the two that used to be
+argued out of it: spawning (the rules travel, the die is injected) and
+adjudication (who won, and on which board).
 
 ## Using it
 
@@ -133,6 +141,28 @@ standing, with rotations folded in and the dead dropped. Carrying the previous
 turn's map forward and patching the units that moved is the per-kind facing
 rule written a second time — sliders sign their ray, knights keep their exact
 L-offset, and pawns turn only through their rotation action.
+
+**Asking the grammar questions.** `queries.ts` is the surface for anything
+that has to CHOOSE a move rather than resolve one — a client's search, an
+interface offering a player their legal squares, a model of what an opponent
+might do:
+
+```ts
+legalTargets(unit, board)      // every cell this kind may be staged to
+pathOf(unit, target, board)    // the cells it would walk, or null if illegal
+coverOf(unit, board)           // what it could contest, rays cut at the first body
+actionOf(unit, target, board)  // the planned action, or null
+stagedAction(unit, staged, board) // ...with the default substituted, as the server does
+rotationTargets(unit, board)   // a pawn's turns: the cell to stage, and the facing
+```
+
+`stagedAction` is not a reimplementation of the staging step — it IS the
+staging step, and `resolveTurn` calls it. `planUnitAction`, `defaultAction`
+and `legalOrientations` are re-exported from here so the whole movement
+surface has one import site. Note what the answers include, because these are
+the three a re-derivation gets wrong: a trail unit may legally stage a WALL
+(fatal, and still a move the server accepts), a hazard blocks nothing, and a
+pawn's diagonal is legal only onto food or a body.
 
 **`outcome` is the end of the game, not the score of it.** It names the kind
 of ending, the winning team ids, the weight behind each team and WHICH board

@@ -1,11 +1,6 @@
 import { Clash, UnitDeath, UnitType } from "@shared/types/Game"
-import {
-  Orientation,
-  defaultAction,
-  leavesTrail,
-  planUnitAction,
-  traversesEdges,
-} from "./moveGrammar"
+import { Orientation, leavesTrail, traversesEdges } from "./moveGrammar"
+import { BoardShape, stagedAction } from "./queries"
 import { EngineUnit, ExhaustionEvent, REASON, runTurnEngine } from "./turnEngine"
 
 /**
@@ -121,9 +116,17 @@ export const resolveTurn = (input: ResolveTurnInput): TurnResolution => {
 
   // 1. Movement grammar: every staged cell becomes the path the unit walks,
   // one cell per sub-step. An illegal or missing destination falls back to the
-  // kind's default — trail units continue straight, pieces hold.
-  const pawnTargets = new Set<number>(input.food)
-  units.forEach((u) => u.occupancy.forEach((cell) => pawnTargets.add(cell)))
+  // kind's default — trail units continue straight, pieces hold. The step is
+  // `stagedAction`, which is also what a caller asks when it wants to know
+  // what a click will do (queries.ts): one staging rule, not two.
+  const shape: BoardShape = {
+    boardWidth,
+    boardHeight,
+    walls: input.walls,
+    hazards: input.hazards,
+    occupancy: units.map((u) => ({ id: u.id, cells: u.occupancy })),
+    food: input.food,
+  }
 
   const rotations: { [unitID: string]: Orientation } = {}
   const paths: { [unitID: string]: number[] } = {}
@@ -132,21 +135,7 @@ export const resolveTurn = (input: ResolveTurnInput): TurnResolution => {
       paths[u.id] = u.path
       return
     }
-    const origin = u.occupancy[0]
-    const planned =
-      u.stagedMove === undefined
-        ? null
-        : planUnitAction(
-            u.type,
-            origin,
-            u.stagedMove,
-            boardWidth,
-            boardHeight,
-            u.orientation,
-            pawnTargets,
-          )
-    const action =
-      planned ?? defaultAction(u.type, origin, boardWidth, boardHeight, u.orientation)
+    const action = stagedAction(u, u.stagedMove, shape)
 
     if (action.kind === "move") {
       paths[u.id] = action.path
