@@ -110,7 +110,9 @@ service cloud.firestore {
         (setup.timeCreated is timestamp || setup.timeCreated == request.time);
 
       let validOptionalFields = (
-        (!('maxTurns' in setup.keys()) || (setup.maxTurns is int && setup.maxTurns > 0 && setup.maxTurns <= 1000)) &&
+        // Absent means the engine's default limit; null is the explicit
+        // "no limit" opt-out, so it has to be writable.
+        (!('maxTurns' in setup.keys()) || setup.maxTurns == null || (setup.maxTurns is int && setup.maxTurns > 0 && setup.maxTurns <= 1000)) &&
         (!('firstTurnTime' in setup.keys()) || (setup.firstTurnTime is int && setup.firstTurnTime > 0)) &&
         (!('pawnPromotionWeight' in setup.keys()) || (setup.pawnPromotionWeight is int && setup.pawnPromotionWeight >= 2 && setup.pawnPromotionWeight <= 100)) &&
         (!('hazardDamage' in setup.keys()) || (setup.hazardDamage is int && setup.hazardDamage >= 1 && setup.hazardDamage <= 1000)) &&

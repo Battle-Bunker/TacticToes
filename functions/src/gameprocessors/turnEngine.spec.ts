@@ -1,0 +1,1186 @@
+// The unified turn engine, at spec level. Everything here exercises rules the
+// engine owns for EVERY game: frozen tier/weight, the sub-step loop, persistent
+// collision objects (the wrestling rule), severs that keep blocking until the
+// turn ends, per-sub-step health, and the typed wire the engine emits.
+//
+// Several of these deliberately INVERT behavior the old two-engine fork pinned.
+// Each inversion is called out where it lives.
+
+import { Timestamp } from "firebase-admin/firestore"
+import {
+  GamePlayer,
+  GameState,
+  Move,
+  StartedGameSetup,
+  Team,
+  Turn,
+} from "@shared/types/Game"
+import { TeamSnekProcessor } from "./TeamSnekProcessor"
+import { REASON } from "./engine/turnEngine"
+
+// 11x11 board: index = y * 11 + x, perimeter is wall (interior 1..9).
+const W = 11
+const at = (x: number, y: number): number => y * W + x
+
+const teams = (...ids: string[]): Team[] =>
+  ids.map((id) => ({ id, name: id, color: "#ff0000" }))
+
+const gp = (
+  id: string,
+  teamID: string,
+  letter: string,
+  unitType: GamePlayer["unitType"]
+): GamePlayer => ({ id, teamID, letter, unitType })
+
+const mv = (playerID: string, move: number): Move => ({
+  gameID: "game1",
+  moveNumber: 0,
+  playerID,
+  move,
+  timestamp: Timestamp.fromMillis(0),
+})
+
+/** N copies of one cell: a piece's weight-stack. */
+const stack = (cell: number, weight: number): number[] => Array(weight).fill(cell)
+
+interface Scenario {
+  players: GamePlayer[]
+  pieces: { [playerID: string]: number[] }
+  moves: Move[]
+  turn?: Partial<Turn>
+  setup?: Partial<StartedGameSetup>
+  turnsBefore?: number
+}
+
+const play = (scenario: Scenario): Turn => {
+  const ids = Object.keys(scenario.pieces)
+  const teamIDs = Array.from(new Set(scenario.players.map((p) => p.teamID)))
+  const turn: Turn = {
+    playerHealth: Object.fromEntries(ids.map((id) => [id, 100])),
+    startTime: Timestamp.fromMillis(0),
+    endTime: Timestamp.fromMillis(5000),
+    scores: Object.fromEntries(ids.map((id) => [id, scenario.pieces[id].length])),
+    alivePlayers: ids,
+    food: [],
+    hazards: [],
+    playerPieces: scenario.pieces,
+    clashes: [],
+    deaths: {},
+    moves: {},
+    winners: [],
+    unitTypes: Object.fromEntries(
+      scenario.players.map((p) => [p.id, p.unitType ?? "snake"])
+    ),
+    ...scenario.turn,
+    orientation: {
+      ...Object.fromEntries(ids.map((id) => [id, { dx: 1, dy: 0 }])),
+      ...scenario.turn?.orientation,
+    },
+  }
+  const setup: StartedGameSetup = {
+    teams: teams(...teamIDs),
+    snakesPerTeam: 1,
+    gamePlayers: scenario.players,
+    boardWidth: W,
+    boardHeight: W,
+    maxTurnTime: 5,
+    startRequested: false,
+    started: true,
+    timeCreated: Timestamp.fromMillis(0),
+    foodSpawnRate: 0,
+    ...scenario.setup,
+  }
+  const gameState: GameState = {
+    setup,
+    turns: Array(scenario.turnsBefore ?? 1).fill(turn),
+    walls: [],
+    timeCreated: Timestamp.fromMillis(0),
+    timeFinished: null,
+  }
+  return new TeamSnekProcessor(gameState).applyMoves(turn, scenario.moves)
+}
+
+/** Turn state with every keyed map sorted, so key order cannot mask a diff. */
+const normalize = (turn: Turn): string => {
+  const sortKeys = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(sortKeys)
+    if (value && typeof value === "object" && !(value instanceof Timestamp)) {
+      return Object.fromEntries(
+        Object.entries(value as Record<string, unknown>)
+          .sort(([a], [b]) => (a < b ? -1 : 1))
+          .map(([k, v]) => [k, sortKeys(v)])
+      )
+    }
+    return value
+  }
+  return JSON.stringify(
+    sortKeys({
+      alivePlayers: [...turn.alivePlayers].sort(),
+      playerPieces: turn.playerPieces,
+      playerHealth: turn.playerHealth,
+      scores: turn.scores,
+      teamScores: turn.teamScores,
+      moves: turn.moves,
+      deaths: turn.deaths,
+      severedCells: turn.severedCells,
+      paths: turn.paths,
+      orientation: turn.orientation,
+      clashes: turn.clashes,
+    })
+  )
+}
+
+/** Every rotation of the roster (and of the piece map, which follows it). */
+const permutations = (scenario: Scenario): Scenario[] =>
+  scenario.players.map((_, offset) => {
+    const players = [
+      ...scenario.players.slice(offset),
+      ...scenario.players.slice(0, offset),
+    ]
+    const pieces: { [playerID: string]: number[] } = {}
+    players.forEach((p) => {
+      pieces[p.id] = scenario.pieces[p.id]
+    })
+    return { ...scenario, players, pieces, moves: [...scenario.moves].reverse() }
+  })
+
+const agreesUnderPermutation = (scenario: Scenario): void => {
+  const outcomes = permutations(scenario).map((s) => normalize(play(s)))
+  outcomes.forEach((outcome) => expect(outcome).toBe(outcomes[0]))
+}
+
+describe("frozen state: nothing leaves the board mid-turn", () => {
+  // INVERTED. The old engines removed a dead unit the instant it died, so its
+  // cell was free for anything arriving later in the same turn. Corpses now
+  // persist as collision objects for the whole collision phase.
+  //
+  // Two equal-weight kings annihilate each other on (5,5) at sub-step 1. A
+  // light rook reaches the pile at sub-step 3 and is crushed by it; a heavy
+  // rook reaches the same pile at sub-step 4, out-masses the entire pile, and
+  // capture-stops on it.
+  const corpsePile = (): Turn =>
+    play({
+      players: [
+        gp("k1", "t1", "A", "rook"),
+        gp("k2", "t2", "A", "rook"),
+        gp("light", "t1", "B", "rook"),
+        gp("heavy", "t2", "B", "rook"),
+      ],
+      pieces: {
+        k1: stack(at(4, 5), 4),
+        k2: stack(at(6, 5), 4),
+        light: stack(at(2, 5), 3),
+        heavy: stack(at(9, 5), 6),
+      },
+      moves: [
+        mv("k1", at(5, 5)),
+        mv("k2", at(5, 5)),
+        mv("light", at(9, 5)),
+        mv("heavy", at(1, 5)),
+      ],
+    })
+
+  it("equal heavies annihilate, a lighter later arrival joins the pile, a heavier one wins it", () => {
+    const next = corpsePile()
+    const x = at(5, 5)
+
+    expect(next.alivePlayers).toEqual(["heavy"])
+    expect(next.playerPieces.heavy).toEqual(stack(x, 6))
+    // It stopped ON the pile: the rest of its ray is abandoned.
+    expect(next.paths?.heavy).toEqual([at(8, 5), at(7, 5), at(6, 5), x])
+    expect(next.playerHealth.heavy).toBe(96)
+
+    expect(next.deaths).toEqual({
+      k1: { cell: x, subStep: 1, cause: "contest" },
+      k2: { cell: x, subStep: 1, cause: "contest" },
+      light: { cell: x, subStep: 3, cause: "contest" },
+    })
+  })
+
+  it("each sub-step's contest names the whole pile, and only that sub-step's victims", () => {
+    const next = corpsePile()
+    const x = at(5, 5)
+    const atCell = next.clashes.filter((c) => c.index === x)
+
+    expect(atCell.map((c) => c.subStep)).toEqual([1, 3, 4])
+
+    expect(atCell[0]).toMatchObject({
+      kind: "contest",
+      playerIDs: ["k1", "k2"],
+      victimIDs: ["k1", "k2"],
+      reason: REASON.tie,
+    })
+    expect(atCell[0].survivorID).toBeUndefined()
+
+    // The lighter arrival is judged against BOTH corpses at once.
+    expect(atCell[1]).toMatchObject({
+      kind: "contest",
+      playerIDs: ["k1", "k2", "light"],
+      victimIDs: ["light"],
+    })
+    expect(atCell[1].survivorID).toBeUndefined()
+
+    // The heavy rook out-masses the whole accumulated pile and survives it.
+    expect(atCell[2]).toMatchObject({
+      kind: "contest",
+      playerIDs: ["heavy", "k1", "k2", "light"],
+      victimIDs: [],
+      survivorID: "heavy",
+      reason: REASON.weight,
+    })
+  })
+
+  it("a unit that crossed the cell BEFORE the first death there is untouched", () => {
+    // The bishop crosses (5,5) at sub-step 3; the kings only die there at
+    // sub-step 4, well after it has gone.
+    const next = play({
+      players: [
+        gp("b", "t3", "A", "bishop"),
+        gp("k1", "t1", "A", "rook"),
+        gp("k2", "t2", "A", "rook"),
+      ],
+      pieces: { b: [at(2, 2)], k1: [at(5, 8)], k2: [at(5, 6)] },
+      moves: [mv("b", at(8, 8)), mv("k1", at(5, 7)), mv("k2", at(5, 7))],
+    })
+
+    expect(next.alivePlayers).toEqual(["b"])
+    expect(next.playerPieces.b).toEqual([at(8, 8)])
+    expect(next.deaths.k1.cell).toBe(at(5, 7))
+    expect(next.deaths.k2.cell).toBe(at(5, 7))
+  })
+})
+
+// Exhaustion — health at or below zero mid-turn — is PROVISIONAL death. It
+// stops movement and nothing else: the unit halts on the cell it reached and
+// stays a live collision incumbent. Whether it kills is settled at end of
+// turn, AFTER food, and food is the only heal there is.
+describe("exhaustion is provisional death", () => {
+  // A rook with 2 health and a stack of 3 halts on the second cell of its ray.
+  const exhaustedIncumbent = (
+    challengerWeight: number,
+    turn: Partial<Turn> = {}
+  ): Turn =>
+    play({
+      players: [gp("dying", "t1", "A", "rook"), gp("comer", "t2", "A", "rook")],
+      pieces: {
+        dying: stack(at(1, 5), 3),
+        comer: stack(at(7, 5), challengerWeight),
+      },
+      moves: [mv("dying", at(9, 5)), mv("comer", at(1, 5))],
+      turn: { playerHealth: { dying: 2, comer: 100 }, ...turn },
+    })
+
+  /** The same rook, with nobody coming to meet it. */
+  const undisturbed = (turn: Partial<Turn> = {}): Turn =>
+    play({
+      players: [gp("dying", "t1", "A", "rook"), gp("k", "t2", "A", "king")],
+      pieces: { dying: stack(at(1, 5), 3), k: [at(9, 9)] },
+      moves: [mv("dying", at(9, 5))],
+      turn: { playerHealth: { dying: 2, k: 100 }, ...turn },
+    })
+
+  it("halts where the health ran out, and dies there when nothing revives it", () => {
+    const next = undisturbed()
+
+    expect(next.alivePlayers).toEqual(["k"])
+    expect(next.moves.dying).toBe(at(3, 5))
+    expect(next.paths?.dying).toEqual([at(2, 5), at(3, 5)])
+    expect(next.deaths.dying).toEqual({
+      cell: at(3, 5),
+      subStep: 2,
+      cause: "exhaustion",
+    })
+    // Fatal exhaustion names its victim, like any other lethal record.
+    expect(next.clashes.find((c) => c.kind === "exhaustion")).toMatchObject({
+      index: at(3, 5),
+      subStep: 2,
+      playerIDs: ["dying"],
+      victimIDs: ["dying"],
+      reason: REASON.exhaustion,
+    })
+  })
+
+  it("recovers outright when its halt cell holds food", () => {
+    const next = undisturbed({ food: [at(3, 5)] })
+
+    expect(next.alivePlayers.sort()).toEqual(["dying", "k"])
+    expect(next.playerHealth.dying).toBe(100)
+    expect(next.playerPieces.dying).toEqual(stack(at(3, 5), 4)) // ate and grew
+    expect(next.food).toEqual([])
+    expect(next.deaths).toEqual({})
+    // The halt still happened and still shows on the wire — with an EMPTY
+    // victimIDs, the non-fatal shape, so the UI can explain why it stopped
+    // short of (9,5) without guessing.
+    expect(next.clashes.find((c) => c.kind === "exhaustion")).toMatchObject({
+      index: at(3, 5),
+      subStep: 2,
+      playerIDs: ["dying"],
+      victimIDs: [],
+    })
+    expect(next.moves.dying).toBe(at(3, 5))
+    expect(next.paths?.dying).toEqual([at(2, 5), at(3, 5)])
+  })
+
+  it("still beats a lighter arrival while exhausted, and still dies afterwards", () => {
+    const next = exhaustedIncumbent(2)
+
+    expect(next.alivePlayers).toEqual([])
+    // The dying animal wins its contest on frozen weight — and is named the
+    // survivor of it, because at that moment it is standing.
+    expect(next.clashes.find((c) => c.kind === "contest")).toMatchObject({
+      index: at(3, 5),
+      subStep: 4,
+      playerIDs: ["comer", "dying"],
+      victimIDs: ["comer"],
+      survivorID: "dying",
+    })
+    expect(next.deaths).toEqual({
+      comer: { cell: at(3, 5), subStep: 4, cause: "contest" },
+      dying: { cell: at(3, 5), subStep: 2, cause: "exhaustion" },
+    })
+  })
+
+  it("wins that contest and then recovers on the food under it", () => {
+    const next = exhaustedIncumbent(2, { food: [at(3, 5)] })
+
+    expect(next.alivePlayers).toEqual(["dying"])
+    expect(next.playerHealth.dying).toBe(100)
+    expect(next.playerPieces.dying).toEqual(stack(at(3, 5), 4))
+    expect(next.deaths).toEqual({
+      comer: { cell: at(3, 5), subStep: 4, cause: "contest" },
+    })
+    expect(next.clashes.find((c) => c.kind === "exhaustion")!.victimIDs).toEqual([])
+  })
+
+  it("killed by a heavier arrival, it is a COLLISION death — never listed twice", () => {
+    const next = exhaustedIncumbent(5)
+
+    expect(next.alivePlayers).toEqual(["comer"])
+    // One entry, and the cause is the contest that actually killed it.
+    expect(next.deaths).toEqual({
+      dying: { cell: at(3, 5), subStep: 4, cause: "contest" },
+    })
+    expect(next.clashes.find((c) => c.kind === "contest")).toMatchObject({
+      victimIDs: ["dying"],
+      survivorID: "comer",
+    })
+    // Its halt record keeps the non-fatal shape: exhaustion is not what got it.
+    expect(next.clashes.find((c) => c.kind === "exhaustion")!.victimIDs).toEqual([])
+  })
+
+  it("food under an exhausted unit does not save it from a heavier arrival", () => {
+    const next = exhaustedIncumbent(5, { food: [at(3, 5)] })
+
+    expect(next.alivePlayers).toEqual(["comer"])
+    expect(next.deaths).toEqual({
+      dying: { cell: at(3, 5), subStep: 4, cause: "contest" },
+    })
+    // The winner is the one standing on the food at end of turn, so it eats.
+    expect(next.playerHealth.comer).toBe(100)
+    expect(next.playerPieces.comer).toEqual(stack(at(3, 5), 6))
+  })
+
+  // INVERTED against the first cut of this engine, which made exhaustion an
+  // immediate death and therefore had no food rescue at all.
+  it("a trail unit at 1 health exhausts on the food cell and comes straight back", () => {
+    const next = play({
+      players: [gp("s1", "t1", "A", "snake"), gp("s2", "t2", "A", "snake")],
+      pieces: { s1: [at(4, 5), at(3, 5), at(2, 5)], s2: [at(8, 8), at(8, 7), at(8, 6)] },
+      moves: [mv("s1", at(5, 5)), mv("s2", at(8, 9))],
+      turn: { food: [at(5, 5)], playerHealth: { s1: 1, s2: 100 } },
+    })
+
+    expect(next.alivePlayers.sort()).toEqual(["s1", "s2"])
+    expect(next.playerHealth.s1).toBe(100)
+    expect(next.playerPieces.s1).toEqual([at(5, 5), at(4, 5), at(3, 5), at(3, 5)])
+    expect(next.food).toEqual([])
+    expect(next.deaths).toEqual({})
+    // The 1/turn cost still exhausted it at sub-step 1 — that is what the
+    // non-fatal record on the wire says.
+    expect(next.clashes.find((c) => c.kind === "exhaustion")).toMatchObject({
+      index: at(5, 5),
+      subStep: 1,
+      playerIDs: ["s1"],
+      victimIDs: [],
+    })
+  })
+
+  it("the same trail unit dies when the cell it reaches is bare", () => {
+    const next = play({
+      players: [gp("s1", "t1", "A", "snake"), gp("s2", "t2", "A", "snake")],
+      pieces: { s1: [at(4, 5), at(3, 5), at(2, 5)], s2: [at(8, 8), at(8, 7), at(8, 6)] },
+      moves: [mv("s1", at(5, 5)), mv("s2", at(8, 9))],
+      turn: { playerHealth: { s1: 1, s2: 100 } },
+    })
+
+    expect(next.alivePlayers).toEqual(["s2"])
+    expect(next.deaths.s1).toEqual({ cell: at(5, 5), subStep: 1, cause: "exhaustion" })
+  })
+
+  it("food further along a ray is still no rescue — the unit never reaches it", () => {
+    const next = play({
+      players: [gp("t1", "t1", "A", "rook"), gp("t2", "t2", "A", "king")],
+      pieces: { t1: [at(1, 5)], t2: [at(9, 9)] },
+      moves: [mv("t1", at(5, 5))],
+      turn: { food: [at(5, 5)], playerHealth: { t1: 2, t2: 100 } },
+    })
+
+    expect(next.alivePlayers).toEqual(["t2"])
+    expect(next.deaths.t1).toEqual({ cell: at(3, 5), subStep: 2, cause: "exhaustion" })
+    expect(next.food).toEqual([at(5, 5)])
+  })
+
+  it("a hazard dose that empties a unit is a hazard exhaustion, not a movement one", () => {
+    const next = play({
+      players: [gp("t1", "t1", "A", "rook"), gp("t2", "t2", "A", "king")],
+      pieces: { t1: [at(1, 5)], t2: [at(9, 9)] },
+      moves: [mv("t1", at(9, 5))],
+      turn: { hazards: [at(4, 5)], playerHealth: { t1: 20, t2: 100 } },
+      setup: { hazardDamage: 30 },
+    })
+
+    expect(next.deaths.t1).toEqual({ cell: at(4, 5), subStep: 3, cause: "hazard" })
+  })
+
+  it("and food on the hazard cell brings it back, hazard or not", () => {
+    const next = play({
+      players: [gp("t1", "t1", "A", "rook"), gp("t2", "t2", "A", "king")],
+      pieces: { t1: [at(1, 5)], t2: [at(9, 9)] },
+      moves: [mv("t1", at(9, 5))],
+      turn: {
+        hazards: [at(4, 5)],
+        food: [at(4, 5)],
+        playerHealth: { t1: 20, t2: 100 },
+      },
+      setup: { hazardDamage: 30 },
+    })
+
+    expect(next.alivePlayers.sort()).toEqual(["t1", "t2"])
+    expect(next.playerHealth.t1).toBe(100)
+    expect(next.deaths).toEqual({})
+    expect(next.clashes.find((c) => c.kind === "hazard")!.victimIDs).toEqual([])
+  })
+})
+
+describe("severs: the cut lands only when the turn is over", () => {
+  // The snake's post-move body is [(5,2),(5,3),(5,4),(5,5),(5,6)].
+  const severedSnake = {
+    body: [at(5, 3), at(5, 4), at(5, 5), at(5, 6), at(5, 7)],
+    head: at(5, 2),
+  }
+
+  it("a severed segment still blocks a later arrival, and the truncation shows only at end of turn", () => {
+    const next = play({
+      players: [
+        gp("s", "t1", "A", "snake"),
+        gp("cutter", "t2", "A", "rook"),
+        gp("late", "t2", "B", "rook"),
+      ],
+      pieces: { s: severedSnake.body, cutter: [at(3, 3)], late: [at(1, 6)] },
+      moves: [mv("s", severedSnake.head), mv("cutter", at(9, 3)), mv("late", at(9, 6))],
+      turn: { playerInvulnerabilityLevel: { s: 0, cutter: 1, late: 0 } },
+    })
+
+    // The cutter bites at (5,3) on sub-step 2 and capture-stops there.
+    expect(next.playerPieces.cutter).toEqual([at(5, 3)])
+    const sever = next.clashes.find((c) => c.kind === "sever")
+    expect(sever).toMatchObject({
+      index: at(5, 3),
+      subStep: 2,
+      playerIDs: ["cutter", "s"],
+      victimIDs: [],
+      survivorID: "cutter",
+      reason: REASON.sever,
+    })
+
+    // (5,6) is inside the severed run, and it STILL kills the rook that
+    // reaches it on sub-step 4 — the cut is not applied until the turn ends.
+    expect(next.deaths.late).toEqual({ cell: at(5, 6), subStep: 4, cause: "bodyBlock" })
+    expect(
+      next.clashes.some((c) => c.index === at(5, 6) && c.kind === "bodyBlock")
+    ).toBe(true)
+
+    // Only now: the snake is truncated, and the cut cells go on the wire.
+    expect(next.alivePlayers.sort()).toEqual(["cutter", "s"])
+    expect(next.playerPieces.s).toEqual([severedSnake.head])
+    expect(next.severedCells).toEqual({
+      s: [at(5, 3), at(5, 4), at(5, 5), at(5, 6)],
+    })
+  })
+
+  it("two severs on one owner: the lowest cut wins, and both severers capture-stop", () => {
+    // Both rooks bite on the same sub-step, at segments 3 and 1. Whichever
+    // order the roster puts them in, the deeper bite is the one that lands.
+    const next = play({
+      players: [
+        gp("s", "t1", "A", "snake"),
+        gp("deep", "t2", "A", "rook"),
+        gp("shallow", "t2", "B", "rook"),
+      ],
+      pieces: { s: severedSnake.body, deep: [at(1, 3)], shallow: [at(1, 5)] },
+      moves: [mv("s", severedSnake.head), mv("deep", at(9, 3)), mv("shallow", at(9, 5))],
+      turn: { playerInvulnerabilityLevel: { s: 0, deep: 1, shallow: 1 } },
+    })
+
+    expect(next.clashes.filter((c) => c.kind === "sever")).toHaveLength(2)
+    expect(next.playerPieces.deep).toEqual([at(5, 3)])
+    expect(next.playerPieces.shallow).toEqual([at(5, 5)])
+    expect(next.playerPieces.s).toEqual([severedSnake.head])
+    expect(next.severedCells).toEqual({
+      s: [at(5, 3), at(5, 4), at(5, 5), at(5, 6)],
+    })
+  })
+
+  it("a severed owner fights the rest of the turn at its frozen start-of-turn weight", () => {
+    // The snake starts at weight 4 and is cut down to 2. A weight-3 rook
+    // reaches its head two sub-steps after the cut: judged on the frozen 4 the
+    // rook loses; judged on the live 2 it would have won.
+    const next = play({
+      players: [
+        gp("s", "t1", "A", "snake"),
+        gp("cutter", "t2", "A", "rook"),
+        gp("comer", "t3", "A", "rook"),
+      ],
+      pieces: {
+        s: [at(5, 3), at(5, 4), at(5, 5), at(5, 6)],
+        cutter: [at(3, 4)],
+        comer: stack(at(1, 2), 3),
+      },
+      moves: [mv("s", at(5, 2)), mv("cutter", at(9, 4)), mv("comer", at(9, 2))],
+      turn: { playerInvulnerabilityLevel: { s: 0, cutter: 1, comer: 0 } },
+    })
+
+    expect(next.alivePlayers.sort()).toEqual(["cutter", "s"])
+    expect(next.playerPieces.s).toEqual([at(5, 2), at(5, 3)]) // cut to weight 2
+    expect(next.severedCells).toEqual({ s: [at(5, 4), at(5, 5)] })
+    expect(next.deaths.comer).toEqual({ cell: at(5, 2), subStep: 4, cause: "contest" })
+  })
+
+  it("severing a vulnerable owner expires its allies' buffs, exactly as killing it does", () => {
+    // Parity fix: on the old chess path a piece could sever a debuffed snake
+    // without ever expiring the team's ally buffs. Now one encoding covers
+    // deaths AND surviving severed owners.
+    const next = play({
+      players: [
+        gp("s", "t1", "A", "snake"),
+        gp("ally", "t1", "B", "bishop"),
+        gp("cutter", "t2", "A", "rook"),
+      ],
+      pieces: {
+        s: [at(5, 3), at(5, 4), at(5, 5), at(5, 6)],
+        ally: [at(1, 1)],
+        cutter: [at(1, 5)],
+      },
+      moves: [mv("s", at(5, 2)), mv("cutter", at(9, 5))],
+      turn: {
+        playerInvulnerabilityLevel: { s: -1, ally: 1, cutter: 0 },
+        activeEffects: [
+          {
+            playerID: "s",
+            type: "invulnerability_debuff",
+            level: -1,
+            expiryTurn: 3,
+            sourcePlayerID: "s",
+          },
+          {
+            playerID: "ally",
+            type: "invulnerability_buff",
+            level: 1,
+            expiryTurn: 3,
+            sourcePlayerID: "s",
+          },
+        ],
+      },
+      setup: { invulnerabilityPotionEnabled: true, invulnerabilityPotionSpawnRate: 0 },
+    })
+
+    expect(next.clashes.some((c) => c.kind === "sever")).toBe(true)
+    expect(next.alivePlayers.sort()).toEqual(["ally", "cutter", "s"])
+    expect(next.playerInvulnerabilityLevel).toEqual({ s: -1, ally: 0, cutter: 0 })
+    expect(next.activeEffects).toEqual([
+      {
+        playerID: "s",
+        type: "invulnerability_debuff",
+        level: -1,
+        expiryTurn: 3,
+        sourcePlayerID: "s",
+      },
+    ])
+  })
+})
+
+describe("snake-only games run the same engine", () => {
+  const bystanders = {
+    sb1: [at(2, 2), at(2, 3), at(2, 4)],
+    sb2: [at(8, 8), at(8, 7), at(8, 6)],
+  }
+  const bystanderMoves = [mv("sb1", at(3, 2)), mv("sb2", at(9, 8))]
+
+  // INVERTED. The old single-pass snake engine had no edge rule at all: two
+  // length-1 snakes trading cells slid straight through one another. Length-1
+  // snakes are reachable in ordinary play — severing bottoms out there.
+  it("two length-1 snakes trading cells now contest the edge and both die", () => {
+    const next = play({
+      players: [
+        gp("s1", "t1", "A", "snake"),
+        gp("s2", "t2", "A", "snake"),
+        gp("sb1", "t1", "B", "snake"),
+        gp("sb2", "t2", "B", "snake"),
+      ],
+      pieces: { s1: [at(5, 5)], s2: [at(6, 5)], ...bystanders },
+      moves: [mv("s1", at(6, 5)), mv("s2", at(5, 5)), ...bystanderMoves],
+    })
+
+    expect(next.alivePlayers.sort()).toEqual(["sb1", "sb2"])
+    expect(next.deaths.s1).toEqual({ cell: at(5, 5), subStep: 1, cause: "edge" })
+    expect(next.deaths.s2).toEqual({ cell: at(6, 5), subStep: 1, cause: "edge" })
+    expect(next.moves.s1).toBe(at(5, 5))
+    expect(next.moves.s2).toBe(at(6, 5))
+    // Piece-only wire fields stay off in a snake-only game.
+    expect(next.unitTypes).toBeUndefined()
+    expect(next.paths).toBeUndefined()
+  })
+
+  it("the higher tier wins the edge and completes into the loser's cell", () => {
+    const next = play({
+      players: [
+        gp("s1", "t1", "A", "snake"),
+        gp("s2", "t2", "A", "snake"),
+        gp("sb1", "t1", "B", "snake"),
+        gp("sb2", "t2", "B", "snake"),
+      ],
+      pieces: { s1: [at(5, 5)], s2: [at(6, 5)], ...bystanders },
+      moves: [mv("s1", at(6, 5)), mv("s2", at(5, 5)), ...bystanderMoves],
+      turn: { playerInvulnerabilityLevel: { s1: 1, s2: 0, sb1: 0, sb2: 0 } },
+    })
+
+    expect(next.alivePlayers.sort()).toEqual(["s1", "sb1", "sb2"])
+    expect(next.playerPieces.s1).toEqual([at(6, 5)])
+    expect(next.deaths.s2).toEqual({ cell: at(6, 5), subStep: 1, cause: "edge" })
+    const clash = next.clashes.find((c) => c.kind === "edge")
+    expect(clash).toMatchObject({
+      index: at(6, 5),
+      playerIDs: ["s1", "s2"],
+      victimIDs: ["s2"],
+      survivorID: "s1",
+      reason: REASON.tier,
+    })
+  })
+
+  // INVERTED. There is no trail exemption: two length-2 snakes exchanging
+  // heads contest the edge like anything else, and frozen WEIGHT decides it.
+  it("two length-2 snakes exchanging heads contest the edge, and weight decides", () => {
+    const next = play({
+      players: [
+        gp("s1", "t1", "A", "snake"),
+        gp("s2", "t2", "A", "snake"),
+        gp("sb1", "t1", "B", "snake"),
+        gp("sb2", "t2", "B", "snake"),
+      ],
+      pieces: {
+        s1: [at(5, 5), at(4, 5), at(3, 5)], // weight 3
+        s2: [at(6, 5), at(7, 5)], // weight 2
+        ...bystanders,
+      },
+      moves: [mv("s1", at(6, 5)), mv("s2", at(5, 5)), ...bystanderMoves],
+    })
+
+    expect(next.alivePlayers.sort()).toEqual(["s1", "sb1", "sb2"])
+    expect(next.playerPieces.s1).toEqual([at(6, 5), at(5, 5), at(4, 5)])
+    expect(next.deaths.s2).toEqual({ cell: at(6, 5), subStep: 1, cause: "edge" })
+    expect(next.clashes.find((c) => c.kind === "edge")).toMatchObject({
+      index: at(6, 5),
+      victimIDs: ["s2"],
+      survivorID: "s1",
+      reason: REASON.weight,
+    })
+  })
+})
+
+describe("the wire the engine emits", () => {
+  it("carries deaths, severedCells and typed clash records", () => {
+    const next = play({
+      players: [
+        gp("s", "t1", "A", "snake"),
+        gp("cutter", "t2", "A", "rook"),
+        gp("victim", "t2", "B", "rook"),
+      ],
+      pieces: {
+        s: [at(5, 3), at(5, 4), at(5, 5), at(5, 6)],
+        cutter: [at(1, 4)],
+        victim: [at(4, 2)],
+      },
+      moves: [mv("s", at(5, 2)), mv("cutter", at(9, 4)), mv("victim", at(5, 2))],
+      turn: { playerInvulnerabilityLevel: { s: 0, cutter: 1, victim: 0 } },
+    })
+
+    // The king walks onto the snake's new head and loses on weight.
+    expect(next.deaths).toEqual({
+      victim: { cell: at(5, 2), subStep: 1, cause: "contest" },
+    })
+    expect(next.severedCells).toEqual({ s: [at(5, 4), at(5, 5)] })
+
+    next.clashes.forEach((clash) => {
+      expect(typeof clash.index).toBe("number")
+      expect(typeof clash.subStep).toBe("number")
+      expect(typeof clash.kind).toBe("string")
+      expect(Array.isArray(clash.playerIDs)).toBe(true)
+      expect(Array.isArray(clash.victimIDs)).toBe(true)
+      // Victims are always a subset of the units the record names.
+      clash.victimIDs.forEach((id) => expect(clash.playerIDs).toContain(id))
+      if (clash.survivorID) expect(clash.playerIDs).toContain(clash.survivorID)
+    })
+
+    // Every dead unit's applied move is the cell it died on.
+    Object.entries(next.deaths).forEach(([id, death]) => {
+      expect(next.moves[id]).toBe(death.cell)
+    })
+  })
+
+  it("drops severedCells from a turn where nothing was cut", () => {
+    const next = play({
+      players: [gp("t1", "t1", "A", "rook"), gp("t2", "t2", "A", "king")],
+      pieces: { t1: [at(1, 5)], t2: [at(9, 9)] },
+      moves: [mv("t1", at(4, 5))],
+    })
+
+    expect(next.severedCells).toBeUndefined()
+    expect(next.deaths).toEqual({})
+  })
+})
+
+describe("pawn rotation is signalling, not movement", () => {
+  // The interior-bounds check used to reject the staged square before the
+  // grammar ever reached the rotation branch, so a pawn backed against a wall
+  // silently lost the ability to turn that way. Rotation never enters the
+  // square, so it is legal wherever the side square falls.
+  it("a pawn against the wall may still rotate toward it", () => {
+    const next = play({
+      players: [gp("p", "t1", "A", "pawn"), gp("k", "t2", "A", "king")],
+      pieces: { p: [at(1, 5)], k: [at(8, 8)] },
+      moves: [mv("p", at(0, 5))], // the side square is on the perimeter wall
+      turn: { orientation: { p: { dx: 0, dy: 1 }, k: { dx: 1, dy: 0 } } },
+    })
+
+    expect(next.orientation.p).toEqual({ dx: -1, dy: 0 })
+    expect(next.playerPieces.p).toEqual([at(1, 5)])
+    expect(next.moves.p).toBe(at(1, 5))
+    expect(next.playerHealth.p).toBe(100)
+  })
+
+  it("but a pawn still may not STEP into a wall", () => {
+    const next = play({
+      players: [gp("p", "t1", "A", "pawn"), gp("k", "t2", "A", "king")],
+      pieces: { p: [at(1, 5)], k: [at(8, 8)] },
+      moves: [mv("p", at(0, 5))], // now the forward square: illegal, so it holds
+      turn: { orientation: { p: { dx: -1, dy: 0 }, k: { dx: 1, dy: 0 } } },
+    })
+
+    expect(next.playerPieces.p).toEqual([at(1, 5)])
+    expect(next.orientation.p).toEqual({ dx: -1, dy: 0 })
+    expect(next.playerHealth.p).toBe(100)
+  })
+})
+
+// Every adjudication reads the post-advance snapshot and the frozen
+// tier/weight only, so the turn cannot depend on the order units happen to sit
+// in the roster. Both scenarios below raced under the old engines: one on when
+// a dead body vacated its cell, the other on whose sever landed first.
+describe("determinism under roster permutation", () => {
+  it("the dead-body race: who reaches a corpse first cannot change the result", () => {
+    agreesUnderPermutation({
+      players: [
+        gp("k1", "t1", "A", "rook"),
+        gp("k2", "t2", "A", "rook"),
+        gp("light", "t1", "B", "rook"),
+        gp("heavy", "t2", "B", "rook"),
+      ],
+      pieces: {
+        k1: stack(at(4, 5), 4),
+        k2: stack(at(6, 5), 4),
+        light: stack(at(2, 5), 3),
+        heavy: stack(at(9, 5), 6),
+      },
+      moves: [
+        mv("k1", at(5, 5)),
+        mv("k2", at(5, 5)),
+        mv("light", at(9, 5)),
+        mv("heavy", at(1, 5)),
+      ],
+    })
+  })
+
+  it("the mid-loop sever race: two heads on two segments of one snake", () => {
+    agreesUnderPermutation({
+      players: [
+        gp("s", "t1", "A", "snake"),
+        gp("deep", "t2", "A", "rook"),
+        gp("shallow", "t2", "B", "rook"),
+        gp("comer", "t3", "A", "rook"),
+      ],
+      pieces: {
+        s: [at(5, 3), at(5, 4), at(5, 5), at(5, 6), at(5, 7)],
+        deep: [at(1, 3)],
+        shallow: [at(1, 5)],
+        comer: stack(at(1, 2), 4),
+      },
+      moves: [
+        mv("s", at(5, 2)),
+        mv("deep", at(9, 3)),
+        mv("shallow", at(9, 5)),
+        mv("comer", at(9, 2)),
+      ],
+      turn: {
+        playerInvulnerabilityLevel: { s: 0, deep: 1, shallow: 1, comer: 0 },
+      },
+    })
+  })
+})
+
+// CHARACTERIZATION, not new rules. Off-parity snakes — spawned on opposite
+// square colours — have heads that can meet through an EDGE but can never
+// co-arrive on one cell. The legacy engine had no rule for a snake-vs-snake
+// edge meeting at all: the two heads simply passed through each other. Under
+// the unified engine the edge rule is uniform — heads that exchange through
+// one edge contest it, trail or no trail — and this block pins what falls out.
+describe("off-parity snakes", () => {
+  const bystanders = {
+    sb1: [at(2, 2), at(2, 3), at(2, 4)],
+    sb2: [at(8, 8), at(8, 7), at(8, 6)],
+  }
+  const bystanderMoves = [mv("sb1", at(3, 2)), mv("sb2", at(9, 8))]
+  const bystanderPlayers = [
+    gp("sb1", "t3", "A", "snake"),
+    gp("sb2", "t4", "A", "snake"),
+  ]
+
+  /** s1 sits on (5,5), s2 on (6,5): adjacent heads, one shared edge. */
+  const faceOff = (
+    s1Body: number[],
+    s2Body: number[],
+    s2Target: number,
+    turn: Partial<Turn> = {},
+    setup: Partial<StartedGameSetup> = {}
+  ): Turn =>
+    play({
+      players: [
+        gp("s1", "t1", "A", "snake"),
+        gp("s2", "t2", "A", "snake"),
+        ...bystanderPlayers,
+      ],
+      pieces: { s1: s1Body, s2: s2Body, ...bystanders },
+      moves: [mv("s1", at(6, 5)), mv("s2", s2Target), ...bystanderMoves],
+      turn,
+      setup,
+    })
+
+  // 1. A head-to-head exchange, decided on frozen weight. Equal weight leaves
+  // nobody standing, and each is squashed against its OWN neck — never on the
+  // cell it was trying to reach.
+  it("(1) equal tier and weight, both length 2: an edge deadlock at their own head cells", () => {
+    const next = faceOff([at(5, 5), at(4, 5)], [at(6, 5), at(7, 5)], at(5, 5))
+
+    expect(next.alivePlayers.sort()).toEqual(["sb1", "sb2"])
+    expect(next.deaths).toEqual({
+      s1: { cell: at(5, 5), subStep: 1, cause: "edge" },
+      s2: { cell: at(6, 5), subStep: 1, cause: "edge" },
+    })
+    // One record per cell, each naming both units and its own victim, neither
+    // claiming a survivor.
+    const edges = next.clashes.filter((c) => c.kind === "edge")
+    expect(edges.map((c) => c.index)).toEqual([at(5, 5), at(6, 5)])
+    edges.forEach((c) => {
+      expect(c.playerIDs).toEqual(["s1", "s2"])
+      expect(c.reason).toBe(REASON.tie)
+      expect(c.survivorID).toBeUndefined()
+    })
+    expect(edges[0].victimIDs).toEqual(["s1"])
+    expect(edges[1].victimIDs).toEqual(["s2"])
+    expect(next.moves.s1).toBe(at(5, 5))
+    expect(next.moves.s2).toBe(at(6, 5))
+  })
+
+  it("(1b) unequal weight: the heavier snake completes the step, the lighter is squashed at home", () => {
+    const next = faceOff(
+      [at(5, 5), at(4, 5), at(3, 5)], // weight 3
+      [at(6, 5), at(7, 5)], // weight 2
+      at(5, 5)
+    )
+
+    expect(next.alivePlayers.sort()).toEqual(["s1", "sb1", "sb2"])
+    expect(next.playerPieces.s1).toEqual([at(6, 5), at(5, 5), at(4, 5)])
+    expect(next.deaths).toEqual({
+      s2: { cell: at(6, 5), subStep: 1, cause: "edge" },
+    })
+    expect(next.clashes.find((c) => c.kind === "edge")).toMatchObject({
+      index: at(6, 5),
+      playerIDs: ["s1", "s2"],
+      victimIDs: ["s2"],
+      survivorID: "s1",
+      reason: REASON.weight,
+    })
+  })
+
+  // 2. Nothing special about a length-1 snake any more: it is just the lighter
+  // side of the same weight contest. What IS particular to it is what it
+  // leaves behind — its only cell was the tail it shed, so its corpse owns no
+  // cells at all. It still died somewhere, and the wire still says where.
+  it("(2) length 2 vs length 1: the same weight contest, and the loser owns nothing", () => {
+    const next = faceOff([at(5, 5), at(4, 5)], [at(6, 5)], at(5, 5))
+
+    expect(next.alivePlayers.sort()).toEqual(["s1", "sb1", "sb2"])
+    expect(next.playerPieces.s1).toEqual([at(6, 5), at(5, 5)]) // completed the step
+    expect(next.playerPieces.s2).toBeUndefined()
+    expect(next.deaths).toEqual({
+      s2: { cell: at(6, 5), subStep: 1, cause: "edge" },
+    })
+    expect(next.moves.s2).toBe(at(6, 5))
+    expect(next.clashes.find((c) => c.kind === "edge")).toMatchObject({
+      index: at(6, 5),
+      victimIDs: ["s2"],
+      survivorID: "s1",
+      reason: REASON.weight,
+    })
+  })
+
+  // 3. Both leave nothing behind, so this is the one genuine snake-vs-snake
+  // EDGE contest — the case the legacy engine had no rule for.
+  it("(3a) two length-1 snakes, equal tier: an edge deadlock, one record per cell", () => {
+    const next = faceOff([at(5, 5)], [at(6, 5)], at(5, 5))
+
+    expect(next.alivePlayers.sort()).toEqual(["sb1", "sb2"])
+    expect(next.deaths).toEqual({
+      s1: { cell: at(5, 5), subStep: 1, cause: "edge" },
+      s2: { cell: at(6, 5), subStep: 1, cause: "edge" },
+    })
+    const edges = next.clashes.filter((c) => c.kind === "edge")
+    expect(edges.map((c) => c.index)).toEqual([at(5, 5), at(6, 5)])
+    edges.forEach((c) => {
+      expect(c.playerIDs).toEqual(["s1", "s2"])
+      expect(c.reason).toBe(REASON.tie)
+      expect(c.survivorID).toBeUndefined()
+    })
+    expect(edges[0].victimIDs).toEqual(["s1"])
+    expect(edges[1].victimIDs).toEqual(["s2"])
+  })
+
+  it("(3b) two length-1 snakes, unequal tier: the winner takes the loser's cell and the corpse lands under it", () => {
+    const next = faceOff([at(5, 5)], [at(6, 5)], at(5, 5), {
+      playerInvulnerabilityLevel: { s1: 1, s2: 0, sb1: 0, sb2: 0 },
+    })
+
+    expect(next.alivePlayers.sort()).toEqual(["s1", "sb1", "sb2"])
+    expect(next.playerPieces.s1).toEqual([at(6, 5)])
+    expect(next.deaths).toEqual({
+      s2: { cell: at(6, 5), subStep: 1, cause: "edge" },
+    })
+    // Winner and loser both report (6,5): the loser never crossed, and the
+    // winner completed into the cell the loser was standing on.
+    expect(next.moves.s1).toBe(at(6, 5))
+    expect(next.moves.s2).toBe(at(6, 5))
+    expect(next.clashes.find((c) => c.kind === "edge")).toMatchObject({
+      index: at(6, 5),
+      victimIDs: ["s2"],
+      survivorID: "s1",
+      reason: REASON.tier,
+    })
+  })
+
+  // 4. Tier outranks weight, and the exchange is a PURE edge contest: no sever
+  // fires for it, because the two heads never reach each other's bodies.
+  it("(4) higher tier vs lower tier, both length 2: a tier win, and no sever", () => {
+    const next = faceOff([at(5, 5), at(4, 5)], [at(6, 5), at(7, 5)], at(5, 5), {
+      playerInvulnerabilityLevel: { s1: 1, s2: 0, sb1: 0, sb2: 0 },
+    })
+
+    expect(next.alivePlayers.sort()).toEqual(["s1", "sb1", "sb2"])
+    expect(next.playerPieces.s1).toEqual([at(6, 5), at(5, 5)])
+    expect(next.deaths).toEqual({
+      s2: { cell: at(6, 5), subStep: 1, cause: "edge" },
+    })
+    expect(next.clashes.map((c) => c.kind)).toEqual(["edge"])
+    expect(next.clashes[0]).toMatchObject({
+      index: at(6, 5),
+      victimIDs: ["s2"],
+      survivorID: "s1",
+      reason: REASON.tier,
+    })
+    expect(next.severedCells).toBeUndefined()
+  })
+
+  it("(4) the same outcome under any roster order", () => {
+    agreesUnderPermutation({
+      players: [
+        gp("s1", "t1", "A", "snake"),
+        gp("s2", "t2", "A", "snake"),
+        ...bystanderPlayers,
+      ],
+      pieces: {
+        s1: [at(5, 5), at(4, 5)],
+        s2: [at(6, 5), at(7, 5)],
+        ...bystanders,
+      },
+      moves: [mv("s1", at(6, 5)), mv("s2", at(5, 5)), ...bystanderMoves],
+      turn: { playerInvulnerabilityLevel: { s1: 1, s2: 0, sb1: 0, sb2: 0 } },
+    })
+  })
+
+  // 5. You cannot chase a head: by the time the chaser arrives, the cell the
+  // head left is the fleeing snake's neck.
+  it("(5a) chasing a fleeing head at equal tier walks into its neck and dies", () => {
+    const next = faceOff([at(5, 5), at(4, 5)], [at(6, 5), at(6, 6)], at(7, 5))
+
+    expect(next.alivePlayers.sort()).toEqual(["s2", "sb1", "sb2"])
+    expect(next.playerPieces.s2).toEqual([at(7, 5), at(6, 5)])
+    expect(next.deaths).toEqual({
+      s1: { cell: at(6, 5), subStep: 1, cause: "bodyBlock" },
+    })
+    expect(next.clashes.find((c) => c.kind === "bodyBlock")).toMatchObject({
+      index: at(6, 5),
+      victimIDs: ["s1"],
+      survivorID: "s2",
+    })
+  })
+
+  it("(5b) a higher-tier chaser cuts the neck instead, and both live", () => {
+    const next = faceOff([at(5, 5), at(4, 5)], [at(6, 5), at(6, 6)], at(7, 5), {
+      playerInvulnerabilityLevel: { s1: 1, s2: 0, sb1: 0, sb2: 0 },
+    })
+
+    expect(next.alivePlayers.sort()).toEqual(["s1", "s2", "sb1", "sb2"])
+    expect(next.deaths).toEqual({})
+    expect(next.playerPieces.s1).toEqual([at(6, 5), at(5, 5)])
+    // The fleeing snake is cut down to its head — and a length-1 snake is
+    // exactly the one that contests edges next turn.
+    expect(next.playerPieces.s2).toEqual([at(7, 5)])
+    expect(next.severedCells).toEqual({ s2: [at(6, 5)] })
+  })
+
+  // 6. Collisions adjudicate strictly before health, so a hazard on the far
+  // side of the edge never touches a unit that never crossed it.
+  it("(6a) an edge loser is not dosed by a hazard on the cell it never reached", () => {
+    const next = faceOff(
+      [at(5, 5), at(4, 5)],
+      [at(6, 5), at(7, 5)],
+      at(5, 5),
+      {
+        hazards: [at(6, 5)],
+        playerHealth: { s1: 10, s2: 100, sb1: 100, sb2: 100 },
+      },
+      { hazardDamage: 30 }
+    )
+
+    // The deadlock squashes s1 at its own head cell — the hazard sits on the
+    // cell it was aiming at, and it is charged nothing for it.
+    expect(next.deaths).toEqual({
+      s1: { cell: at(5, 5), subStep: 1, cause: "edge" },
+      s2: { cell: at(6, 5), subStep: 1, cause: "edge" },
+    })
+    expect(next.clashes.every((c) => c.kind === "edge")).toBe(true)
+    expect(next.clashes.some((c) => c.kind === "hazard")).toBe(false)
+  })
+
+  it("(6b) the edge WINNER does cross, and exhausts on the hazard it lands in", () => {
+    const next = faceOff(
+      [at(5, 5), at(4, 5)],
+      [at(6, 5), at(7, 5)],
+      at(5, 5),
+      {
+        hazards: [at(6, 5)], // deliberately foodless: nothing revives it
+        playerHealth: { s1: 10, s2: 100, sb1: 100, sb2: 100 },
+        playerInvulnerabilityLevel: { s1: 1, s2: 0, sb1: 0, sb2: 0 },
+      },
+      { hazardDamage: 30 }
+    )
+
+    expect(next.alivePlayers.sort()).toEqual(["sb1", "sb2"])
+    expect(next.deaths).toEqual({
+      s1: { cell: at(6, 5), subStep: 1, cause: "hazard" },
+      s2: { cell: at(6, 5), subStep: 1, cause: "edge" },
+    })
+    // It really did win the edge, and the record says so: exhaustion is a
+    // separate, later verdict, so it does not retract the survivorID the way a
+    // simultaneous collision death does.
+    expect(next.clashes.find((c) => c.kind === "edge")).toMatchObject({
+      index: at(6, 5),
+      victimIDs: ["s2"],
+      survivorID: "s1",
+    })
+    expect(next.clashes.find((c) => c.kind === "hazard")).toMatchObject({
+      index: at(6, 5),
+      victimIDs: ["s1"],
+    })
+  })
+
+  it("(6c) put food on that same hazard cell and the winner walks away alive", () => {
+    const next = faceOff(
+      [at(5, 5), at(4, 5)],
+      [at(6, 5), at(7, 5)],
+      at(5, 5),
+      {
+        hazards: [at(6, 5)],
+        food: [at(6, 5)],
+        playerHealth: { s1: 10, s2: 100, sb1: 100, sb2: 100 },
+        playerInvulnerabilityLevel: { s1: 1, s2: 0, sb1: 0, sb2: 0 },
+      },
+      { hazardDamage: 30 }
+    )
+
+    expect(next.alivePlayers.sort()).toEqual(["s1", "sb1", "sb2"])
+    expect(next.playerHealth.s1).toBe(100)
+    expect(next.playerPieces.s1).toEqual([at(6, 5), at(5, 5), at(5, 5)]) // ate and grew
+    expect(next.deaths).toEqual({
+      s2: { cell: at(6, 5), subStep: 1, cause: "edge" },
+    })
+    expect(next.clashes.find((c) => c.kind === "hazard")!.victimIDs).toEqual([])
+  })
+
+  // A piece exchanging heads with a trail unit is the same contest: no
+  // friendly geometry, no trail exemption, just frozen tier then weight.
+  it("(7) a piece exchanging heads with a length-2 snake is an ordinary edge contest", () => {
+    const heavierPiece = play({
+      players: [
+        gp("s", "t1", "A", "snake"),
+        gp("r", "t2", "A", "rook"),
+        ...bystanderPlayers,
+      ],
+      pieces: {
+        s: [at(5, 5), at(4, 5)],
+        r: [at(6, 5), at(6, 5), at(6, 5)],
+        ...bystanders,
+      },
+      moves: [mv("s", at(6, 5)), mv("r", at(1, 5)), ...bystanderMoves],
+    })
+
+    expect(heavierPiece.deaths.s).toEqual({
+      cell: at(5, 5),
+      subStep: 1,
+      cause: "edge",
+    })
+    expect(heavierPiece.playerPieces.r).toEqual([at(5, 5), at(5, 5), at(5, 5)])
+    // The winner capture-stops: the rest of its ray is abandoned.
+    expect(heavierPiece.paths?.r).toEqual([at(5, 5)])
+
+    const heavierSnake = play({
+      players: [
+        gp("s", "t1", "A", "snake"),
+        gp("r", "t2", "A", "rook"),
+        ...bystanderPlayers,
+      ],
+      pieces: {
+        s: [at(5, 5), at(4, 5), at(3, 5), at(2, 5)],
+        r: [at(6, 5)],
+        ...bystanders,
+      },
+      moves: [mv("s", at(6, 5)), mv("r", at(1, 5)), ...bystanderMoves],
+    })
+
+    expect(heavierSnake.deaths.r).toEqual({
+      cell: at(6, 5),
+      subStep: 1,
+      cause: "edge",
+    })
+    expect(heavierSnake.playerPieces.s).toEqual([at(6, 5), at(5, 5), at(4, 5), at(3, 5)])
+    expect(heavierSnake.paths?.r).toBeUndefined() // it entered nothing
+  })
+})

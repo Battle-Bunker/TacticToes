@@ -43,6 +43,72 @@ export interface ProcessTurnResult {
 const DEFAULT_MMR = 1000
 const MIN_MMR = 0 // Minimum MMR value
 
+/** One staged privateMoves document: its id and the move it carries. */
+export interface StagedMove {
+  id: string
+  move: Move
+}
+
+/** The commit timestamp of a staged move, or null if it carries none. */
+const stagedAt = (move: Move): Timestamp | null =>
+  move.timestamp instanceof Timestamp ? move.timestamp : null
+
+/**
+ * Newest staged write first — a TOTAL order, so the winner never depends on
+ * the order Firestore happened to return the documents in.
+ *
+ * 1. Commit timestamp at full Firestore precision (seconds, then nanoseconds).
+ *    `Timestamp.toMillis()` floors, so ordering on it alone left two revisions
+ *    committed inside the SAME millisecond tied — and a tie fell through to
+ *    the query's implicit `__name__` ordering over random document ids, which
+ *    has nothing to do with which write actually landed last.
+ * 2. Document id ascending, as the final tie-break. Timestamps are only ever
+ *    exactly equal when the two writes shared a commit — i.e. one writeBatch —
+ *    and then neither write is later than the other, so the choice is
+ *    arbitrary by nature. It is pinned here purely so it is deterministic and
+ *    reproducible. Writing at most one document per player per batch keeps the
+ *    case unreachable.
+ */
+const newestStagedFirst = (a: StagedMove, b: StagedMove): number => {
+  const at = stagedAt(a.move)
+  const bt = stagedAt(b.move)
+  const seconds = (bt?.seconds ?? 0) - (at?.seconds ?? 0)
+  if (seconds !== 0) return seconds
+  const nanos = (bt?.nanoseconds ?? 0) - (at?.nanoseconds ?? 0)
+  if (nanos !== 0) return nanos
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0
+}
+
+/**
+ * The move each player actually gets: their newest staged write committed at
+ * or before the turn's `endTime`.
+ *
+ * The deadline comparison is in whole milliseconds — `toMillis()` floors both
+ * sides — so a write that lands inside the millisecond `endTime` falls in
+ * still counts. Everything later is dropped, whatever the client believed.
+ * A move carrying no usable timestamp sorts as the epoch: it always passes the
+ * deadline and always loses to a timestamped write from the same player.
+ *
+ * Players with nothing staged are simply absent from the result; resolution
+ * substitutes each unit's default action for them (see engine/resolveTurn.ts).
+ */
+export function selectLatestMoves(
+  staged: StagedMove[],
+  endTime: Timestamp
+): Move[] {
+  const latestAllowedTime = endTime.toMillis()
+
+  return staged
+    .filter((s) => (stagedAt(s.move)?.toMillis() ?? 0) <= latestAllowedTime)
+    .sort(newestStagedFirst)
+    .reduce((acc: Move[], s: StagedMove) => {
+      if (!acc.find((m) => m.playerID === s.move.playerID)) {
+        acc.push(s.move)
+      }
+      return acc
+    }, [])
+}
+
 async function preparePlayerUpdates(
   transaction: Transaction,
   sessionID: string,
@@ -250,37 +316,18 @@ export async function processTurn(
       return { newTurnCreated: false }
     }
 
-    // Process moves and get next turn
-    const movesThisRound: Move[] = movesSnapshot.docs.map(
-      (doc) => doc.data() as Move
-    )
-    const latestAllowedTime = currentTurn.endTime.toMillis()
+    // Process moves and get next turn. Every write a player made for this turn
+    // is here — the collection is append-only, so a revision is another
+    // document, never an edit of the first.
+    const stagedThisRound: StagedMove[] = movesSnapshot.docs.map((doc) => ({
+      id: doc.id,
+      move: doc.data() as Move,
+    }))
 
-    const latestMoves: Move[] = movesThisRound
-      .filter((move) => {
-        const moveTime =
-          move.timestamp instanceof Timestamp
-            ? move.timestamp.toMillis()
-            : 0
-        return moveTime <= latestAllowedTime
-      })
-      .sort((a, b) => {
-        const aTime =
-          a.timestamp instanceof Timestamp
-            ? a.timestamp.toMillis()
-            : 0
-        const bTime =
-          b.timestamp instanceof Timestamp
-            ? b.timestamp.toMillis()
-            : 0
-        return bTime - aTime
-      })
-      .reduce((acc: Move[], move: Move) => {
-        if (!acc.find((m) => m.playerID === move.playerID)) {
-          acc.push(move)
-        }
-        return acc
-      }, [])
+    const latestMoves: Move[] = selectLatestMoves(
+      stagedThisRound,
+      currentTurn.endTime
+    )
 
     if (!currentTurn) {
       logger.info("No current turn found for the game.", { gameID })

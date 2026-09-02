@@ -231,7 +231,23 @@ wire contract is unchanged in shape; what varies for a piece unit:
   orientation set (snake/rook/pawn: 4 orthogonals; bishop: 4
   diagonals; queen/king: 8; knight: its 8 L-offsets) with minimal angle to
   the spawn→centre vector, ties resolved uniformly at random.
-- In-flight clashes carry `subStep`, the within-turn step they happened on.
+- Every clash carries `subStep` (the within-turn step it happened on) and
+  `kind` — `contest | edge | bodyBlock | sever | hazard | exhaustion | wall |
+  self | regicide` — plus `playerIDs` (everyone involved), `victimIDs` (who
+  died at that cell) and, when there is one, `survivorID`. `reason` is
+  display text: read `kind` and the id lists, never the string.
+- `hazard` and `exhaustion` records mark a unit that ran out of health and
+  HALTED there. That is provisional death only: the unit stays on the board
+  and contests normally, and it dies of it only if it is still at or below
+  zero once the end-of-turn food phase has run — so a unit that halted on food
+  eats, recovers and lives. A fatal one names the unit in `victimIDs`; a
+  survived one leaves `victimIDs` empty, and is purely the explanation for why
+  the unit stopped short of its staged path.
+- `turn.deaths[playerID] = { cell, subStep, cause }` is the authoritative
+  registry of every unit removed this turn. It always agrees with
+  `turn.moves[playerID]` for the dead.
+- `turn.severedCells[playerID]` (present only when something was cut) lists
+  the cells a sever removed from a SURVIVING snake this turn.
 
 ### Timing semantics
 

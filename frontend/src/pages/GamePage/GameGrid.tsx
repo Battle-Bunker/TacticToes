@@ -2,7 +2,7 @@ import { Box, IconButton, Typography, Slider } from "@mui/material"
 import React, { useEffect, useMemo, useState } from "react"
 import { useGameStateContext } from "../../context/GameStateContext"
 import BoardCanvas from "../../board/BoardCanvas"
-import { clashesAtCell } from "../../board/clashes"
+import { isInspectable } from "../../board/clashes"
 import { Cell } from "../../board/renderer"
 import { turnToBoard } from "../../board/turnToBoard"
 import ClashDialog from "./ClashDialog"
@@ -46,12 +46,13 @@ const GameGrid: React.FC = () => {
     [gameState, viewedTurnIndex],
   )
 
-  // Clash squares stay clickable whether or not a death marker is drawn on
-  // them: the panel explains what happened there, and a survivor standing on
-  // the square is exactly when that explanation is worth reading. Every record
-  // the square carries is kept — one square can hold several collisions.
+  // Any square the turn's records can say something about is clickable: one
+  // that was adjudicated, one somebody died on, one cut off a snake that lived,
+  // and one the record could not account for. A survivor standing on the square
+  // is exactly when that explanation is worth reading, and one square can hold
+  // several records — the inspector keeps every one of them.
   const handleSquareClick = (cell: Cell) => {
-    if (!board || clashesAtCell(board, cell).length === 0) return
+    if (!board || !isInspectable(board, cell)) return
     setInspectedClashCell(cell)
   }
 
