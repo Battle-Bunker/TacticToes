@@ -169,14 +169,34 @@ type Outcome =
 
 const byID = (a: { id: string }, b: { id: string }): number => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
 
-/** Tier first, then frozen weight. At most one unique strict maximum survives. */
-const strictMaximum = (participants: RuntimeUnit[]): RuntimeUnit | null => {
-  const maxTier = Math.max(...participants.map((u) => u.tier))
-  const top = participants.filter((u) => u.tier === maxTier)
-  const maxWeight = Math.max(...top.map((u) => u.weight))
-  const heaviest = top.filter((u) => u.weight === maxWeight)
-  return heaviest.length === 1 ? heaviest[0] : null
-}
+/**
+ * The contest rule itself, over the only two coordinates a contest reads: the
+ * frozen tier, and then the frozen weight. Exported because it is the rule,
+ * and anything that has to ask "would this beat that" — a search pricing a
+ * cell it has not walked into yet, a partial settlement asking whether a claim
+ * could hold a cell — must ask the rule rather than restate it. Restating it
+ * is how the comparator came to exist twice.
+ */
+export const outranks = (
+  a: { readonly tier: number; readonly weight: number },
+  b: { readonly tier: number; readonly weight: number },
+): boolean => a.tier > b.tier || (a.tier === b.tier && a.weight > b.weight)
+
+/**
+ * Health spent per cell entered. A rule, not a magic number: anything that
+ * brackets a unit's health against where it might have been halted prices the
+ * difference with this.
+ */
+export const COST_PER_CELL = 1
+
+/**
+ * The unique participant that `outranks` every other, or null when the top of
+ * the pile is shared — a tie kills everyone in it. One encoding of the
+ * comparison, asked once per participant rather than restated as a pair of
+ * maxima.
+ */
+const strictMaximum = (participants: RuntimeUnit[]): RuntimeUnit | null =>
+  participants.find((u) => participants.every((o) => o === u || outranks(u, o))) ?? null
 
 /** Why the contest ended the way it did — display text only. */
 const contestReason = (participants: RuntimeUnit[], survivor: RuntimeUnit | null): string => {
@@ -513,7 +533,7 @@ export const runTurnEngine = (
 
       const cell = u.occupancy[0]
       const onHazard = hazardSet.has(cell)
-      const cost = (entered ? 1 : 0) + (onHazard ? hazardDamage : 0)
+      const cost = (entered ? COST_PER_CELL : 0) + (onHazard ? hazardDamage : 0)
       if (cost === 0) return
 
       u.health -= cost
