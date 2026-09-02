@@ -24,6 +24,7 @@ describe("engine/ is vendorable", () => {
     expect(engineFiles.sort()).toEqual([
       "moveGrammar.ts",
       "resolveTurn.ts",
+      "settleTurn.ts",
       "turnEngine.ts",
     ])
     // Exactly these, because vendoring copies the whole directory. Anything

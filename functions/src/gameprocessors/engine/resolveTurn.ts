@@ -23,11 +23,11 @@ import { EngineUnit, ExhaustionEvent, REASON, runTurnEngine } from "./turnEngine
  * file and its two neighbours import nothing outside `engine/` and
  * `@shared/types/Game`, so they can be copied wholesale into another repo.
  *
- * Deliberately NOT here, because it needs game-level state this module does
- * not carry: spawning food, hazards or potions; invulnerability potions,
- * effects and the tier changes they cause (tier is an INPUT, which already
- * captures their effect at adjudication time); the orientation rewrite;
- * pawn promotion; scoring, winners and MMR; anything Firestore.
+ * Deliberately NOT here: the end-of-turn effect bookkeeping — the ally-buff
+ * cancel and effect expiry — which reads the turn number and the effect
+ * schedule and so lives one layer up, in `settleTurn`, the module's entry
+ * point. Nor spawning food, hazards or potions; the orientation rewrite; pawn
+ * promotion; scoring, winners and MMR; anything Firestore.
  */
 
 export interface ResolveUnit {
