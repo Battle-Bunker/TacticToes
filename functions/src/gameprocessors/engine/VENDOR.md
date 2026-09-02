@@ -89,11 +89,11 @@ import { settleTurn } from "./engine/settleTurn"
 
 const settled = settleTurn({
   units: [
-    { id, type, teamID, isKing, tier, health, occupancy, orientation, stagedMove },
+    { id, type, teamID, isKing, tier, energy, occupancy, orientation, stagedMove },
     // ...one per unit alive at the start of the turn
   ],
   boardWidth, boardHeight, walls, hazards, hazardDamage, food,
-  maxHealth,          // per-kind overrides; the rest default to 100
+  maxEnergy,          // per-kind overrides; the rest default to 100
   regicideTeamIDs,    // teams configured with at least one king
   turn,               // the turn being resolved
   teamOf,             // unit id -> team id, for every configured unit
@@ -107,7 +107,7 @@ const settled = settleTurn({
 }, randomSpawner({ foodSpawnRate, potionsEnabled, potionSpawnRate, fertileTiles },
                  { next: () => Math.random() }))   // or NO_SPAWN
 
-settled.board          // survivors: final occupancy and health
+settled.board          // survivors: final occupancy and energy
 settled.deaths         // every unit removed, with cell / subStep / cause
 settled.eliminatedTeamIDs
 settled.effects        // the schedule as the turn closed
@@ -131,7 +131,7 @@ this directory exists to prevent. Read `tiers`.
 only kind change in the game, and settlement is where it happens: the kinds a
 caller sends in are the kinds the turn was played at, and `unitTypes` is the
 kinds the next turn opens with. A caller that promotes for itself has written
-the threshold, the weight-1 collapse and the queen health clamp a second time.
+the threshold, the weight-1 collapse and the queen energy clamp a second time.
 
 Promotion runs last of the unit phases, after the food phase (so a pawn that
 ate its way to the threshold promotes on that turn) and after the orientation
@@ -187,7 +187,7 @@ settled.claims   // where each held unit could be, and how strong — hoistable,
 
 **An empty ledger is a proof; a non-empty one is a work list.** With no
 entries, every modelled unit's disposition — where it went, whether it lived,
-its health, its weight, what it ate, and the game's `outcome` — is what it is
+its energy, its weight, what it ate, and the game's `outcome` — is what it is
 in every world the held units could have chosen. With entries, the entries name
 every place a world could differ and nothing else does. That property is
 established by ENUMERATION in `../settlePartial.spec.ts`: random boards with
@@ -211,7 +211,7 @@ and `unitTypes`.
 
 `turnEngine.ts` exports the two rules a caller pricing a cell it has not walked
 into needs: `outranks(a, b)` is the contest comparison itself — tier, then
-frozen weight — and `COST_PER_CELL` is what a step costs in health. Both are
+frozen weight — and `COST_PER_CELL` is what a step costs in energy. Both are
 the engine's own; restating either is how the comparator came to exist twice.
 
 **`outcome` is the end of the game, not the score of it.** It names the kind

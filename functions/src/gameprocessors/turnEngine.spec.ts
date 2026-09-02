@@ -1,7 +1,7 @@
 // The unified turn engine, at spec level. Everything here exercises rules the
 // engine owns for EVERY game: frozen tier/weight, the sub-step loop, persistent
 // collision objects (the wrestling rule), severs that keep blocking until the
-// turn ends, per-sub-step health, and the typed wire the engine emits.
+// turn ends, per-sub-step energy, and the typed wire the engine emits.
 //
 // Several of these deliberately INVERT behavior the old two-engine fork pinned.
 // Each inversion is called out where it lives.
@@ -56,7 +56,7 @@ const play = (scenario: Scenario): Turn => {
   const ids = Object.keys(scenario.pieces)
   const teamIDs = Array.from(new Set(scenario.players.map((p) => p.teamID)))
   const turn: Turn = {
-    playerHealth: Object.fromEntries(ids.map((id) => [id, 100])),
+    playerEnergy: Object.fromEntries(ids.map((id) => [id, 100])),
     startTime: Timestamp.fromMillis(0),
     endTime: Timestamp.fromMillis(5000),
     scores: Object.fromEntries(ids.map((id) => [id, scenario.pieces[id].length])),
@@ -117,7 +117,7 @@ const normalize = (turn: Turn): string => {
     sortKeys({
       alivePlayers: [...turn.alivePlayers].sort(),
       playerPieces: turn.playerPieces,
-      playerHealth: turn.playerHealth,
+      playerEnergy: turn.playerEnergy,
       scores: turn.scores,
       teamScores: turn.teamScores,
       moves: turn.moves,
@@ -188,7 +188,7 @@ describe("frozen state: nothing leaves the board mid-turn", () => {
     expect(next.playerPieces.heavy).toEqual(stack(x, 6))
     // It stopped ON the pile: the rest of its ray is abandoned.
     expect(next.paths?.heavy).toEqual([at(8, 5), at(7, 5), at(6, 5), x])
-    expect(next.playerHealth.heavy).toBe(96)
+    expect(next.playerEnergy.heavy).toBe(96)
 
     expect(next.deaths).toEqual({
       k1: { cell: x, subStep: 1, cause: "contest" },
@@ -250,12 +250,12 @@ describe("frozen state: nothing leaves the board mid-turn", () => {
   })
 })
 
-// Exhaustion — health at or below zero mid-turn — is PROVISIONAL death. It
+// Exhaustion — energy at or below zero mid-turn — is PROVISIONAL death. It
 // stops movement and nothing else: the unit halts on the cell it reached and
 // stays a live collision incumbent. Whether it kills is settled at end of
 // turn, AFTER food, and food is the only heal there is.
 describe("exhaustion is provisional death", () => {
-  // A rook with 2 health and a stack of 3 halts on the second cell of its ray.
+  // A rook with 2 energy and a stack of 3 halts on the second cell of its ray.
   const exhaustedIncumbent = (
     challengerWeight: number,
     turn: Partial<Turn> = {}
@@ -267,7 +267,7 @@ describe("exhaustion is provisional death", () => {
         comer: stack(at(7, 5), challengerWeight),
       },
       moves: [mv("dying", at(9, 5)), mv("comer", at(1, 5))],
-      turn: { playerHealth: { dying: 2, comer: 100 }, ...turn },
+      turn: { playerEnergy: { dying: 2, comer: 100 }, ...turn },
     })
 
   /** The same rook, with nobody coming to meet it. */
@@ -276,10 +276,10 @@ describe("exhaustion is provisional death", () => {
       players: [gp("dying", "t1", "A", "rook"), gp("k", "t2", "A", "king")],
       pieces: { dying: stack(at(1, 5), 3), k: [at(9, 9)] },
       moves: [mv("dying", at(9, 5))],
-      turn: { playerHealth: { dying: 2, k: 100 }, ...turn },
+      turn: { playerEnergy: { dying: 2, k: 100 }, ...turn },
     })
 
-  it("halts where the health ran out, and dies there when nothing revives it", () => {
+  it("halts where the energy ran out, and dies there when nothing revives it", () => {
     const next = undisturbed()
 
     expect(next.alivePlayers).toEqual(["k"])
@@ -304,7 +304,7 @@ describe("exhaustion is provisional death", () => {
     const next = undisturbed({ food: [at(3, 5)] })
 
     expect(next.alivePlayers.sort()).toEqual(["dying", "k"])
-    expect(next.playerHealth.dying).toBe(100)
+    expect(next.playerEnergy.dying).toBe(100)
     expect(next.playerPieces.dying).toEqual(stack(at(3, 5), 4)) // ate and grew
     expect(next.food).toEqual([])
     expect(next.deaths).toEqual({})
@@ -344,7 +344,7 @@ describe("exhaustion is provisional death", () => {
     const next = exhaustedIncumbent(2, { food: [at(3, 5)] })
 
     expect(next.alivePlayers).toEqual(["dying"])
-    expect(next.playerHealth.dying).toBe(100)
+    expect(next.playerEnergy.dying).toBe(100)
     expect(next.playerPieces.dying).toEqual(stack(at(3, 5), 4))
     expect(next.deaths).toEqual({
       comer: { cell: at(3, 5), subStep: 4, cause: "contest" },
@@ -376,22 +376,22 @@ describe("exhaustion is provisional death", () => {
       dying: { cell: at(3, 5), subStep: 4, cause: "contest" },
     })
     // The winner is the one standing on the food at end of turn, so it eats.
-    expect(next.playerHealth.comer).toBe(100)
+    expect(next.playerEnergy.comer).toBe(100)
     expect(next.playerPieces.comer).toEqual(stack(at(3, 5), 6))
   })
 
   // INVERTED against the first cut of this engine, which made exhaustion an
   // immediate death and therefore had no food rescue at all.
-  it("a trail unit at 1 health exhausts on the food cell and comes straight back", () => {
+  it("a trail unit at 1 energy exhausts on the food cell and comes straight back", () => {
     const next = play({
       players: [gp("s1", "t1", "A", "snake"), gp("s2", "t2", "A", "snake")],
       pieces: { s1: [at(4, 5), at(3, 5), at(2, 5)], s2: [at(8, 8), at(8, 7), at(8, 6)] },
       moves: [mv("s1", at(5, 5)), mv("s2", at(8, 9))],
-      turn: { food: [at(5, 5)], playerHealth: { s1: 1, s2: 100 } },
+      turn: { food: [at(5, 5)], playerEnergy: { s1: 1, s2: 100 } },
     })
 
     expect(next.alivePlayers.sort()).toEqual(["s1", "s2"])
-    expect(next.playerHealth.s1).toBe(100)
+    expect(next.playerEnergy.s1).toBe(100)
     expect(next.playerPieces.s1).toEqual([at(5, 5), at(4, 5), at(3, 5), at(3, 5)])
     expect(next.food).toEqual([])
     expect(next.deaths).toEqual({})
@@ -410,7 +410,7 @@ describe("exhaustion is provisional death", () => {
       players: [gp("s1", "t1", "A", "snake"), gp("s2", "t2", "A", "snake")],
       pieces: { s1: [at(4, 5), at(3, 5), at(2, 5)], s2: [at(8, 8), at(8, 7), at(8, 6)] },
       moves: [mv("s1", at(5, 5)), mv("s2", at(8, 9))],
-      turn: { playerHealth: { s1: 1, s2: 100 } },
+      turn: { playerEnergy: { s1: 1, s2: 100 } },
     })
 
     expect(next.alivePlayers).toEqual(["s2"])
@@ -422,7 +422,7 @@ describe("exhaustion is provisional death", () => {
       players: [gp("t1", "t1", "A", "rook"), gp("t2", "t2", "A", "king")],
       pieces: { t1: [at(1, 5)], t2: [at(9, 9)] },
       moves: [mv("t1", at(5, 5))],
-      turn: { food: [at(5, 5)], playerHealth: { t1: 2, t2: 100 } },
+      turn: { food: [at(5, 5)], playerEnergy: { t1: 2, t2: 100 } },
     })
 
     expect(next.alivePlayers).toEqual(["t2"])
@@ -435,7 +435,7 @@ describe("exhaustion is provisional death", () => {
       players: [gp("t1", "t1", "A", "rook"), gp("t2", "t2", "A", "king")],
       pieces: { t1: [at(1, 5)], t2: [at(9, 9)] },
       moves: [mv("t1", at(9, 5))],
-      turn: { hazards: [at(4, 5)], playerHealth: { t1: 20, t2: 100 } },
+      turn: { hazards: [at(4, 5)], playerEnergy: { t1: 20, t2: 100 } },
       setup: { hazardDamage: 30 },
     })
 
@@ -450,13 +450,13 @@ describe("exhaustion is provisional death", () => {
       turn: {
         hazards: [at(4, 5)],
         food: [at(4, 5)],
-        playerHealth: { t1: 20, t2: 100 },
+        playerEnergy: { t1: 20, t2: 100 },
       },
       setup: { hazardDamage: 30 },
     })
 
     expect(next.alivePlayers.sort()).toEqual(["t1", "t2"])
-    expect(next.playerHealth.t1).toBe(100)
+    expect(next.playerEnergy.t1).toBe(100)
     expect(next.deaths).toEqual({})
     expect(next.clashes.find((c) => c.kind === "hazard")!.victimIDs).toEqual([])
   })
@@ -765,7 +765,7 @@ describe("pawn rotation is signalling, not movement", () => {
     expect(next.orientation.p).toEqual({ dx: -1, dy: 0 })
     expect(next.playerPieces.p).toEqual([at(1, 5)])
     expect(next.moves.p).toBe(at(1, 5))
-    expect(next.playerHealth.p).toBe(100)
+    expect(next.playerEnergy.p).toBe(100)
   })
 
   it("but a pawn still may not STEP into a wall", () => {
@@ -778,7 +778,7 @@ describe("pawn rotation is signalling, not movement", () => {
 
     expect(next.playerPieces.p).toEqual([at(1, 5)])
     expect(next.orientation.p).toEqual({ dx: -1, dy: 0 })
-    expect(next.playerHealth.p).toBe(100)
+    expect(next.playerEnergy.p).toBe(100)
   })
 })
 
@@ -1056,7 +1056,7 @@ describe("off-parity snakes", () => {
     expect(next.severedCells).toEqual({ s2: [at(6, 5)] })
   })
 
-  // 6. Collisions adjudicate strictly before health, so a hazard on the far
+  // 6. Collisions adjudicate strictly before energy, so a hazard on the far
   // side of the edge never touches a unit that never crossed it.
   it("(6a) an edge loser is not dosed by a hazard on the cell it never reached", () => {
     const next = faceOff(
@@ -1065,7 +1065,7 @@ describe("off-parity snakes", () => {
       at(5, 5),
       {
         hazards: [at(6, 5)],
-        playerHealth: { s1: 10, s2: 100, sb1: 100, sb2: 100 },
+        playerEnergy: { s1: 10, s2: 100, sb1: 100, sb2: 100 },
       },
       { hazardDamage: 30 }
     )
@@ -1087,7 +1087,7 @@ describe("off-parity snakes", () => {
       at(5, 5),
       {
         hazards: [at(6, 5)], // deliberately foodless: nothing revives it
-        playerHealth: { s1: 10, s2: 100, sb1: 100, sb2: 100 },
+        playerEnergy: { s1: 10, s2: 100, sb1: 100, sb2: 100 },
         playerInvulnerabilityLevel: { s1: 1, s2: 0, sb1: 0, sb2: 0 },
       },
       { hazardDamage: 30 }
@@ -1120,14 +1120,14 @@ describe("off-parity snakes", () => {
       {
         hazards: [at(6, 5)],
         food: [at(6, 5)],
-        playerHealth: { s1: 10, s2: 100, sb1: 100, sb2: 100 },
+        playerEnergy: { s1: 10, s2: 100, sb1: 100, sb2: 100 },
         playerInvulnerabilityLevel: { s1: 1, s2: 0, sb1: 0, sb2: 0 },
       },
       { hazardDamage: 30 }
     )
 
     expect(next.alivePlayers.sort()).toEqual(["s1", "sb1", "sb2"])
-    expect(next.playerHealth.s1).toBe(100)
+    expect(next.playerEnergy.s1).toBe(100)
     expect(next.playerPieces.s1).toEqual([at(6, 5), at(5, 5), at(5, 5)]) // ate and grew
     expect(next.deaths).toEqual({
       s2: { cell: at(6, 5), subStep: 1, cause: "edge" },

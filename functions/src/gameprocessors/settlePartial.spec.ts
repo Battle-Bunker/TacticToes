@@ -16,7 +16,7 @@
 //       PROOF and a non-empty one a work list;
 //   T2  `fates` "dead" and "alive" hold in every world; "contingent" claims
 //       nothing and must be backed by a ledger entry;
-//   T3  every coordinate a rule reads — survival, weight, health, tier — is
+//   T3  every coordinate a rule reads — survival, weight, energy, tier — is
 //       inside the bracket the ledger and the claims imply.
 //
 // and separately, that the CLAIMS themselves contain the truth: where a held
@@ -114,7 +114,7 @@ export const makeBoard = (seed: number): PartialSettleInput => {
       teamID,
       isKing: type === "king",
       tier: Math.floor(rnd() * 3) - 1,
-      health: rnd() < 0.35 ? 1 + Math.floor(rnd() * 4) : 20 + Math.floor(rnd() * 80),
+      energy: rnd() < 0.35 ? 1 + Math.floor(rnd() * 4) : 20 + Math.floor(rnd() * 80),
       occupancy,
       orientation: pick(ORTHO),
       stagedMove: Math.floor(rnd() * W * W),
@@ -149,8 +149,8 @@ export const makeBoard = (seed: number): PartialSettleInput => {
     hazards,
     hazardDamage: pick([1, 5, 40]),
     food,
-    defaultMaxHealth: 100,
-    maxHealth: { queen: 80 },
+    defaultMaxEnergy: 100,
+    maxEnergy: { queen: 80 },
     regicideTeamIDs: units.some((u) => u.isKing) ? ["A", "B"] : [],
     turn,
     teamOf,
@@ -244,7 +244,7 @@ const divergedAt = (
   const ub = b.board[unit.id]
   if (!ua !== !ub) return subSteps
   if (ua && ub) {
-    if (ua.health !== ub.health) return subSteps
+    if (ua.energy !== ub.energy) return subSteps
     if (ua.occupancy.length !== ub.occupancy.length) return subSteps
     if (ua.occupancy.join() !== ub.occupancy.join()) return subSteps
   }
@@ -458,7 +458,7 @@ describe("T1–T3 by enumeration — three held units", () => {
  * plan's `Hist(h)` says exactly what the second one is played on: the board as
  * `h` ALONE would have moved on it. So the first move is settled with `h` and
  * nobody else — the same `settleTurn`, over a roster of one — and the turn
- * under test opens on what that left behind, food eaten and health spent
+ * under test opens on what that left behind, food eaten and energy spent
  * included.
  *
  * Potions are switched off for this sweep. A pickup during the unknown turn
@@ -492,7 +492,7 @@ const advanceAlone = (
             ...record,
             type: solo.unitTypes[id],
             occupancy: settled.occupancy,
-            health: settled.health,
+            energy: settled.energy,
             orientation: solo.orientation[id],
           },
         ]
@@ -684,7 +684,7 @@ const bench = (units: ResolveUnit[], overrides: Partial<PartialSettleInput> = {}
     hazards: [],
     hazardDamage: 5,
     food: [],
-    defaultMaxHealth: 100,
+    defaultMaxEnergy: 100,
     turn: 4,
     teamOf,
     effects: [],
@@ -709,7 +709,7 @@ describe("what an entry says", () => {
       type: "snake",
       teamID: "A",
       tier: 1,
-      health: 50,
+      energy: 50,
       occupancy: [at(4, 4), at(3, 4), at(2, 4)],
       orientation: { dx: 1, dy: 0 },
     }
@@ -718,7 +718,7 @@ describe("what an entry says", () => {
       type: "rook",
       teamID: "B",
       tier: 0,
-      health: 50,
+      energy: 50,
       occupancy: [at(7, 4)],
       orientation: { dx: -1, dy: 0 },
       stagedMove: at(1, 4),
@@ -739,7 +739,7 @@ describe("what an entry says", () => {
       type: "snake",
       teamID: "A",
       tier: 0,
-      health: 50,
+      energy: 50,
       occupancy: [at(4, 4), at(4, 5)],
       orientation: { dx: 1, dy: 0 },
     }
@@ -748,7 +748,7 @@ describe("what an entry says", () => {
       type: "queen",
       teamID: "B",
       tier: 2,
-      health: 50,
+      energy: 50,
       occupancy: [at(7, 4), at(7, 4), at(7, 4)],
       orientation: { dx: -1, dy: 0 },
       stagedMove: at(1, 4),
@@ -768,7 +768,7 @@ describe("what an entry says", () => {
       type: "knight",
       teamID: "A",
       tier: 0,
-      health: 50,
+      energy: 50,
       occupancy: [at(1, 1)],
       orientation: { dx: 1, dy: 0 },
     }
@@ -777,7 +777,7 @@ describe("what an entry says", () => {
       type: "pawn",
       teamID: "B",
       tier: 0,
-      health: 50,
+      energy: 50,
       occupancy: [at(7, 7)],
       orientation: { dx: -1, dy: 0 },
       stagedMove: at(6, 7),

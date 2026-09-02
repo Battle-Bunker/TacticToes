@@ -52,7 +52,7 @@ const KNOWN_KINDS: ReadonlySet<string> = new Set<ClashKind>([
 ])
 
 /**
- * The two causes that are not a killing: the unit's health ran out mid-move and
+ * The two causes that are not a killing: the unit's energy ran out mid-move and
  * it halted where it stood. Nobody beat it, and the board should not draw as
  * though somebody had.
  *
@@ -234,8 +234,8 @@ export const turnToBoard = (
       body,
       // A piece's weight is the height of its stack; a snake's is its length.
       weight: positions.length,
-      health: turn.playerHealth[playerID] ?? 0,
-      maxHealth: gameState.setup.maxHealthPerUnit?.[unitType] ?? 100,
+      energy: turn.playerEnergy[playerID] ?? 0,
+      maxEnergy: gameState.setup.maxEnergyPerUnit?.[unitType] ?? 100,
       orientation: turn.orientation?.[playerID],
       invulnerabilityLevel: turn.playerInvulnerabilityLevel?.[playerID] ?? 0,
       invulnerabilityExpiryTurn: invulnerabilityExpiryTurn(turn, playerID),
@@ -367,7 +367,7 @@ export const turnToBoard = (
   })
 
   // ── Near-deaths ───────────────────────────────────────────────────────────
-  // An exhaustion record naming NO victim is a unit that ran out of health,
+  // An exhaustion record naming NO victim is a unit that ran out of energy,
   // halted short of where it was going, ate what was on its halt square and
   // finished the turn alive. The death registry is what settles it: a unit
   // named there stayed down and gets a grave, and only a unit the registry does

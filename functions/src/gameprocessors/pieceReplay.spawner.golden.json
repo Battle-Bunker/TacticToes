@@ -99,7 +99,7 @@
         61
       ]
     },
-    "playerHealth": {
+    "playerEnergy": {
       "t1": 98,
       "t1#2": 96,
       "t1#3": 98,
@@ -290,7 +290,7 @@
         124
       ]
     },
-    "playerHealth": {
+    "playerEnergy": {
       "t1": 96,
       "t1#2": 94,
       "t1#3": 96,
@@ -482,7 +482,7 @@
         125
       ]
     },
-    "playerHealth": {
+    "playerEnergy": {
       "t1": 94,
       "t1#2": 92,
       "t1#3": 94,
@@ -663,7 +663,7 @@
         97
       ]
     },
-    "playerHealth": {
+    "playerEnergy": {
       "t1": 94,
       "t1#2": 92,
       "t1#3": 94,
@@ -843,7 +843,7 @@
         136
       ]
     },
-    "playerHealth": {
+    "playerEnergy": {
       "t1": 94,
       "t1#2": 92,
       "t1#3": 94,
@@ -1018,7 +1018,7 @@
       }
     },
     "paths": {},
-    "playerHealth": {
+    "playerEnergy": {
       "t1": 94,
       "t1#2": 92,
       "t1#3": 94,

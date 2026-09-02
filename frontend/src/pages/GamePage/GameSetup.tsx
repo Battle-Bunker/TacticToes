@@ -42,7 +42,7 @@ import {
   Theme,
   Typography,
 } from "@mui/material";
-import { Centaur, Team, UnitCounts, UnitMaxHealth, UnitType } from "@shared/types/Game";
+import { Centaur, Team, UnitCounts, UnitMaxEnergy, UnitType } from "@shared/types/Game";
 import { PIECE_GLYPHS, SNAKE_GLYPH } from "../../utils/unitGlyphs";
 import { useGameStateContext } from "../../context/GameStateContext";
 
@@ -370,8 +370,8 @@ const GameSetup: React.FC = () => {
   const [pawnPromotionWeight, setPawnPromotionWeight] = useState<number>(
     gameSetup?.pawnPromotionWeight ?? 10,
   );
-  const [maxHealthPerUnit, setMaxHealthPerUnit] = useState<UnitMaxHealth>(
-    gameSetup?.maxHealthPerUnit ?? {},
+  const [maxEnergyPerUnit, setMaxEnergyPerUnit] = useState<UnitMaxEnergy>(
+    gameSetup?.maxEnergyPerUnit ?? {},
   );
 
   const [tournamentMode, setTournamentMode] = useState<boolean>(
@@ -538,7 +538,7 @@ const GameSetup: React.FC = () => {
       setInvulnerabilityPotionEnabled(gameSetup.invulnerabilityPotionEnabled ?? false);
       setInvulnerabilityPotionSpawnRate(gameSetup.invulnerabilityPotionSpawnRate ?? 0.15);
       setPawnPromotionWeight(gameSetup.pawnPromotionWeight ?? 10);
-      setMaxHealthPerUnit(gameSetup.maxHealthPerUnit ?? {});
+      setMaxEnergyPerUnit(gameSetup.maxEnergyPerUnit ?? {});
 
       setTournamentMode(gameSetup.tournamentMode ?? false);
       setRemainingRounds(gameSetup.remainingRounds ?? 1);
@@ -630,11 +630,11 @@ const GameSetup: React.FC = () => {
   const unitCount = (type: UnitType): number => unitCounts[type] ?? 0;
   const totalUnits = totalUnitCount(unitCounts);
 
-  // Whether a unit type's max health is meaningful for this setup. Normally
+  // Whether a unit type's max energy is meaningful for this setup. Normally
   // that means "some are fielded", but a pawn promotes to a queen, so queen
-  // max health matters whenever pawns are in play even with zero queens
+  // max energy matters whenever pawns are in play even with zero queens
   // configured. Queen is the only promotion-reachable type.
-  const maxHealthApplies = (type: UnitType): boolean =>
+  const maxEnergyApplies = (type: UnitType): boolean =>
     unitCount(type) > 0 || (type === "queen" && unitCount("pawn") > 0);
 
   const handleUnitCountChange = async (unitType: UnitType, value: number) => {
@@ -705,14 +705,14 @@ const GameSetup: React.FC = () => {
     setLocal: setPawnPromotionWeight,
   });
 
-  // Per-unit-type max health. Same sanitize/mirror/write shape as
-  // setupNumberField, but the setting is one key of the maxHealthPerUnit map
+  // Per-unit-type max energy. Same sanitize/mirror/write shape as
+  // setupNumberField, but the setting is one key of the maxEnergyPerUnit map
   // rather than a whole scalar field.
-  const handleMaxHealthChange = async (unitType: UnitType, raw: number) => {
+  const handleMaxEnergyChange = async (unitType: UnitType, raw: number) => {
     const sanitizedValue = Math.max(1, Math.min(1000, Math.round(raw)));
-    const next: UnitMaxHealth = { ...maxHealthPerUnit, [unitType]: sanitizedValue };
-    setMaxHealthPerUnit(next);
-    await updateDoc(gameDocRef, { maxHealthPerUnit: next });
+    const next: UnitMaxEnergy = { ...maxEnergyPerUnit, [unitType]: sanitizedValue };
+    setMaxEnergyPerUnit(next);
+    await updateDoc(gameDocRef, { maxEnergyPerUnit: next });
   };
 
   // Handle max turns configuration (writes only while the limit is enabled,
@@ -753,7 +753,7 @@ const GameSetup: React.FC = () => {
     setLocal: setHazardPercentage,
   });
 
-  // Damage only changes health accounting, not board layout: no preview regen.
+  // Damage only changes energy accounting, not board layout: no preview regen.
   const handleHazardDamageChange = setupNumberField("hazardDamage", {
     min: 1,
     max: 1000,
@@ -1273,14 +1273,14 @@ const GameSetup: React.FC = () => {
                   helperText="A promoted queen restarts at weight 1"
                 />
               )}
-              {/* Max health, one small input per unit type in play. Queens
+              {/* Max energy, one small input per unit type in play. Queens
                   count as "in play" whenever pawns are, because a pawn
                   promotes into one. */}
               <Typography variant="body2" sx={{ mt: 1.5 }} gutterBottom>
-                Max health (default 100)
+                Max energy (default 100)
               </Typography>
               <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
-                {UNIT_TYPES.filter(({ type }) => maxHealthApplies(type)).map(
+                {UNIT_TYPES.filter(({ type }) => maxEnergyApplies(type)).map(
                   ({ type, label }) => {
                     const promotedOnly = type === "queen" && unitCount("queen") === 0;
                     return (
@@ -1288,9 +1288,9 @@ const GameSetup: React.FC = () => {
                         key={type}
                         label={label}
                         size="small"
-                        value={maxHealthPerUnit[type]}
+                        value={maxEnergyPerUnit[type]}
                         placeholder="100"
-                        onChange={(value) => handleMaxHealthChange(type, value)}
+                        onChange={(value) => handleMaxEnergyChange(type, value)}
                         disabled={started || isConfigDisabled}
                         sx={{ width: promotedOnly ? 150 : 110 }}
                         min={1}

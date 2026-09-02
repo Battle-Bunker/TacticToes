@@ -46,7 +46,7 @@ const mkTurn = (
 ): Turn => {
   const ids = Object.keys(playerPieces)
   return {
-    playerHealth: Object.fromEntries(ids.map((id) => [id, 100])),
+    playerEnergy: Object.fromEntries(ids.map((id) => [id, 100])),
     startTime: Timestamp.fromMillis(0),
     endTime: Timestamp.fromMillis(5000),
     scores: Object.fromEntries(ids.map((id) => [id, playerPieces[id].length])),
@@ -205,7 +205,7 @@ describe("head-to-head collision resolution", () => {
 
     expect(next.alivePlayers).toEqual(["t1", "t2"])
     expect(next.playerPieces.t1).toEqual([16, 9, 8, 15, 15])
-    expect(next.playerHealth.t1).toBe(100)
+    expect(next.playerEnergy.t1).toBe(100)
     expect(next.food).toEqual([])
   })
 

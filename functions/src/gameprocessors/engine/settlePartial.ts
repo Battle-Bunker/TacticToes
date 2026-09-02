@@ -42,7 +42,7 @@ import { outranks } from "./turnEngine"
  *
  * **An empty ledger is a PROOF; a non-empty one is a work list.** With no
  * entries, every modelled unit's disposition — where it went, whether it
- * lived, its health, its weight, what it ate — is what it is in every world
+ * lived, its energy, its weight, what it ate — is what it is in every world
  * the held units could have chosen, and so is the game's `outcome`. With
  * entries, the entries name every place a world could differ and nothing
  * else does.
@@ -86,7 +86,7 @@ export type DivergenceKind =
   | "durable" // a claim could have DIED here, leaving a pile
   | "food" // a claim could have eaten the food this unit ate
   | "potion" // a claim could have taken the potion this unit took
-  | "exhaustion" // health spent here depends on whether a claim halted it
+  | "exhaustion" // energy spent here depends on whether a claim halted it
   | "promotion" // the weight the threshold is read against could differ
 
 export interface Divergence {
@@ -118,7 +118,7 @@ export interface Divergence {
    * Whether `unitId` could FAIL to survive this contact — at any strength the
    * claim's interval permits, including the tie that kills everyone in it.
    * False means the contact is real but this unit wins it in every world: a
-   * divergence in timing and health, not in survival.
+   * divergence in timing and energy, not in survival.
    */
   readonly couldBeat: boolean
   /** True when this entry exists only because a caller's narrowing admitted
@@ -808,7 +808,7 @@ const itemDivergences = (
 
 /**
  * The two verdicts a divergence changes without a contact of its own: whether
- * an exhaustion was fatal (a unit halted early spent less health) and whether
+ * an exhaustion was fatal (a unit halted early spent less energy) and whether
  * a pawn reached the promotion threshold (a unit halted early ate something
  * else, or nothing).
  */

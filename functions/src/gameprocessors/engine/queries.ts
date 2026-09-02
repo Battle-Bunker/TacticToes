@@ -188,7 +188,7 @@ export const pathOf = (
  * ends at the first cell holding a body — that cell INCLUDED, because it is
  * exactly the cell a capture happens on, and the engine stops the winner
  * there — and a wall is excluded, because a unit that stages one dies on it
- * rather than contesting it. Hazards cut nothing: they cost health, and a
+ * rather than contesting it. Hazards cut nothing: they cost energy, and a
  * unit crossing one still arrives.
  *
  * A jump is a single cell, so nothing between the knight and its landing

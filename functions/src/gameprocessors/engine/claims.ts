@@ -33,7 +33,7 @@ export const NEVER = 0x7fffffff
 
 /**
  * A unit in `units` whose staged move is NOT known. Its `stagedMove`/`path`
- * are ignored; its occupancy, health, tier, orientation and type are the
+ * are ignored; its occupancy, energy, tier, orientation and type are the
  * OBSERVATION, taken at `observedTurn`.
  */
 export interface HeldUnit {
@@ -120,9 +120,9 @@ export interface Claim {
    * that lapses before this turn given back.
    */
   readonly tierAtArrival: number
-  /** The most health it could be carrying, for a caller pricing an exchange. */
-  readonly healthMax: number
-  /** It is dead in every world (it was walled in, or it had no health left). */
+  /** The most energy it could be carrying, for a caller pricing an exchange. */
+  readonly energyMax: number
+  /** It is dead in every world (it was walled in, or it had no energy left). */
   readonly certainlyGone: boolean
   /**
    * It could be dead — from terrain, exhaustion, its own body, a modelled
@@ -469,14 +469,14 @@ const claimOf = (
   // always hold, and may always leave, so nothing about it is certain at all.
   const certainIfAlive = trail ? sorted(record.occupancy.slice(0, Math.max(0, length - span))) : []
 
-  // Health. A meal restores to the kind's maximum, so the ceiling is the
+  // Energy. A meal restores to the kind's maximum, so the ceiling is the
   // biggest maximum any kind it could be is allowed, and the floor is what it
   // was observed with minus the cheapest way to spend the span.
-  const defaultMax = input.defaultMaxHealth ?? 100
-  const healthMax =
+  const defaultMax = input.defaultMaxEnergy ?? 100
+  const energyMax =
     foodInReach > 0
-      ? Math.max(...kinds.map((k) => input.maxHealth?.[k] ?? defaultMax))
-      : record.health
+      ? Math.max(...kinds.map((k) => input.maxEnergy?.[k] ?? defaultMax))
+      : record.energy
 
   // Tier. Only two things move it: an effect of the schedule lapsing before
   // this turn, which is arithmetic the caller cannot be asked to redo, and a
@@ -508,19 +508,19 @@ const claimOf = (
   const tierMax = ceiling + (allies > 0 ? potionTurns : 0)
 
   // Death. `certainlyGone` is a PROOF and is claimed only where one exists:
-  // every choice it had walks into terrain that kills, or it had no health
+  // every choice it had walks into terrain that kills, or it had no energy
   // left to spend and nothing to eat. `deathPossible` is the opposite
   // conservatism — anything unproven is possible.
   const walledIn = reach.totalFirst > 0 && reach.fatalFirst === reach.totalFirst
-  const starved = record.health <= 0 || (trail && record.health <= span && foodInReach === 0)
+  const starved = record.energy <= 0 || (trail && record.energy <= span && foodInReach === 0)
   const certainlyGone = walledIn || starved
-  // The health it could spend: a cell entered costs one, and a hazard cell
+  // The energy it could spend: a cell entered costs one, and a hazard cell
   // entered costs a whole dose — and a unit standing still on a hazard pays
   // one anyway. Nothing here proves an exhaustion fatal; it only refuses to
   // prove it impossible.
   const hazardInReach = input.hazards.some((cell) => everPossible.includes(cell))
   const perCell = 1 + (hazardInReach ? input.hazardDamage : 0)
-  const couldExhaust = record.health <= span * reach.longestPath * perCell
+  const couldExhaust = record.energy <= span * reach.longestPath * perCell
   // Regicide is a team verdict off one unit's death, so a unit that plays
   // under it can be taken off the board by a king it never met.
   const underRegicide = (input.regicideTeamIDs ?? []).includes(record.teamID)
@@ -550,7 +550,7 @@ const claimOf = (
     tierMin,
     tierMax,
     tierAtArrival,
-    healthMax,
+    energyMax,
     certainlyGone,
     deathPossible,
     severPossible,

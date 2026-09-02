@@ -69,7 +69,7 @@ const mkTurn = (
 ): Turn => {
   const ids = Object.keys(playerPieces)
   return {
-    playerHealth: Object.fromEntries(ids.map((id) => [id, 100])),
+    playerEnergy: Object.fromEntries(ids.map((id) => [id, 100])),
     startTime: Timestamp.fromMillis(0),
     endTime: Timestamp.fromMillis(5000),
     scores: Object.fromEntries(ids.map((id) => [id, playerPieces[id].length])),

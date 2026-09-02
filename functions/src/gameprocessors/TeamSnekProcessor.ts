@@ -45,7 +45,7 @@ export interface SnakeGameState {
   newSnakes: { [playerID: string]: number[] }
   newFood: number[]
   newHazards: number[]
-  newPlayerHealth: { [playerID: string]: number }
+  newPlayerEnergy: { [playerID: string]: number }
   newAlivePlayers: string[]
   newInvulnerabilityPotions: number[]
   playerInvulnerabilityLevel: { [playerID: string]: number }
@@ -192,10 +192,10 @@ export class TeamSnekProcessor {
       ? this.gameSetup.presetFood
       : this.initializeFood(boardWidth, boardHeight, playerPieces, hazards)
 
-    // Initialize player health (per-type configurable max, default 100)
-    const initialHealth: { [playerID: string]: number } = {}
+    // Initialize player energy (per-type configurable max, default 100)
+    const initialEnergy: { [playerID: string]: number } = {}
     gamePlayers.forEach((player) => {
-      initialHealth[player.id] = this.maxHealthFor(player.unitType)
+      initialEnergy[player.id] = this.maxEnergyFor(player.unitType)
     })
 
     // Initialize scores (score = length/weight: snakes spawn at 3, pieces at 1)
@@ -223,7 +223,7 @@ export class TeamSnekProcessor {
     })
 
     const firstTurn: Turn = {
-      playerHealth: initialHealth,
+      playerEnergy: initialEnergy,
       // Placeholder window. The turn deadline has exactly one writer: the
       // caller that commits the turn (startGame for turn 0, processTurn for
       // turns 1..n) stamps the real startTime/endTime — that is where the
@@ -351,7 +351,7 @@ export class TeamSnekProcessor {
         teamID: this.gameSetup.gamePlayers.find((p) => p.id === playerID)?.teamID ?? "",
         isKing: kings.has(playerID),
         tier: gameState.playerInvulnerabilityLevel[playerID] ?? 0,
-        health: gameState.newPlayerHealth[playerID],
+        energy: gameState.newPlayerEnergy[playerID],
         occupancy: gameState.newSnakes[playerID],
         orientation: gameState.orientation[playerID],
         stagedMove: gameState.playerMoves[playerID],
@@ -362,13 +362,13 @@ export class TeamSnekProcessor {
       hazards: gameState.newHazards,
       hazardDamage: this.hazardDamage(),
       food: gameState.newFood,
-      maxHealth: this.gameSetup.maxHealthPerUnit,
+      maxEnergy: this.gameSetup.maxEnergyPerUnit,
       regicideTeamIDs: this.regicideTeamIDs(),
     }
   }
 
   // Folds the settled turn back into the game-level state. Everything the
-  // module reports is authoritative: occupancy, health, food, applied moves,
+  // module reports is authoritative: occupancy, energy, food, applied moves,
   // the death registry, severed cells, the clash stream, and now the effect
   // schedule and the tiers the next turn starts from.
   private applySettlement(gameState: SnakeGameState, resolution: Settlement): void {
@@ -388,7 +388,7 @@ export class TeamSnekProcessor {
     this.removeDeadPlayers(gameState)
     Object.entries(resolution.board).forEach(([playerID, unit]) => {
       gameState.newSnakes[playerID] = unit.occupancy
-      gameState.newPlayerHealth[playerID] = unit.health
+      gameState.newPlayerEnergy[playerID] = unit.energy
     })
 
     // The settled schedule and tiers replace the ones removeDeadPlayers just
@@ -402,7 +402,7 @@ export class TeamSnekProcessor {
     // here instead would be the same rule written a second time.
     gameState.orientation = resolution.orientation
 
-    // Promotion arrives already applied to the board and the health above;
+    // Promotion arrives already applied to the board and the energy above;
     // what is left is the kind map, which the processor keeps for every
     // CONFIGURED unit rather than only the standing ones, so the settled kinds
     // are folded in rather than swapped for.
@@ -445,13 +445,13 @@ export class TeamSnekProcessor {
     })
   }
 
-  // Max health for a unit type: per-type config with a universal default of
+  // Max energy for a unit type: per-type config with a universal default of
   // 100. An absent type means "snake".
-  private maxHealthFor(type: UnitType | undefined): number {
-    return this.gameSetup.maxHealthPerUnit?.[type ?? "snake"] ?? 100
+  private maxEnergyFor(type: UnitType | undefined): number {
+    return this.gameSetup.maxEnergyPerUnit?.[type ?? "snake"] ?? 100
   }
 
-  // Health lost per hazard square entered (and per turn spent sitting on
+  // Energy lost per hazard square entered (and per turn spent sitting on
   // one, for stationary pieces). Default 100: usually lethal.
   private hazardDamage(): number {
     return this.gameSetup.hazardDamage ?? 100
@@ -463,7 +463,7 @@ export class TeamSnekProcessor {
       food,
       hazards,
       alivePlayers,
-      playerHealth,
+      playerEnergy,
     } = currentTurn
       const { boardWidth, boardHeight } = this.gameSetup
 
@@ -491,7 +491,7 @@ export class TeamSnekProcessor {
       newSnakes,
       newFood: [...food],
       newHazards: [...hazards],
-      newPlayerHealth: { ...playerHealth },
+      newPlayerEnergy: { ...playerEnergy },
       newAlivePlayers: [...alivePlayers],
       newInvulnerabilityPotions: [...(currentTurn.invulnerabilityPotions ?? [])],
       playerInvulnerabilityLevel,
@@ -516,7 +516,7 @@ export class TeamSnekProcessor {
         gameState.newAlivePlayers.splice(index, 1)
       }
       delete gameState.newSnakes[playerID]
-      delete gameState.newPlayerHealth[playerID]
+      delete gameState.newPlayerEnergy[playerID]
       delete gameState.playerInvulnerabilityLevel[playerID]
       gameState.activeEffects = gameState.activeEffects.filter(e => e.playerID !== playerID)
     })
@@ -598,7 +598,7 @@ export class TeamSnekProcessor {
     // writer of the real deadline.
     const newTurn: Turn = {
       ...currentTurn,
-      playerHealth: gameState.newPlayerHealth,
+      playerEnergy: gameState.newPlayerEnergy,
       scores: gameState.newScores,
       alivePlayers: validAlivePlayers,
       food: gameState.newFood,
