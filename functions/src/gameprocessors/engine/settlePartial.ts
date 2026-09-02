@@ -344,7 +344,10 @@ export const settlePartial = (
         ? "dead"
         : "alive"
   })
-  claimList.forEach((claim) => {
+
+  // The regicide cascade, discharged now that the kings have fates.
+  const settledClaims = dischargeRegicide(input, claimList, fates)
+  settledClaims.forEach((claim) => {
     fates[claim.id] = claim.certainlyGone
       ? "dead"
       : claim.deathPossible
@@ -356,18 +359,58 @@ export const settlePartial = (
   // into this one: settlement never saw it, so nothing charged it. The claim's
   // interval is what brackets the truth.
   const tiers = { ...settlement.tiers }
-  claimList.forEach((claim) => {
+  settledClaims.forEach((claim) => {
     tiers[claim.id] = claim.tierAtArrival
   })
 
   return {
     ...settlement,
     tiers,
-    outcome: outcomeOf(input, settlement, claimList, byId),
+    outcome: outcomeOf(input, settlement, settledClaims, byId),
     ledger,
     fates,
-    claims: claimList,
+    claims: settledClaims,
   }
+}
+
+/**
+ * A claim's regicide term, discharged against the settlement.
+ *
+ * `claims.ts` is a pure function of the board and settles nothing, so it
+ * cannot tell whether a MODELLED king survives; it leaves that half of
+ * `deathPossible` conservative and names the king in `regicideKingId`. Here
+ * the king has a `fate`, and "alive" is a proof over every world. A team whose
+ * every king is proved alive loses nobody to the rule, and the claims that
+ * were possibly-dead only by cascade come back alive.
+ *
+ * The ledger above was built against the wider reading. That is sound in the
+ * one direction that matters: a ledger may name a world the claims go on to
+ * prove impossible; it may never miss one.
+ */
+const dischargeRegicide = (
+  input: PartialSettleInput,
+  claims: ReadonlyArray<Claim>,
+  fates: Readonly<Record<string, Fate>>,
+): ReadonlyArray<Claim> => {
+  if (!claims.some((claim) => claim.regicideKingId !== null)) return claims
+  const claimById = new Map(claims.map((claim) => [claim.id, claim]))
+  const safe = new Map<string, boolean>()
+  const teamIsSafe = (teamID: string): boolean => {
+    const known = safe.get(teamID)
+    if (known !== undefined) return known
+    const answer = input.units.every((unit) => {
+      if (!unit.isKing || unit.teamID !== teamID) return true
+      const claim = claimById.get(unit.id)
+      return claim ? !claim.selfDeathPossible : fates[unit.id] === "alive"
+    })
+    safe.set(teamID, answer)
+    return answer
+  }
+  return claims.map((claim) =>
+    claim.regicideKingId !== null && teamIsSafe(claim.teamID)
+      ? { ...claim, deathPossible: claim.selfDeathPossible, regicideKingId: null }
+      : claim,
+  )
 }
 
 const byLedgerOrder = (a: Divergence, b: Divergence): number =>

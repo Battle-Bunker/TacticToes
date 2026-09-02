@@ -126,11 +126,35 @@ export interface Claim {
   readonly certainlyGone: boolean
   /**
    * It could be dead — from terrain, exhaustion, its own body, a modelled
-   * unit or another CLAIM. The last is why claims are computed as a set
-   * rather than one at a time: two claims whose grammars overlap can kill
-   * each other, and a tie kills both.
+   * unit or another CLAIM, or from the fall of its team's king. The middle
+   * one is why claims are computed as a set rather than one at a time: two
+   * claims whose grammars overlap can kill each other, and a tie kills both.
    */
   readonly deathPossible: boolean
+  /**
+   * `deathPossible` WITHOUT the regicide cascade — this unit's own peril,
+   * from terrain, exhaustion, its own body, a modelled unit or another claim.
+   */
+  readonly selfDeathPossible: boolean
+  /**
+   * The king whose fall would take this unit off the board under regicide, or
+   * null when there is no such king to name: the unit is itself a king, its
+   * team plays no regicide, or no king of its team could fall. Null ALSO when
+   * the team plays regicide with no king left on the roster — that team is
+   * lost outright when the turn resolves, `deathPossible` says so on its own,
+   * and there is no shot for a caller to price.
+   *
+   * Not-null is exactly the condition `deathPossible` adds to
+   * `selfDeathPossible`, so a caller pricing a shot at a king reads this to
+   * find out whose roster is riding on it — and a caller looking at a claim
+   * that is only possibly-dead by cascade sees that in
+   * `!selfDeathPossible && regicideKingId !== null`.
+   *
+   * A HELD king's peril is settled here, by its own claim. A MODELLED king's
+   * is not — `claims.ts` settles nothing — so it is left conservative and
+   * `settlePartial` discharges it against the king's `fate`.
+   */
+  readonly regicideKingId: string | null
   /** It could be severed, which is what makes `certainIfAlive` conditional. */
   readonly severPossible: boolean
   /** True when a caller's `options` narrowing was applied to this claim. */
@@ -304,13 +328,53 @@ export const computeClaims = (input: PartialSettleInput): ReadonlyArray<Claim> =
     u.occupancy.forEach((cell) => liveCover.add(cell))
   })
 
-  return reaches.map((reach) => {
+  const claims = reaches.map((reach) => {
     const others = new Set<number>()
     reaches.forEach((other) => {
       if (other === reach) return
       other.everHead.forEach((cell) => others.add(cell))
     })
     return claimOf(reach, input, cells, liveCover, others, subSteps)
+  })
+  return foldRegicide(input, claims, byId)
+}
+
+/**
+ * The regicide cascade, folded onto the claims that could actually suffer it.
+ *
+ * Regicide is a team verdict off one unit's death, so a unit that plays under
+ * it can be taken off the board by a king it never met — BUT ONLY BY A KING
+ * THAT COULD FALL. Charging every unit of every king-bearing team with a
+ * possible death, unconditionally, is sound and useless: it says the same
+ * thing about the plan that takes a shot at the king and the plan that walks
+ * away from it, and a caller folding material out of `deathPossible` cannot
+ * tell those two apart at all. The condition is the king's own peril, and it
+ * is cheap: `selfDeathPossible` is exactly `deathPossible` with this cascade
+ * taken out, so asking it of the king is not circular.
+ *
+ * A HELD king answers here, from its own claim. A MODELLED king does not —
+ * nothing in this file settles a turn — so it is treated as able to fall and
+ * `settlePartial` discharges it against the king's settled `fate`.
+ */
+const foldRegicide = (
+  input: PartialSettleInput,
+  claims: ReadonlyArray<Claim>,
+  byId: Map<string, ResolveUnit>,
+): ReadonlyArray<Claim> => {
+  const regicide = new Set(input.regicideTeamIDs ?? [])
+  if (regicide.size === 0) return claims
+  const claimById = new Map(claims.map((claim) => [claim.id, claim]))
+  return claims.map((claim) => {
+    const record = byId.get(claim.id)
+    if (!record || record.isKing || !regicide.has(claim.teamID)) return claim
+    const kings = input.units.filter((u) => u.isKing && u.teamID === claim.teamID)
+    // A team configured for regicide with no king left on the roster loses
+    // every remaining unit the moment this turn resolves. There is no king to
+    // name and no shot to price: the loss is unconditional.
+    if (kings.length === 0) return { ...claim, deathPossible: true }
+    const king = kings.find((u) => claimById.get(u.id)?.selfDeathPossible ?? true)
+    if (king === undefined) return claim
+    return { ...claim, deathPossible: true, regicideKingId: king.id }
   })
 }
 
@@ -526,11 +590,10 @@ const claimOf = (
   const hazardInReach = input.hazards.some((cell) => everPossible.includes(cell))
   const perCell = 1 + (hazardInReach ? input.hazardDamage : 0)
   const couldExhaust = record.energy <= span * reach.longestPath * perCell
-  // Regicide is a team verdict off one unit's death, so a unit that plays
-  // under it can be taken off the board by a king it never met.
-  const underRegicide = (input.regicideTeamIDs ?? []).includes(record.teamID)
-  const deathPossible =
-    certainlyGone || reach.fatalFirst > 0 || reachable || couldExhaust || underRegicide
+  // This unit's OWN peril. Regicide is folded on afterwards, by `foldRegicide`,
+  // because the answer is a question about ANOTHER claim — the team's king —
+  // and a claim cannot read a claim that is still being built.
+  const selfDeathPossible = certainlyGone || reach.fatalFirst > 0 || reachable || couldExhaust
 
   const earliestSubStep = new Int32Array(cells).fill(NEVER)
   headPossible.forEach((set, k) => {
@@ -557,7 +620,9 @@ const claimOf = (
     tierAtArrival,
     energyMax,
     certainlyGone,
-    deathPossible,
+    deathPossible: selfDeathPossible,
+    selfDeathPossible,
+    regicideKingId: null,
     severPossible,
     narrowed: reach.held.options !== undefined,
   }

@@ -889,6 +889,136 @@ const bench = (units: ResolveUnit[], overrides: Partial<PartialSettleInput> = {}
   return input
 }
 
+describe("the regicide cascade is conditional on the king", () => {
+  // A team that plays under regicide loses everything with its last king, so
+  // every unit of it CAN be taken off the board by a king it never met. That
+  // is a conditional, and pricing it as an unconditional is what made the
+  // material fold blind: it says exactly the same thing about the plan that
+  // takes a shot at the king and the plan that walks past it.
+  //
+  // The two halves of the conditional, on one board with the attacker moved.
+  //
+  //   bK  a held enemy KING, alone in the middle, nothing near it
+  //   bT  its held team-mate, out of everybody's reach — its OWN peril is nil,
+  //       so whatever `deathPossible` says about it is the cascade talking
+  //   bM  a modelled team-mate, so there is somebody for the ledger to name
+  //   ar  our rook, whose file either bears on the king or does not
+
+  const board = (rookAt: number, rookTo: number): PartialSettleInput => {
+    const king: ResolveUnit = {
+      id: "bK",
+      type: "king",
+      teamID: "B",
+      isKing: true,
+      tier: 0,
+      energy: 50,
+      occupancy: [at(4, 4)],
+      orientation: { dx: 1, dy: 0 },
+    }
+    const mate: ResolveUnit = {
+      id: "bT",
+      type: "pawn",
+      teamID: "B",
+      tier: 0,
+      energy: 50,
+      occupancy: [at(2, 6)],
+      orientation: { dx: 0, dy: 1 },
+    }
+    const modelled: ResolveUnit = {
+      id: "bM",
+      type: "pawn",
+      teamID: "B",
+      tier: 0,
+      energy: 50,
+      occupancy: [at(7, 7)],
+      orientation: { dx: 0, dy: -1 },
+      stagedMove: at(7, 6),
+    }
+    const rook: ResolveUnit = {
+      id: "ar",
+      type: "rook",
+      teamID: "A",
+      tier: 0,
+      energy: 50,
+      occupancy: [rookAt],
+      orientation: { dx: 0, dy: 1 },
+      stagedMove: rookTo,
+    }
+    return bench([king, mate, modelled, rook], {
+      regicideTeamIDs: ["A", "B"],
+      held: [
+        { id: "bK", observedTurn: 3 },
+        { id: "bT", observedTurn: 3 },
+      ],
+    })
+  }
+
+  const claimOf = (settled: { claims: ReadonlyArray<Claim> }, id: string): Claim =>
+    settled.claims.find((c) => c.id === id) as Claim
+
+  it("a king nothing can touch takes nobody with it", () => {
+    // The rook sits on the first file: its cover never crosses the king.
+    const input = board(at(1, 1), at(1, 2))
+    const settled = settlePartial(input, NO_SPAWN)
+
+    expect(claimOf(settled, "bK").deathPossible).toBe(false)
+    expect(claimOf(settled, "bT")).toMatchObject({
+      selfDeathPossible: false,
+      deathPossible: false,
+      regicideKingId: null,
+    })
+    expect(settled.fates.bT).toBe("alive")
+    expect(settled.ledger.filter((e) => e.kind === "regicide")).toEqual([])
+
+    // And "alive" is a proof: every world agrees, and it is the whole product
+    // of both held units' options, not a sample of it.
+    let worlds = 0
+    optionsFor(input, "bK").forEach((kingMove) => {
+      optionsFor(input, "bT").forEach((mateMove) => {
+        worlds++
+        const truth = concrete(
+          input,
+          new Map([
+            ["bK", kingMove],
+            ["bT", mateMove],
+          ]),
+        )
+        expect({ world: `${kingMove}/${mateMove}`, alive: truth.board.bT !== undefined }).toEqual({
+          world: `${kingMove}/${mateMove}`,
+          alive: true,
+        })
+      })
+    })
+    expect(worlds).toBeGreaterThan(8)
+  })
+
+  it("a king our rook bears on puts its whole team in doubt, and names the shot", () => {
+    // The same board with the rook on the king's file. Nothing else moved.
+    const input = board(at(4, 1), at(4, 2))
+    const settled = settlePartial(input, NO_SPAWN)
+
+    expect(claimOf(settled, "bK").deathPossible).toBe(true)
+    expect(claimOf(settled, "bT")).toMatchObject({
+      // Its own peril is still nil — everything below is the cascade.
+      selfDeathPossible: false,
+      deathPossible: true,
+      regicideKingId: "bK",
+    })
+    expect(settled.fates.bT).toBe("contingent")
+
+    // The modelled team-mate is where the LEDGER can say it, and it says it
+    // keyed to the king: the divergence is charged to the held unit at the
+    // root, and `via` ends at the one unit whose fall carries the team.
+    const regicide = settled.ledger.filter((e) => e.kind === "regicide")
+    expect(regicide.length).toBeGreaterThan(0)
+    regicide.forEach((entry) => {
+      expect(entry.heldId).toBe("bK")
+      expect(entry.via[entry.via.length - 1] ?? entry.heldId).toBe("bK")
+    })
+    expect(regicide.map((e) => e.unitId)).toContain("bM")
+  })
+})
+
 describe("what an entry says", () => {
   it("marks a held trail unit's neck as present in every world it survives", () => {
     // A snake must step and its body follows, so the cells behind its head

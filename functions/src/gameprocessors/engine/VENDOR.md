@@ -245,6 +245,29 @@ ordinary `settleTurn`, and the two compared coordinate for coordinate. With no
 held units at all, `settlePartial` *is* `settleTurn`, which is the reduction
 that makes "one engine" a fact rather than a slogan.
 
+**`Claim.deathPossible` is conditional under regicide, and says on what.** A
+team that plays under regicide loses everything with its last king, so any unit
+of it can be taken off the board by a king it never met — but only by a king
+that could actually fall, and pricing that as an unconditional says the same
+thing about the plan that shoots at the king and the plan that walks away.
+So a claim carries three answers, not one:
+
+```ts
+claim.selfDeathPossible  // its OWN peril: terrain, exhaustion, its own body,
+                         // a modelled unit, another claim. No cascade.
+claim.regicideKingId     // the king whose fall would take it, or null
+claim.deathPossible      // selfDeathPossible, plus that king's fall
+```
+
+`!selfDeathPossible && regicideKingId !== null` is a unit that is in danger
+only because its king is, and the `regicide` ledger entry keyed to that king is
+where the shot gets priced. A HELD king's peril is settled inside
+`computeClaims`; a MODELLED king's cannot be — nothing there settles a turn —
+so `settlePartial` discharges it against the king's `fate`, and the claims it
+returns are the discharged ones. A regicide team with no king left on the
+roster is lost outright when the turn resolves: `deathPossible` is true and
+`regicideKingId` is null, because there is no shot to price.
+
 A held unit's OWN position is not in the ledger — it is inherently unknown, and
 what is known about it is its `Claim`. `Claim` is a pure function of the held
 records, the board, the terrain, the items, the effect schedule, the turn span
