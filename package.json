@@ -6,6 +6,7 @@
   "scripts": {
     "deploy": "bash scripts/deploy.sh",
     "deploy:functions": "bash scripts/deploy.sh functions",
+    "deploy:functions:if-changed": "bash scripts/deploy-functions-if-changed.sh",
     "deploy:rules": "bash scripts/deploy.sh firestore:rules,firestore:indexes",
     "deploy:hosting": "bash scripts/deploy.sh hosting"
   }

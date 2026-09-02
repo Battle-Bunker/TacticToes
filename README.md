@@ -90,6 +90,34 @@ project.
 
 > 🔐 Never commit real `.env` files.
 
+### 1.1.1 Replit dev workflow: automatic Functions deploy
+
+The Replit `Frontend` workflow runs
+`scripts/deploy-functions-if-changed.sh` before starting Vite. The script hashes
+only Firebase Functions deployment inputs (function source, build tooling,
+dependency lockfiles, TypeScript config, and the Firebase deployment config).
+It skips deployment when that hash matches the last successful deploy, so edits
+under `frontend/` do not spend time redeploying Functions.
+
+The successful hash is cached per Firebase project and region under the
+workspace user's cache directory. A failed deploy never updates the marker, so
+the next workflow start retries it. To force a deploy, run:
+
+```bash
+npm run deploy:functions
+```
+
+The automatic step requires these Replit Secrets:
+
+```text
+GCP_SA_KEY_B64
+VITE_FIREBASE_PROJECT_ID
+VITE_FIREBASE_FUNCTIONS_REGION
+```
+
+Until `GCP_SA_KEY_B64` is present, the workflow logs a notice and starts the
+frontend without deploying.
+
 ### 1.2 Functions (environment only — no files)
 
 Functions config is **environment variables, nothing else**. Set the region in
