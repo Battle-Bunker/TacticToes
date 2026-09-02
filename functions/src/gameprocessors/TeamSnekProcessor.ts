@@ -19,7 +19,6 @@ import {
   isPieceType,
   leavesTrail,
   spawnOrientationCandidates,
-  toXY,
 } from "./engine/moveGrammar"
 import {
   DEFAULT_POTION_WINDOW_TURNS,
@@ -52,8 +51,8 @@ export interface SnakeGameState {
   // Computed data
   newScores: { [playerID: string]: number }
 
-  // Per-unit orientation, seeded from the current turn and rewritten by
-  // updateOrientation once the turn's movement and deaths have resolved.
+  // Per-unit orientation, seeded from the current turn and replaced wholesale
+  // by the settlement's rewritten map once the turn has resolved.
   orientation: { [playerID: string]: Orientation }
 
   // Current kind per unit. Every game carries this internally — the movement
@@ -273,7 +272,6 @@ export class TeamSnekProcessor {
       }
       // 1. Setup
       const gameState = this.initializeGameState(currentTurn)
-      const originSquares = this.captureOriginSquares(gameState)
       moves.forEach((move) => {
         gameState.playerMoves[move.playerID] = move.move
       })
@@ -281,14 +279,9 @@ export class TeamSnekProcessor {
       // 2. Settle the turn: grammar, collision phase, collision deaths, food
       //    and growth, exhaustion deaths, sever truncation, regicide — then
       //    the ally-buff cancel for vulnerable units that died or were
-      //    severed, potion collection, and effect expiry, all of which the
-      //    module now owns.
+      //    severed, potion collection, effect expiry and the orientation
+      //    rewrite, all of which the module now owns.
       this.applySettlement(gameState, settleTurn(this.settleInput(gameState)))
-
-      // Orientation rewrites after the last phase that can kill, so the map it
-      // rebuilds holds exactly the units still on the board — and before
-      // promotion, so a pawn that promotes this turn keeps its pawn orientation.
-      this.updateOrientation(gameState, originSquares)
 
       // 3. Spawns
       this.generateNewFood(gameState)
@@ -374,11 +367,6 @@ export class TeamSnekProcessor {
     gameState.subStepCount = resolution.subStepCount
     gameState.newFood = resolution.food
 
-    // A rotation is a grammar outcome, not a movement one: the unit spent its
-    // turn turning, so its new facing lands before the orientation rewrite.
-    Object.entries(resolution.rotations).forEach(([playerID, orientation]) => {
-      gameState.orientation[playerID] = orientation
-    })
     // The applied move is the cell the unit actually ended on — a truncated
     // slider its stop cell, anything that died the cell it died on.
     Object.entries(resolution.finalCell).forEach(([playerID, cell]) => {
@@ -397,6 +385,10 @@ export class TeamSnekProcessor {
     gameState.activeEffects = resolution.effects
     gameState.playerInvulnerabilityLevel = resolution.tiers
     gameState.newInvulnerabilityPotions = resolution.potions
+    // Facing likewise: the module rewrote it for every unit still standing,
+    // rotations folded in, the dead dropped. Patching the previous turn's map
+    // here instead would be the same rule written a second time.
+    gameState.orientation = resolution.orientation
 
     resolution.vulnerableCollided.forEach((playerID) => {
       const teamID = this.gameSetup.gamePlayers.find((p) => p.id === playerID)?.teamID
@@ -441,51 +433,6 @@ export class TeamSnekProcessor {
   // one, for stationary pieces). Default 100: usually lethal.
   private hazardDamage(): number {
     return this.gameSetup.hazardDamage ?? 100
-  }
-
-  // Head squares before movement resolves, threaded into updateOrientation
-  // once it has.
-  private captureOriginSquares(gameState: SnakeGameState): { [playerID: string]: number } {
-    const originSquares: { [playerID: string]: number } = {}
-    gameState.newAlivePlayers.forEach((playerID) => {
-      originSquares[playerID] = gameState.newSnakes[playerID][0]
-    })
-    return originSquares
-  }
-
-  // Rewrites orientation for the turn. The map is rebuilt from the units
-  // still on the board, so dead units drop out. A unit that moved faces the
-  // direction of its FIRST step — sliders and kings the unit step (e.g.
-  // {1,0}, {1,1}), knights their exact L-offset (e.g. {1,-2}), trail units
-  // head minus the cell the head left (so the rule holds even for a snake
-  // severed down to its head, or one that grew this turn). Pawns change
-  // orientation only via their rotation action, which planUnitActions already
-  // applied. Units that held keep their orientation.
-  private updateOrientation(
-    gameState: SnakeGameState,
-    originSquares: { [playerID: string]: number },
-  ): void {
-    const orientation: { [playerID: string]: Orientation } = {}
-    const { boardWidth } = gameState
-    Object.keys(gameState.newSnakes).forEach((playerID) => {
-      orientation[playerID] = gameState.orientation[playerID]
-      const type = gameState.unitTypes[playerID]
-      if (type === "pawn") return
-
-      const traversed = gameState.traversed[playerID]
-      if (!traversed || traversed.length === 0) return // held
-      const from = originSquares[playerID]
-      const to = traversed[0]
-      if (from === to) return
-
-      const f = toXY(from, boardWidth)
-      const t = toXY(to, boardWidth)
-      const dx = t.x - f.x
-      const dy = t.y - f.y
-      orientation[playerID] =
-        type === "knight" ? { dx, dy } : { dx: Math.sign(dx), dy: Math.sign(dy) }
-    })
-    gameState.orientation = orientation
   }
 
   private applyPawnPromotions(gameState: SnakeGameState): void {

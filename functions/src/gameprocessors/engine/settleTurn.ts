@@ -1,4 +1,5 @@
 import { ActiveEffect } from "@shared/types/Game"
+import { Orientation, toXY } from "./moveGrammar"
 import { ResolveTurnInput, TurnResolution, resolveTurn } from "./resolveTurn"
 
 /**
@@ -27,8 +28,8 @@ import { ResolveTurnInput, TurnResolution, resolveTurn } from "./resolveTurn"
  *
  * Still deliberately absent, because they need state this module does not
  * carry: SPAWNING food, hazards and potions (all random — collection is a
- * rule, spawning is a die roll); the orientation rewrite; pawn promotion;
- * scoring, winners and MMR; anything Firestore.
+ * rule, spawning is a die roll); pawn promotion; scoring, winners and MMR;
+ * anything Firestore.
  */
 
 export interface SettleInput extends ResolveTurnInput {
@@ -72,6 +73,13 @@ export interface Settlement extends TurnResolution {
   tiers: { [unitID: string]: number }
   /** Potion cells still on the board once every collector has taken one. */
   potions: number[]
+  /**
+   * Facing as the turn closed, survivors only — the dead drop out of the map
+   * rather than lingering in it. A caller that keeps its own copy of the
+   * previous turn's facings and patches it is writing the rule twice; take
+   * this map whole, as the server does.
+   */
+  orientation: { [unitID: string]: Orientation }
 }
 
 export const settleTurn = (input: SettleInput): Settlement => {
@@ -167,5 +175,37 @@ export const settleTurn = (input: SettleInput): Settlement => {
     effects = effects.filter((e) => alive.has(e.playerID))
   }
 
-  return { ...resolution, effects, tiers, potions }
+  // 4. Orientation, rewritten from the units still standing — which is why it
+  // runs here, after every phase that can kill: the map holds exactly the
+  // board, and the dead take their facing off it with them. A unit that moved
+  // faces the direction of its FIRST step: sliders and kings the unit step
+  // (e.g. {1,0}, {1,1}), knights their exact L-offset (e.g. {1,-2}) since
+  // signing one would collapse every jump to a diagonal, trail units head
+  // minus the cell the head left — which is why the origin square is read off
+  // the unit's start-of-turn occupancy rather than its body, so the rule holds
+  // for a snake severed down to its head or one that grew this turn. Pawns are
+  // the exception: they change facing ONLY through their rotation action, so a
+  // pawn that walked diagonally forward still points the way it pointed.
+  // Units that held keep what they had.
+  const orientation: { [unitID: string]: Orientation } = {}
+  input.units.forEach((u) => {
+    if (!alive.has(u.id)) return
+    orientation[u.id] = resolution.rotations[u.id] ?? u.orientation
+    if (u.type === "pawn") return
+
+    const traversed = resolution.traversed[u.id]
+    if (!traversed || traversed.length === 0) return // held
+    const from = u.occupancy[0]
+    const to = traversed[0]
+    if (from === to) return
+
+    const f = toXY(from, input.boardWidth)
+    const t = toXY(to, input.boardWidth)
+    const dx = t.x - f.x
+    const dy = t.y - f.y
+    orientation[u.id] =
+      u.type === "knight" ? { dx, dy } : { dx: Math.sign(dx), dy: Math.sign(dy) }
+  })
+
+  return { ...resolution, effects, tiers, potions, orientation }
 }
