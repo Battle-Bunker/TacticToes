@@ -248,6 +248,25 @@ const serialise = (stream: Turn[]): string =>
 
 const GOLDEN = join(__dirname, "settlementReplay.golden.json")
 const GOLDEN_WINDOW_8 = join(__dirname, "settlementReplay.window8.golden.json")
+const GOLDEN_SPAWNERS_ON = join(__dirname, "settlementReplay.spawners.golden.json")
+
+/**
+ * The same game with BOTH spawners running: a food every turn and a potion
+ * every turn, each placed on a free cell the seeded LCG picks. This is the
+ * variant the spawner migration is measured against, and it only works as a
+ * gate because the draws are pinned — the spawners consume the same sequence
+ * in the same order, so a spawner that moved across the phase boundary and
+ * changed WHEN it drew would put its items somewhere else, and every turn
+ * downstream of it would disagree.
+ *
+ * A potion spawning every turn also means potions land where snakes are about
+ * to walk, so this run collects several that the base replay never places —
+ * which is the point: it exercises the spawn/collect loop, not just the spawn.
+ */
+const SPAWNERS_ON: Partial<StartedGameSetup> = {
+  foodSpawnRate: 1,
+  invulnerabilityPotionSpawnRate: 1,
+}
 
 /**
  * The same stream with every `expiryTurn` blanked. Two runs whose blanked
@@ -298,6 +317,38 @@ describe("golden settlement replay", () => {
     ])
 
     check(serialise(eight), GOLDEN_WINDOW_8)
+  })
+
+  it("plays the same game with both spawners running", () => {
+    // Food and potion spawning are the last two things left outside the
+    // module that a turn actually does, and they are about to move inside it,
+    // behind an injected RNG. What makes that checkable is a run in which
+    // both spawners fire on every turn: the cells they choose are a function
+    // of the free-cell set AND of the draw order, so any change to either
+    // shows up here as a different board.
+    const stream = runReplay(SPAWNERS_ON)
+    check(serialise(stream), GOLDEN_SPAWNERS_ON)
+  })
+
+  it("spawns, and has the spawns collected, so the spawner fixture is not vacuous", () => {
+    const stream = runReplay(SPAWNERS_ON)
+    const base = runReplay()
+
+    // Both spawners actually placed things, on every turn.
+    stream.forEach((turn) => {
+      expect(turn.food.length).toBeGreaterThan(0)
+      expect((turn.invulnerabilityPotions ?? []).length).toBeGreaterThan(0)
+    })
+
+    // And what they placed was walked over: the board holds fewer foods than
+    // were spawned, because a snake ate one where it landed.
+    expect(stream[stream.length - 1].food.length).toBeLessThan(REPLAY_TURNS)
+
+    // And the spawned potions were picked up: this run ends with effects the
+    // base run — same moves, same board, no spawners — never wrote.
+    const effectsOf = (turns: Turn[]): number =>
+      (turns[turns.length - 1].activeEffects ?? []).length
+    expect(effectsOf(stream)).toBeGreaterThan(effectsOf(base))
   })
 
   it("fires every mechanic the migration moves, so the fixture is not vacuous", () => {
