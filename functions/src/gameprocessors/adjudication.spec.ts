@@ -30,6 +30,7 @@ import {
   Winner,
 } from "@shared/types/Game"
 import { DEFAULT_MAX_TURNS, TeamSnekProcessor } from "./TeamSnekProcessor"
+import { EndKind, adjudicate, resolveMaxTurns, sharePar } from "./engine/adjudicate"
 
 // 9x9 board: index = y * 9 + x, perimeter is wall (interior 1..7).
 const W = 9
@@ -129,6 +130,10 @@ interface Fixture {
   readonly turnsPlayed?: number
   /** The winner rows the server writes. Pinned before adjudication moves. */
   readonly winners: Winner[]
+  /** The ending the engine must name, asked the same question directly. */
+  readonly kind: EndKind
+  /** And the board it must say decided it. */
+  readonly decidedOn: "settled" | "previous"
 }
 
 /** Two snakes, one per team, in the same opening every snake row starts from. */
@@ -162,6 +167,8 @@ const CORPUS: Fixture[] = [
         teamScore: 3,
       },
     ],
+    kind: "last-team",
+    decidedOn: "settled",
   },
   {
     name: "nobody wins while two teams stand and the limit is far off",
@@ -170,6 +177,8 @@ const CORPUS: Fixture[] = [
     moves: QUIET_MOVES,
     turnsPlayed: DEFAULT_MAX_TURNS - 1,
     winners: [],
+    kind: "continues",
+    decidedOn: "settled",
   },
   {
     name: "the turn limit picks the heavier team when the weights differ",
@@ -187,6 +196,8 @@ const CORPUS: Fixture[] = [
         teamScore: 4,
       },
     ],
+    kind: "turn-limit",
+    decidedOn: "settled",
   },
   {
     name: "the turn limit draws between teams of equal weight",
@@ -210,6 +221,8 @@ const CORPUS: Fixture[] = [
         teamScore: 3,
       },
     ],
+    kind: "turn-limit",
+    decidedOn: "settled",
   },
   {
     name: "an absent maxTurns adjudicates on arrival at the default limit",
@@ -227,6 +240,8 @@ const CORPUS: Fixture[] = [
         teamScore: 4,
       },
     ],
+    kind: "turn-limit",
+    decidedOn: "settled",
   },
   {
     name: "an explicit maxTurns: null never ends on the count",
@@ -237,6 +252,8 @@ const CORPUS: Fixture[] = [
     setupOverrides: { maxTurns: null },
     turnsPlayed: DEFAULT_MAX_TURNS * 2,
     winners: [],
+    kind: "continues",
+    decidedOn: "settled",
   },
   {
     name: "a mutual wipe settles on the previous board, which t1 led",
@@ -252,6 +269,8 @@ const CORPUS: Fixture[] = [
         teamScore: 4,
       },
     ],
+    kind: "all-eliminated",
+    decidedOn: "previous",
   },
   {
     name: "a mutual wipe the previous board had tied draws",
@@ -277,6 +296,8 @@ const CORPUS: Fixture[] = [
         teamScore: 4,
       },
     ],
+    kind: "all-eliminated",
+    decidedOn: "previous",
   },
   {
     name: "a mutual wipe ON the limit turn still settles on the previous board",
@@ -293,6 +314,8 @@ const CORPUS: Fixture[] = [
         teamScore: 4,
       },
     ],
+    kind: "all-eliminated",
+    decidedOn: "previous",
   },
   {
     name: "regicide ends a team, and the survivor wins as the last one standing",
@@ -301,6 +324,8 @@ const CORPUS: Fixture[] = [
       gp("t1#2", "t1", "B", "rook"),
       gp("t2", "t2", "A", "queen"),
     ],
+    kind: "last-team",
+    decidedOn: "settled",
     pieces: {
       t1: [at(5, 5)],
       "t1#2": [at(2, 7)],
@@ -327,6 +352,8 @@ const CORPUS: Fixture[] = [
     },
     moves: { t1: at(4, 3), t2: at(1, 2), t3: at(7, 8) },
     winners: [],
+    kind: "continues",
+    decidedOn: "settled",
   },
   {
     name: "the turn limit weighs the dead team at zero alongside the living",
@@ -348,18 +375,34 @@ const CORPUS: Fixture[] = [
         teamScore: 4,
       },
     ],
+    kind: "turn-limit",
+    decidedOn: "settled",
   },
 ]
 
+interface Played {
+  /** The turn the server wrote. */
+  readonly produced: Turn
+  /** The board it was played from — the one a mutual wipe settles on. */
+  readonly before: Turn
+  readonly setup: StartedGameSetup
+  readonly turnsPlayed: number
+}
+
 /** Plays the fixture's one turn and returns the turn the server produced. */
-const play = (fixture: Fixture): { produced: Turn; before: Turn } => {
+const play = (fixture: Fixture): Played => {
   const setup = mkSetup(fixture.players, fixture.setupOverrides)
   const before = mkTurn(fixture.pieces, fixture.turnOverrides)
-  const state = mkGameState(setup, before, fixture.turnsPlayed ?? 1)
+  const turnsPlayed = fixture.turnsPlayed ?? 1
+  const state = mkGameState(setup, before, turnsPlayed)
   const processor = new TeamSnekProcessor(state)
   const moves = Object.entries(fixture.moves).map(([id, cell]) => mv(id, cell))
-  return { produced: processor.applyMoves(before, moves), before }
+  return { produced: processor.applyMoves(before, moves), before, setup, turnsPlayed }
 }
+
+/** The winning team ids the server declared, in the order it declared them. */
+const teamsIn = (winners: Winner[]): string[] =>
+  winners.map((w) => w.teamID).filter((id, i, all) => all.indexOf(id) === i)
 
 describe("adjudication corpus: the server's winner rows", () => {
   it.each(CORPUS.map((f) => [f.name, f] as const))("%s", (_name, fixture) => {
@@ -400,5 +443,77 @@ describe("adjudication corpus: coverage", () => {
         expect(p.turn.winners.length).toBeGreaterThan(0)
         p.turn.winners.forEach((w) => expect(w.winningSquares.length).toBe(4))
       })
+  })
+})
+
+describe("adjudication corpus: the engine, asked the same question directly", () => {
+  // The point of the move: a second caller can now adjudicate a game without
+  // owning a processor, off nothing but the two wire boards and the roster,
+  // and must reach the server's answer every time. The harness computing
+  // placements and a bot deciding whether its line has ended are both this
+  // call — and neither of them has a SnakeGameState.
+  it.each(CORPUS.map((f) => [f.name, f] as const))("%s", (_name, fixture) => {
+    const { produced, before, setup, turnsPlayed } = play(fixture)
+    const teamOf = Object.fromEntries(fixture.players.map((p) => [p.id, p.teamID]))
+
+    const outcome = adjudicate(
+      { alive: produced.alivePlayers, pieces: produced.playerPieces },
+      { alive: before.alivePlayers, pieces: before.playerPieces },
+      teamOf,
+      turnsPlayed,
+      resolveMaxTurns(setup.maxTurns),
+    )
+
+    expect(outcome.kind).toBe(fixture.kind)
+    expect(outcome.decidedOn).toBe(fixture.decidedOn)
+    expect(outcome.winners).toEqual(teamsIn(fixture.winners))
+    // Team weight is the same number the server put on every winner row.
+    fixture.winners.forEach((row) =>
+      expect(outcome.weightByTeam[row.teamID]).toBe(row.teamScore),
+    )
+    // Every configured team is weighed, including one that has been wiped out.
+    expect(Object.keys(outcome.weightByTeam).sort()).toEqual(
+      Array.from(new Set(fixture.players.map((p) => p.teamID))).sort(),
+    )
+  })
+})
+
+describe("sharePar", () => {
+  const outcomeOf = (fixture: Fixture) => {
+    const { produced, before, setup, turnsPlayed } = play(fixture)
+    return adjudicate(
+      { alive: produced.alivePlayers, pieces: produced.playerPieces },
+      { alive: before.alivePlayers, pieces: before.playerPieces },
+      Object.fromEntries(fixture.players.map((p) => [p.id, p.teamID])),
+      turnsPlayed,
+      resolveMaxTurns(setup.maxTurns),
+    )
+  }
+  const fixture = (name: string): Fixture =>
+    CORPUS.find((f) => f.name === name) as Fixture
+
+  it("scores a dead heat at par for everyone", () => {
+    const outcome = outcomeOf(fixture("the turn limit draws between teams of equal weight"))
+    expect(sharePar(outcome, 2)).toEqual({ t1: 1, t2: 1 })
+  })
+
+  it("scores a win continuously in the margin, not as a flat point", () => {
+    // 4 against 3: the winner takes 4/7 of the end weight in a two-team game,
+    // which is 1.14 par — a nose ahead, and scored like one.
+    const outcome = outcomeOf(
+      fixture("the turn limit picks the heavier team when the weights differ"),
+    )
+    expect(sharePar(outcome, 2)).toEqual({ t1: (4 / 7) * 2, t2: (3 / 7) * 2 })
+  })
+
+  it("scores a team that was wiped out at zero, and the survivors above par", () => {
+    const outcome = outcomeOf(
+      fixture("the turn limit weighs the dead team at zero alongside the living"),
+    )
+    expect(sharePar(outcome, 3)).toEqual({
+      t1: (4 / 7) * 3,
+      t2: (3 / 7) * 3,
+      t3: 0,
+    })
   })
 })

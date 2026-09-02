@@ -1,4 +1,5 @@
 import { ActiveEffect, UnitType } from "@shared/types/Game"
+import { BoardView, Outcome, adjudicate } from "./adjudicate"
 import { Orientation, toXY } from "./moveGrammar"
 import { ResolveTurnInput, TurnResolution, resolveTurn } from "./resolveTurn"
 
@@ -26,9 +27,15 @@ import { ResolveTurnInput, TurnResolution, resolveTurn } from "./resolveTurn"
  * charging a pickup, lapsing a window — has written the second encoding again.
  * Read `tiers`.
  *
+ * Settlement also says whether the game is OVER: `outcome` is null while the
+ * game continues and an adjudication when it ends. A caller simulating a line
+ * therefore knows when the line stops, which is what makes a turn limit
+ * representable at all rather than an infinite horizon everybody plays into.
+ *
  * Still deliberately absent, because they need state this module does not
  * carry: SPAWNING food, hazards and potions (all random — collection is a
- * rule, spawning is a die roll); scoring, winners and MMR; anything Firestore.
+ * rule, spawning is a die roll); the winner ROWS, MMR and placements a caller
+ * builds out of an outcome; anything Firestore.
  */
 
 export interface SettleInput extends ResolveTurnInput {
@@ -60,6 +67,19 @@ export interface SettleInput extends ResolveTurnInput {
    * collapses to the single square it stands on.
    */
   readonly pawnPromotionWeight: number
+
+  /**
+   * The turn count this game is adjudicated at, or null for a game that runs
+   * unlimited. Pass `resolveMaxTurns(setup.maxTurns)`: an absent setting is
+   * the default limit, and only a written-out null opts out.
+   */
+  readonly maxTurns: number | null
+  /**
+   * The previous committed turn's board. Read by exactly one branch — the one
+   * where every remaining team dies on this turn and the outcome has to come
+   * off the last board somebody was standing on.
+   */
+  readonly previous?: BoardView
 }
 
 /** The window a setup that names none plays with. */
@@ -93,6 +113,12 @@ export interface Settlement extends TurnResolution {
   unitTypes: { [unitID: string]: UnitType }
   /** Units that promoted this turn, for anything that wants to announce it. */
   promoted: string[]
+  /**
+   * Whether the game ended on this turn, and how. Null while it continues.
+   * Adjudicated on the settled board — after promotion, so a pawn that traded
+   * its stack for a queen is weighed at the weight it actually ends on.
+   */
+  outcome: Outcome | null
 }
 
 export const settleTurn = (input: SettleInput): Settlement => {
@@ -251,5 +277,33 @@ export const settleTurn = (input: SettleInput): Settlement => {
     if (settled.health > queenMaxHealth) settled.health = queenMaxHealth
   })
 
-  return { ...resolution, effects, tiers, potions, orientation, unitTypes, promoted }
+  // 6. Adjudication, on the board as it now stands: promotion has already
+  // collapsed what it was going to collapse, so the weights the outcome is
+  // decided at are the weights the turn actually ends with. Spawning food or
+  // potions afterwards cannot change it — items are not weight.
+  const board: BoardView = {
+    alive: aliveInOrder,
+    pieces: Object.fromEntries(
+      aliveInOrder.map((unitID) => [unitID, resolution.board[unitID]?.occupancy ?? []]),
+    ),
+  }
+  const adjudicated = adjudicate(
+    board,
+    input.previous,
+    input.teamOf,
+    input.turn,
+    input.maxTurns,
+  )
+  const outcome = adjudicated.kind === "continues" ? null : adjudicated
+
+  return {
+    ...resolution,
+    effects,
+    tiers,
+    potions,
+    orientation,
+    unitTypes,
+    promoted,
+    outcome,
+  }
 }

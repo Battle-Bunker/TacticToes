@@ -11,9 +11,10 @@ Copy exactly these, together, keeping their relative layout:
 
 | File | What it is |
 | --- | --- |
-| `settleTurn.ts` | **The public entry point.** One pure function, `settleTurn`, covering everything from "the staged moves are known" to "the turn has closed" — `resolveTurn` plus the end-of-turn effect bookkeeping, the orientation rewrite and pawn promotion. |
+| `settleTurn.ts` | **The public entry point.** One pure function, `settleTurn`, covering everything from "the staged moves are known" to "the turn has closed" — `resolveTurn` plus the end-of-turn effect bookkeeping, the orientation rewrite, pawn promotion and the adjudication that says whether the game ended. |
 | `resolveTurn.ts` | The board half of settlement, callable on its own: grammar, collisions, food, exhaustion, sever, regicide. |
 | `turnEngine.ts` | The snapshot-adjudicated sub-step collision engine. |
+| `adjudicate.ts` | Who has won, on which board, and at what weight — plus the turn limit a setup is played to. |
 | `moveGrammar.ts` | The movement grammar: staged cell → the path a unit of that kind walks, plus spawn orientation and the per-kind property flags. |
 | `VENDOR.md` | This file. |
 
@@ -84,6 +85,8 @@ const settled = settleTurn({
   potionsEnabled,     // off: potions are inert scenery
   potionWindowTurns,  // how long a pickup's debuff and ally buffs last (3)
   pawnPromotionWeight, // the weight at which a pawn becomes a queen (10)
+  maxTurns,           // resolveMaxTurns(setup.maxTurns): 100 unless told otherwise
+  previous,           // the last committed turn's board, for the mutual-wipe branch
 })
 
 settled.board          // survivors: final occupancy and health
@@ -95,6 +98,7 @@ settled.potions        // potion cells left once every collector has taken one
 settled.orientation    // facing per surviving unit, rewritten for the turn
 settled.unitTypes      // kind per surviving unit, promotion applied
 settled.promoted       // units that became queens this turn
+settled.outcome        // null while the game continues; the adjudication when it ends
 ```
 
 **`tier` is an input AND an output.** A caller hands settlement the tiers a
@@ -120,6 +124,13 @@ standing, with rotations folded in and the dead dropped. Carrying the previous
 turn's map forward and patching the units that moved is the per-kind facing
 rule written a second time — sliders sign their ray, knights keep their exact
 L-offset, and pawns turn only through their rotation action.
+
+**`outcome` is the end of the game, not the score of it.** It names the kind
+of ending, the winning team ids, the weight behind each team and WHICH board
+decided — the settled one, or the previous committed turn's when every
+remaining team died at once. `adjudicate` is exported separately for a caller
+that has two boards and no turn to settle (a harness recomputing placements),
+and `sharePar` turns an outcome into a par-1 score per team.
 
 `resolveTurn` remains exported for a caller that wants the board half alone;
 it does not touch effects, tiers or facing.

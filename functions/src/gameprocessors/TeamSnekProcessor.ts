@@ -12,6 +12,7 @@ import {
 } from "@shared/types/Game"
 import { Timestamp } from "firebase-admin/firestore"
 import { logger } from "../logger"
+import { BoardView, Outcome, resolveMaxTurns } from "./engine/adjudicate"
 import {
   DEFAULT_PAWN_PROMOTION_WEIGHT,
   Orientation,
@@ -70,27 +71,18 @@ export interface SnakeGameState {
   subStepCount: number
 }
 
-// The board projection the team scoring/win logic works on. Built either from
-// the in-flight SnakeGameState or from a committed Turn.
-interface TeamBoardView {
+// The board projection adjudication works on, with the mutable arrays the
+// wire wants: the engine's BoardView reads it, and the winner rows are built
+// from the same object. Made either from the in-flight SnakeGameState or from
+// a committed Turn.
+interface TeamBoardView extends BoardView {
   alive: string[]
   pieces: Record<string, number[]>
 }
 
-/**
- * Every game is played to a turn limit; this is the one a setup that names
- * none is played to. The limit is enforced, not optional: only an explicit
- * `maxTurns: null` opts a game out of it (see GameSetup.maxTurns).
- */
-export const DEFAULT_MAX_TURNS = 100
-
-/**
- * The limit a setup actually plays to. `null` — and only a written-out `null`
- * — means no limit at all; a setup that says nothing gets the default.
- */
-export const resolveMaxTurns = (
-  maxTurns: number | null | undefined,
-): number | null => (maxTurns === undefined ? DEFAULT_MAX_TURNS : maxTurns)
+// The turn limit is a rule, so it is the engine's: re-exported here because
+// callers have always asked the processor for it.
+export { DEFAULT_MAX_TURNS, resolveMaxTurns } from "./engine/adjudicate"
 
 export class TeamSnekProcessor {
   protected gameSetup: StartedGameSetup
@@ -281,7 +273,8 @@ export class TeamSnekProcessor {
       //    the ally-buff cancel for vulnerable units that died or were
       //    severed, potion collection, effect expiry, the orientation rewrite
       //    and pawn promotion, all of which the module now owns.
-      this.applySettlement(gameState, settleTurn(this.settleInput(gameState)))
+      const settled = settleTurn(this.settleInput(gameState))
+      this.applySettlement(gameState, settled)
 
       // 3. Spawns. They read weight through the free-cell set, and promotion
       //    has already run — which changes nothing, because a piece's
@@ -290,9 +283,10 @@ export class TeamSnekProcessor {
       this.generateNewFood(gameState)
       this.generateNewInvulnerabilityPotions(gameState)
 
-      // 4. Winners and turn assembly
-      const winners = this.calculateWinners(gameState)
-      return this.createNewTurn(currentTurn, gameState, winners)
+      // 4. Winners and turn assembly. Settlement has already adjudicated the
+      //    game on the board it settled — spawned items are not weight, so
+      //    running the spawners first cannot have changed the verdict.
+      return this.createNewTurn(currentTurn, gameState, this.winnerRows(gameState, settled.outcome))
     } catch (error) {
       logger.error(`Snek: Error applying moves:`, error)
       throw error
@@ -319,13 +313,11 @@ export class TeamSnekProcessor {
     const kings = new Set(
       this.gameSetup.gamePlayers.filter((p) => p.unitType === "king").map((p) => p.id),
     )
-    const teamOf: { [playerID: string]: string } = {}
-    this.gameSetup.gamePlayers.forEach((p) => {
-      teamOf[p.id] = p.teamID
-    })
     return {
       turn: this.gameState.turns.length,
-      teamOf,
+      teamOf: this.teamOf(),
+      maxTurns: this.maxTurns,
+      previous: this.previousBoard(),
       effects: gameState.activeEffects,
       potions: gameState.newInvulnerabilityPotions,
       potionsEnabled: this.gameSetup.invulnerabilityPotionEnabled === true,
@@ -560,38 +552,31 @@ export class TeamSnekProcessor {
       }
   }
 
-  // Team-based end conditions
-  protected calculateWinners(gameState: SnakeGameState): Winner[] {
-    const currentTurnNumber = this.gameState.turns.length
-    const reachedTurnLimit = this.maxTurns !== null && currentTurnNumber >= this.maxTurns
+  // The winner ROWS the wire wants, built from the outcome settlement already
+  // adjudicated. The rule — which teams won, on which board, at what weight —
+  // is the engine's (engine/adjudicate.ts); what is left here is the shape:
+  // one row per configured player of a winning team, carrying the squares it
+  // held on the board that decided the game.
+  protected winnerRows(gameState: SnakeGameState, outcome: Outcome | null): Winner[] {
+    if (!outcome) return []
 
-    const board = TeamSnekProcessor.liveBoard(gameState)
-    const aliveTeams = this.getAliveTeams(board)
+    const board =
+      outcome.decidedOn === "previous"
+        ? this.previousBoard()
+        : TeamSnekProcessor.liveBoard(gameState)
+    if (!board) return []
 
-    if (aliveTeams.length === 0) {
-      return this.calculatePreviousTurnTeamOutcome()
-    }
-
-    if (aliveTeams.length === 1) {
-      return this.calculateTeamWinners(aliveTeams[0], board)
-    }
-
-    if (reachedTurnLimit) {
-      const teamScores = this.getTeamScores(board)
-      const maxScore = Math.max(...teamScores.values())
-      const topTeams = Array.from(teamScores.entries())
-        .filter(([, score]) => score === maxScore)
-        .map(([teamID]) => teamID)
-
-      if (topTeams.length === 1) {
-        return this.calculateTeamWinners(topTeams[0], board)
-      }
-
-      // Tie at the turn limit results in a draw between the top teams
-      return this.calculateTeamDrawWinners(topTeams, board)
-    }
-
-    return []
+    return outcome.winners.flatMap((teamID) =>
+      this.gameSetup.gamePlayers
+        .filter((player) => player.teamID === teamID)
+        .map((player) => ({
+          playerID: player.id,
+          score: board.pieces[player.id]?.length || 0,
+          winningSquares: board.pieces[player.id] || [],
+          teamID,
+          teamScore: outcome.weightByTeam[teamID] ?? 0,
+        })),
+    )
   }
 
   /** The in-flight state of the turn being resolved. */
@@ -604,88 +589,22 @@ export class TeamSnekProcessor {
     return { alive: turn.alivePlayers, pieces: turn.playerPieces }
   }
 
-  private getAliveTeams(board: TeamBoardView): string[] {
-    const aliveTeams = new Set<string>()
-
-    board.alive.forEach((playerID) => {
-      const player = this.gameSetup.gamePlayers.find(p => p.id === playerID)
-      if (player?.teamID) {
-        aliveTeams.add(player.teamID)
-      }
-    })
-
-    return Array.from(aliveTeams)
-  }
-
-  private calculateTeamWinners(teamID: string, board: TeamBoardView): Winner[] {
-    const teamScore = this.getTeamScore(teamID, board)
-
-    return this.gameSetup.gamePlayers
-      .filter(player => player.teamID === teamID)
-      .map(player => ({
-        playerID: player.id,
-        score: board.pieces[player.id]?.length || 0,
-        winningSquares: board.pieces[player.id] || [],
-        teamID,
-        teamScore,
-      }))
-  }
-
-  private calculateTeamDrawWinners(teamIDs: string[], board: TeamBoardView): Winner[] {
-    return teamIDs.flatMap(teamID => this.calculateTeamWinners(teamID, board))
-  }
-
-  private getTeamScore(teamID: string, board: TeamBoardView): number {
-    return this.gameSetup.gamePlayers
-      .filter(player => player.teamID === teamID)
-      .reduce((total, player) => total + (board.pieces[player.id]?.length || 0), 0)
-  }
-
-  private getTeamScores(board: TeamBoardView): Map<string, number> {
-    const teamScores = new Map<string, number>()
-
-    this.gameSetup.gamePlayers.forEach(player => {
-      if (player.teamID) {
-        const currentScore = teamScores.get(player.teamID) || 0
-        teamScores.set(player.teamID, currentScore + (board.pieces[player.id]?.length || 0))
-      }
-    })
-
-    return teamScores
-  }
-
-  // When every remaining team died at once, the outcome is settled from the
-  // previous committed turn's board.
-  private calculatePreviousTurnTeamOutcome(): Winner[] {
+  /**
+   * The last committed turn's board — the one a mutual wipe is settled on.
+   * Undefined only before any turn has been committed, which no game reaches.
+   */
+  private previousBoard(): TeamBoardView | undefined {
     const previousTurn = this.gameState.turns[this.gameState.turns.length - 1]
+    return previousTurn ? TeamSnekProcessor.turnBoard(previousTurn) : undefined
+  }
 
-    if (!previousTurn) {
-      return []
-    }
-
-    const board = TeamSnekProcessor.turnBoard(previousTurn)
-    const aliveTeams = this.getAliveTeams(board)
-
-    if (aliveTeams.length === 1) {
-      return this.calculateTeamWinners(aliveTeams[0], board)
-    }
-
-    const teamScores = this.getTeamScores(board)
-
-    if (teamScores.size === 0) {
-      return []
-    }
-
-    const maxScore = Math.max(...teamScores.values())
-    const topTeams = Array.from(teamScores.entries())
-      .filter(([, score]) => score === maxScore)
-      .map(([teamID]) => teamID)
-
-    if (topTeams.length === 1) {
-      return this.calculateTeamWinners(topTeams[0], board)
-    }
-
-    return this.calculateTeamDrawWinners(topTeams, board)
+  /** Unit id → team id, for every configured unit. */
+  private teamOf(): { [playerID: string]: string } {
+    const teamOf: { [playerID: string]: string } = {}
+    this.gameSetup.gamePlayers.forEach((p) => {
+      teamOf[p.id] = p.teamID
+    })
+    return teamOf
   }
 
   protected createNewTurn(currentTurn: Turn, gameState: SnakeGameState, winners: Winner[]): Turn {

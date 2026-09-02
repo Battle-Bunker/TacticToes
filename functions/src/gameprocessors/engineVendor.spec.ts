@@ -22,6 +22,7 @@ const engineFiles = readdirSync(ENGINE_DIR).filter((f) => f.endsWith(".ts"))
 describe("engine/ is vendorable", () => {
   it("contains the files VENDOR.md promises, and nothing else", () => {
     expect(engineFiles.sort()).toEqual([
+      "adjudicate.ts",
       "moveGrammar.ts",
       "resolveTurn.ts",
       "settleTurn.ts",
