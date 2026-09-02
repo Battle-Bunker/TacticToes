@@ -1,4 +1,5 @@
 import { UnitType } from "@shared/types/Game"
+import { Rng } from "./spawn"
 
 /**
  * The movement grammar: the one place unit-kind names still matter. It turns a
@@ -112,9 +113,23 @@ export const spawnOrientationCandidates = (
   return best
 }
 
-// NOTE: picking ONE of these candidates is spawning, not rules, and the tie
-// break is random — so it lives with the caller. Nothing in this directory may
-// read a clock or an RNG (see VENDOR.md).
+/**
+ * The orientation a unit is placed facing: one of the candidates above, drawn
+ * uniformly when several tie. The candidate SET was always a rule; which of
+ * the tied candidates is taken is a die roll, and the die is injected like
+ * every other one in this module (engine/spawn.ts) — nothing in this
+ * directory reads a clock or an RNG of its own (see VENDOR.md).
+ */
+export const pickSpawnOrientation = (
+  type: UnitType,
+  index: number,
+  boardWidth: number,
+  boardHeight: number,
+  rng: Rng,
+): Orientation => {
+  const best = spawnOrientationCandidates(type, index, boardWidth, boardHeight)
+  return best[Math.floor(rng.next() * best.length)]
+}
 
 export type UnitAction =
   | { kind: "stay" }

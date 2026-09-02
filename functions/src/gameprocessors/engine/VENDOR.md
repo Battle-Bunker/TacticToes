@@ -15,6 +15,7 @@ Copy exactly these, together, keeping their relative layout:
 | `resolveTurn.ts` | The board half of settlement, callable on its own: grammar, collisions, food, exhaustion, sever, regicide. |
 | `turnEngine.ts` | The snapshot-adjudicated sub-step collision engine. |
 | `adjudicate.ts` | Who has won, on which board, and at what weight — plus the turn limit a setup is played to. |
+| `spawn.ts` | Where a food or a potion may land and how many arrive, behind an injected RNG. |
 | `moveGrammar.ts` | The movement grammar: staged cell → the path a unit of that kind walks, plus spawn orientation and the per-kind property flags. |
 | `VENDOR.md` | This file. |
 
@@ -31,6 +32,11 @@ Plus the one type module they depend on:
 runtime dependency, no reaching up into `../`. Nothing in here may read a
 clock, a random number, or the network — `resolveTurn` is a pure function of
 its input and mutates nothing it is given.
+
+Item spawning is the game's only nondeterminism, and it is inside the module
+anyway: the rules travel here and the DIE is an input. `settleTurn` takes a
+`Spawner` as its second argument, `randomSpawner(rules, rng)` is the real one
+over an injected `Rng`, and `NO_SPAWN` places nothing at all.
 
 This is enforced, not merely requested: `../engineVendor.spec.ts` parses every
 import in this directory and fails the build if one points anywhere else — and
@@ -87,14 +93,17 @@ const settled = settleTurn({
   pawnPromotionWeight, // the weight at which a pawn becomes a queen (10)
   maxTurns,           // resolveMaxTurns(setup.maxTurns): 100 unless told otherwise
   previous,           // the last committed turn's board, for the mutual-wipe branch
-})
+}, randomSpawner({ foodSpawnRate, potionsEnabled, potionSpawnRate, fertileTiles },
+                 { next: () => Math.random() }))   // or NO_SPAWN
 
 settled.board          // survivors: final occupancy and health
 settled.deaths         // every unit removed, with cell / subStep / cause
 settled.eliminatedTeamIDs
 settled.effects        // the schedule as the turn closed
 settled.tiers          // per-unit tier the NEXT turn starts from
-settled.potions        // potion cells left once every collector has taken one
+settled.food           // food left once every eater has eaten, plus what spawned
+settled.potions        // potion cells left once every collector has taken one, plus spawns
+settled.spawned        // { food, potions }: just the cells this turn added
 settled.orientation    // facing per surviving unit, rewritten for the turn
 settled.unitTypes      // kind per surviving unit, promotion applied
 settled.promoted       // units that became queens this turn
@@ -113,11 +122,11 @@ caller sends in are the kinds the turn was played at, and `unitTypes` is the
 kinds the next turn opens with. A caller that promotes for itself has written
 the threshold, the weight-1 collapse and the queen health clamp a second time.
 
-Promotion runs LAST, after the food phase (so a pawn that ate its way to the
-threshold promotes on that turn) and after the orientation rewrite (so it was
-still a pawn when its facing was decided). A caller that spawns items of its
-own may still do so after settlement: a piece's occupancy is N copies of one
-square, so the collapse frees no cell and the free-cell set is unchanged.
+Promotion runs last of the unit phases, after the food phase (so a pawn that
+ate its way to the threshold promotes on that turn) and after the orientation
+rewrite (so it was still a pawn when its facing was decided), and before
+spawning — which changes nothing either way, because a piece's occupancy is N
+copies of one square and the collapse frees no cell.
 
 **Take `orientation` whole.** It is rebuilt each turn from the units still
 standing, with rotations folded in and the dead dropped. Carrying the previous
