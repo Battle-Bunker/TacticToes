@@ -859,16 +859,59 @@ function drawHazardIcon(
   ctx.restore()
 }
 
+// Energy mark: a LIGHTNING BOLT, drawn from one path for the same reason the
+// anvil is. The bolt CHARACTER (U+26A1) carries emoji presentation on every
+// platform that ships a colour font, so it arrives as a fixed yellow picture \u2014
+// and the one thing this mark has to do is wear the red/orange/green tint that
+// says how much charge is left. A path takes a fill colour; an emoji does not.
+export const BOLT_ICON = {
+  w: 16,
+  h: 24,
+  // The classic zigzag: a wide shoulder at the top, the jog across the middle,
+  // a single point at the bottom. Nothing else reads as "bolt" at ten pixels.
+  d: "M10.5 1 L2 13.5 L7.5 13.5 L5.5 23 L14 10.5 L8.5 10.5 Z",
+  // The path IS its own ink \u2014 the bolt fills its box corner to corner.
+  ink: { x: 2, y: 1, w: 12, h: 22 },
+}
+// The rim the bolt wears, so the shape still reads when its tint runs pale
+// against the near-white plate it is drawn on. The FILL is the tint and is
+// passed in, never fixed: that is the whole point of the mark.
+export const BOLT_LINE = "rgba(20, 24, 30, 0.75)"
+/** The tint a bolt falls back to when a caller names none. */
+export const BOLT_DEFAULT_FILL = "#43a047"
+
+// The bolt, left-aligned at `x`, vertically centred on `midY`, filled with the
+// energy tint the caller hands it.
+function drawBoltIcon(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  midY: number,
+  height: number,
+  color?: string,
+) {
+  const scale = height / BOLT_ICON.h
+  ctx.save()
+  ctx.translate(x, midY - height / 2)
+  ctx.scale(scale, scale)
+  const p = new Path2D(BOLT_ICON.d)
+  ctx.lineJoin = "round"
+  ctx.strokeStyle = BOLT_LINE
+  ctx.lineWidth = 1.6
+  ctx.stroke(p)
+  ctx.fillStyle = color || BOLT_DEFAULT_FILL
+  ctx.fill(p)
+  ctx.restore()
+}
+
 // Stat glyphs shared by the on-board unit tags and the body plates, so one stat
-// always reads as one symbol wherever it appears. Weight (the anvil) and
-// extra-vulnerability (the hazard triangle) are drawn paths rather than
-// characters, so neither carries an entry here.
+// always reads as one symbol wherever it appears. Weight (the anvil), energy
+// (the bolt) and extra-vulnerability (the hazard triangle) are drawn paths
+// rather than characters, so none of them carries an entry here.
 export const STAT_ICON = {
-  energy: "\u2665", // heart, tinted by energyBarColor
   invulnerable: "\u{1F6E1}\uFE0F", // shield (positive level)
 }
 
-export type MarkName = "anvil" | "hazard"
+export type MarkName = "anvil" | "hazard" | "bolt"
 
 interface DrawnMark {
   icon: { w: number; h: number; d: string; ink: { x: number; y: number; w: number; h: number } }
@@ -877,6 +920,8 @@ interface DrawnMark {
     x: number,
     midY: number,
     height: number,
+    /** The fill, for a mark whose colour is a reading rather than a livery. */
+    color?: string,
   ) => void
 }
 
@@ -886,16 +931,15 @@ interface DrawnMark {
 const STAT_MARK: Record<MarkName, DrawnMark> = {
   anvil: { icon: ANVIL_ICON, draw: drawAnvilIcon },
   hazard: { icon: HAZARD_ICON, draw: drawHazardIcon },
+  bolt: { icon: BOLT_ICON, draw: drawBoltIcon },
 }
 
 // The INK of the glyph stat symbols, per unit of font size: how tall it stands,
 // and how far its centre sits above the alphabetic baseline. A glyph fills its
-// em box neither fully nor symmetrically — a heart is barely more than half its
-// font size tall and rides high, the shield emoji overflows the em in both
-// directions — so a symbol stacked over a number can only be sized and centred
-// against numbers if it is measured by its ink.
+// em box neither fully nor symmetrically — the shield emoji overflows the em in
+// both directions — so a symbol stacked over a number can only be sized and
+// centred against numbers if it is measured by its ink.
 const STAT_GLYPH_INK: Record<string, { h: number; mid: number }> = {
-  [STAT_ICON.energy]: { h: 0.58, mid: 0.27 },
   [STAT_ICON.invulnerable]: { h: 1.18, mid: 0.34 },
 }
 // A glyph nobody has measured: assume it behaves like a capital letter. The fit
@@ -1086,7 +1130,7 @@ function drawWallCell(
 //   head        the unit's LETTER, on the same plate every stat behind it uses,
 //               filled with its own body colour
 //   neck        weight, under the silver anvil
-//   2nd cell    energy, under the heart tinted by the shared thresholds
+//   2nd cell    energy, under the bolt tinted by the shared thresholds
 //   3rd cell    the TURNS of invulnerability still to run, under the shield /
 //               hazard mark — only while a level is running
 //   tail        how many body parts are STACKED on the tail cell — only when
@@ -1104,7 +1148,7 @@ function drawWallCell(
 // carries it.
 const BODY_ITEM_MIN_FONT = 9
 // The smallest a stat's SYMBOL may be drawn, measured across its ink. Below this
-// an anvil, a heart and a shield all collapse into the same small dark blob, and
+// an anvil, a bolt and a shield all collapse into the same small dark blob, and
 // a symbol that cannot be told apart names nothing — so the item is dropped
 // whole rather than drawn as a number nobody can label.
 const BODY_ITEM_MIN_SYMBOL = 6
@@ -1112,7 +1156,7 @@ const BODY_ITEM_MIN_SYMBOL = 6
 // may take any of it, and the air between the two rows as a share of that column.
 const BODY_STACK_SYMBOL = 0.44
 const BODY_STACK_GAP = 0.07
-// The plaque a stat item is drawn on: near-white, so a tinted heart, a silver
+// The plaque a stat item is drawn on: near-white, so a tinted bolt, a silver
 // anvil and a dark number keep the same contrast on EVERY team colour and over
 // every terrain a body can lie on.
 const BODY_ITEM_PLAQUE = "rgba(255, 255, 255, 0.94)"
@@ -1432,6 +1476,7 @@ function drawBodyStatItem(
         cx - symbol.inkW / 2 + (symbol.boxDX ?? 0),
         symMidY + (symbol.boxDY ?? 0),
         symbol.boxH ?? symbol.inkH,
+        item.iconColor,
       )
     } else {
       ctx.font = symbol.font ?? fit.font
@@ -1511,7 +1556,7 @@ function unitBodyInfoPlan(
   if (typeof unit.energy === "number") {
     flow.push({
       kind: "stat",
-      icon: STAT_ICON.energy,
+      mark: "bolt",
       iconColor: energyBarColor(energyFraction(unit)),
       text: String(unit.energy),
     })
@@ -2320,10 +2365,10 @@ function statIconWidth(
 
 // Draw ONE unit tag: a rounded white pill whose LETTER SQUARE is its anchor,
 // sitting on the cell diagonally adjacent to the unit's head. The body carries
-// the unit's WEIGHT behind the silver anvil, its numeric ENERGY behind a heart
+// the unit's WEIGHT behind the silver anvil, its numeric ENERGY behind a bolt
 // tinted by the shared energy thresholds, and its remaining INVULNERABILITY
 // turns behind the shared shield/warning mark. The tag carries no energy BAR:
-// the numeric heart says it, and the unit's own cell already wears the bar.
+// the numeric bolt says it, and the unit's own cell already wears the bar.
 // `letterAtEnd` flips the body's reading order: the square stays on the anchor
 // cell while the stats run to its LEFT, which is what lets a tag near the
 // board's right edge extend inward without losing its anchor.
@@ -2389,7 +2434,7 @@ function drawUnitTag(ctx: CanvasRenderingContext2D, tag: TagLayout) {
     if (!letterAtEnd) x += gap
     const mark = stat.mark ? STAT_MARK[stat.mark] : null
     if (mark) {
-      mark.draw(ctx, x, midY, iconH)
+      mark.draw(ctx, x, midY, iconH, stat.iconColor ?? undefined)
     } else {
       ctx.fillStyle = stat.iconColor || "#1a1a1a"
       ctx.fillText(stat.icon ?? "", x, midY)
@@ -2477,13 +2522,14 @@ function renderUnitTags(
     const padX = fontSize * 0.45
     const gap = fontSize * 0.45
     const iconGap = fontSize * 0.16
-    // Stat pairs: weight, energy, invulnerability. Weight rides the drawn silver
-    // anvil and a negative invulnerability the drawn red hazard mark; the energy
-    // heart is the one tinted glyph, the shield a plain one.
+    // Stat pairs: weight, energy, invulnerability. All three symbols but one
+    // are drawn paths in a fixed livery — the silver anvil, the red hazard mark;
+    // the energy BOLT is the one whose fill is a reading, tinted by how much
+    // charge is left, and the shield is the one plain glyph.
     const stats: TagStat[] = [{ mark: "anvil", iconColor: null, text: String(weight) }]
     if (energy != null) {
       stats.push({
-        icon: STAT_ICON.energy,
+        mark: "bolt",
         iconColor: energyBarColor(frac),
         text: String(energy),
       })

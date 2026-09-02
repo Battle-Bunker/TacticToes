@@ -1,12 +1,11 @@
 import { Box, Typography } from "@mui/material"
 import React, { useEffect, useRef, useState } from "react"
-import { AnvilIcon, HazardIcon, UnitIcon } from "../../board/BoardIcons"
+import { AnvilIcon, BoltIcon, HazardIcon, UnitIcon } from "../../board/BoardIcons"
 import {
   BoardModel,
   BoardTeam,
   BoardUnit,
   RosterUnit,
-  STAT_ICON,
   energyBarColor,
   energyFraction,
   invulnerabilityMark,
@@ -206,9 +205,7 @@ const UnitRow: React.FC<{ row: Row; turn: number }> = ({ row, turn }) => {
           </Stat>
           {!dead && (
             <Stat title="Energy">
-              <Box component="span" sx={{ color: energyBarColor(frac) }}>
-                {STAT_ICON.energy}
-              </Box>
+              <BoltIcon height={12} color={energyBarColor(frac)} />
               <Box
                 sx={{
                   width: 48,
