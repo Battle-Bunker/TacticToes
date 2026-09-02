@@ -19,7 +19,7 @@ import {
   ORTHOGONALS,
   isPieceType,
   leavesTrail,
-  spawnOrientationCandidates,
+  pickSpawnOrientation,
 } from "./engine/moveGrammar"
 import {
   DEFAULT_POTION_WINDOW_TURNS,
@@ -27,6 +27,13 @@ import {
   Settlement,
   settleTurn,
 } from "./engine/settleTurn"
+import {
+  Spawner,
+  freeCells,
+  randomSpawner,
+  resolveFoodSpawnRate,
+  resolvePotionSpawnRate,
+} from "./engine/spawn"
 import { assignCellsToSlices, sliceDistance } from "../utils/radialSlices"
 
 export interface SnakeGameState {
@@ -96,8 +103,7 @@ export class TeamSnekProcessor {
     this.gameSetup = gameState.setup
     this.gameState = gameState
     this.maxTurns = resolveMaxTurns(gameState.setup.maxTurns)
-    const rawRate = gameState.setup.foodSpawnRate ?? 0.5
-    this.foodSpawnRate = rawRate > 5 ? rawRate / 100 : rawRate
+    this.foodSpawnRate = resolveFoodSpawnRate(gameState.setup.foodSpawnRate)
   }
 
   firstTurn(): Turn {
@@ -273,19 +279,14 @@ export class TeamSnekProcessor {
       //    the ally-buff cancel for vulnerable units that died or were
       //    severed, potion collection, effect expiry, the orientation rewrite
       //    and pawn promotion, all of which the module now owns.
-      const settled = settleTurn(this.settleInput(gameState))
+      //    Spawning runs inside it too, as the last board phase: the rules
+      //    for where an item may land are the module's, and the only thing
+      //    this class still supplies is the die.
+      const settled = settleTurn(this.settleInput(gameState), this.spawner())
       this.applySettlement(gameState, settled)
 
-      // 3. Spawns. They read weight through the free-cell set, and promotion
-      //    has already run — which changes nothing, because a piece's
-      //    occupancy is N copies of one square and collapsing the stack frees
-      //    no cell.
-      this.generateNewFood(gameState)
-      this.generateNewInvulnerabilityPotions(gameState)
-
-      // 4. Winners and turn assembly. Settlement has already adjudicated the
-      //    game on the board it settled — spawned items are not weight, so
-      //    running the spawners first cannot have changed the verdict.
+      // 3. Winners and turn assembly. Settlement has already adjudicated the
+      //    game on the board it settled.
       return this.createNewTurn(currentTurn, gameState, this.winnerRows(gameState, settled.outcome))
     } catch (error) {
       logger.error(`Snek: Error applying moves:`, error)
@@ -303,6 +304,25 @@ export class TeamSnekProcessor {
           .filter((p) => p.unitType === "king")
           .map((p) => p.teamID),
       ),
+    )
+  }
+
+  // The turn's die. Item spawning is the game's only nondeterminism, and the
+  // rules around it — the free-cell set, the rate arithmetic, the fertile
+  // filter — are the module's; this hands it the randomness those rules
+  // consume, and nothing else. A client predicting a turn passes NO_SPAWN
+  // instead and reads a barer board.
+  private spawner(): Spawner {
+    return randomSpawner(
+      {
+        foodSpawnRate: this.foodSpawnRate,
+        potionsEnabled: this.gameSetup.invulnerabilityPotionEnabled === true,
+        potionSpawnRate: resolvePotionSpawnRate(
+          this.gameSetup.invulnerabilityPotionSpawnRate,
+        ),
+        fertileTiles: this.gameSetup.fertileGroundEnabled ? this.fertileTiles : [],
+      },
+      { next: () => Math.random() },
     )
   }
 
@@ -411,17 +431,18 @@ export class TeamSnekProcessor {
   }
 
   // Spawn orientation, assigned once at turn 0: toward the board centre, ties
-  // resolved uniformly at random among the tied candidates. The candidate set
-  // is a rule (engine/moveGrammar.ts); choosing among them is spawning, and
-  // spawning is random, so it lives out here.
+  // resolved uniformly at random among the tied candidates. Both halves are
+  // the module's (engine/moveGrammar.ts) — the candidate set because it is a
+  // rule, the draw because the module takes its randomness as an input.
   private spawnOrientation(
     type: UnitType,
     index: number,
     boardWidth: number,
     boardHeight: number,
   ): Orientation {
-    const best = spawnOrientationCandidates(type, index, boardWidth, boardHeight)
-    return best[Math.floor(Math.random() * best.length)]
+    return pickSpawnOrientation(type, index, boardWidth, boardHeight, {
+      next: () => Math.random(),
+    })
   }
 
   // Max health for a unit type: per-type config with a universal default of
@@ -488,29 +509,6 @@ export class TeamSnekProcessor {
     }
   }
 
-  private generateNewInvulnerabilityPotions(gameState: SnakeGameState): void {
-    if (!this.gameSetup.invulnerabilityPotionEnabled) return
-
-    const spawnRate = this.gameSetup.invulnerabilityPotionSpawnRate ?? 0.15
-    const guaranteed = Math.floor(spawnRate)
-    const fractional = spawnRate - guaranteed
-    const total = guaranteed + (Math.random() < fractional ? 1 : 0)
-
-    for (let i = 0; i < total; i++) {
-      const freePositions = this.getFreePositions(
-        gameState.boardWidth,
-        gameState.boardHeight,
-        gameState.newSnakes,
-        [...gameState.newFood, ...gameState.newInvulnerabilityPotions],
-        gameState.newHazards,
-      )
-      if (freePositions.length > 0) {
-        const randomIndex = Math.floor(Math.random() * freePositions.length)
-        gameState.newInvulnerabilityPotions.push(freePositions[randomIndex])
-      }
-    }
-  }
-
   private removeDeadPlayers(gameState: SnakeGameState): void {
     gameState.deadPlayers.forEach((playerID) => {
       const index = gameState.newAlivePlayers.indexOf(playerID)
@@ -522,34 +520,6 @@ export class TeamSnekProcessor {
       delete gameState.playerInvulnerabilityLevel[playerID]
       gameState.activeEffects = gameState.activeEffects.filter(e => e.playerID !== playerID)
     })
-  }
-
-  // Food, at the end of the turn: a survivor standing on food eats it,
-  // restoring health to its CURRENT kind's configured max and adding one
-  // weight/length. Movement cost is NOT settled here any more — the engine
-  // charged it cell by cell as it was spent, so there is no mid-ray rescue by
-  // food a unit never lived to reach.
-  private generateNewFood(gameState: SnakeGameState): void {
-      const guaranteedFood = Math.floor(this.foodSpawnRate)
-      const fractional = this.foodSpawnRate - guaranteedFood
-      const totalFood = guaranteedFood + (Math.random() < fractional ? 1 : 0)
-      for (let i = 0; i < totalFood; i++) {
-        let freePositions = this.getFreePositions(
-          gameState.boardWidth,
-          gameState.boardHeight,
-          gameState.newSnakes,
-          [...gameState.newFood, ...gameState.newInvulnerabilityPotions],
-          gameState.newHazards,
-        )
-        if (this.gameSetup.fertileGroundEnabled && this.fertileTiles.length > 0) {
-          const fertileSet = new Set(this.fertileTiles)
-          freePositions = freePositions.filter(pos => fertileSet.has(pos))
-        }
-        if (freePositions.length > 0) {
-          const randomIndex = Math.floor(Math.random() * freePositions.length)
-          gameState.newFood.push(freePositions[randomIndex])
-        }
-      }
   }
 
   // The winner ROWS the wire wants, built from the outcome settlement already
@@ -931,6 +901,9 @@ export class TeamSnekProcessor {
     return indices
   }
 
+  // Where an item may be placed, which is the module's rule (engine/spawn.ts)
+  // — asked here for the placement pass that builds the board, since the
+  // per-turn spawners now ask it from inside settlement.
   private getFreePositions(
     boardWidth: number,
     boardHeight: number,
@@ -938,32 +911,15 @@ export class TeamSnekProcessor {
     food: number[],
     hazards: number[],
   ): number[] {
-    const totalCells = boardWidth * boardHeight
-    const occupied = new Set<number>()
-
-    // Add snake positions
-    Object.values(playerPieces).forEach((snake) => {
-      snake.forEach((pos) => occupied.add(pos))
+    return freeCells({
+      boardWidth,
+      boardHeight,
+      walls: this.getWallPositions(boardWidth, boardHeight),
+      hazards,
+      occupancy: Object.values(playerPieces),
+      food,
+      potions: [],
     })
-
-    // Add food positions
-    food.forEach((pos) => occupied.add(pos))
-
-    // Add hazard positions
-    hazards.forEach((pos) => occupied.add(pos))
-
-    // Add wall positions
-    const wallPositions = this.getWallPositions(boardWidth, boardHeight)
-    wallPositions.forEach((pos) => occupied.add(pos))
-
-    const freePositions: number[] = []
-    for (let i = 0; i < totalCells; i++) {
-      if (!occupied.has(i)) {
-        freePositions.push(i)
-      }
-    }
-
-    return freePositions
   }
 
   private generateHazardPositions(
