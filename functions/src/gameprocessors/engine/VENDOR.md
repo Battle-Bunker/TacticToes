@@ -58,7 +58,9 @@ npx tsc --noEmit -p /tmp/vendorcheck/tsconfig.json   # must be silent
 These need game-level state the module does not carry, and stay in
 `TeamSnekProcessor`:
 
-- spawning food, hazards and potions (all of it random);
+- SPAWNING food, hazards and potions (all of it random — collecting a potion
+  is a rule and lives here; putting one on the board is a die roll and does
+  not);
 - the per-turn orientation rewrite (the module does report `rotations`, since
   choosing to rotate is a grammar outcome);
 - pawn promotion;
@@ -81,6 +83,9 @@ const settled = settleTurn({
   turn,               // the turn being resolved
   teamOf,             // unit id -> team id, for every configured unit
   effects,            // the invulnerability effect schedule as the turn opened
+  potions,            // potion cells on the board as the turn opened
+  potionsEnabled,     // off: potions are inert scenery
+  potionWindowTurns,  // how long a pickup's debuff and ally buffs last (3)
 })
 
 settled.board          // survivors: final occupancy and health
@@ -88,13 +93,14 @@ settled.deaths         // every unit removed, with cell / subStep / cause
 settled.eliminatedTeamIDs
 settled.effects        // the schedule as the turn closed
 settled.tiers          // per-unit tier the NEXT turn starts from
+settled.potions        // potion cells left once every collector has taken one
 ```
 
 **`tier` is an input AND an output.** A caller hands settlement the tiers a
 turn is adjudicated at and reads back the tiers the next turn starts from.
-Deriving the second set yourself — decrementing on a pickup, giving a level
-back on expiry — is writing a second encoding of the rules, which is the one
-thing this directory exists to prevent. Read `tiers`.
+Deriving the second set yourself — charging a pickup, giving a level back on
+expiry — is writing a second encoding of the rules, which is the one thing
+this directory exists to prevent. Read `tiers`.
 
 `resolveTurn` remains exported for a caller that wants the board half alone;
 it does not touch effects or tiers.

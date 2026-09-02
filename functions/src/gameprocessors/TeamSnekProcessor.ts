@@ -21,7 +21,12 @@ import {
   spawnOrientationCandidates,
   toXY,
 } from "./engine/moveGrammar"
-import { SettleInput, Settlement, settleTurn } from "./engine/settleTurn"
+import {
+  DEFAULT_POTION_WINDOW_TURNS,
+  SettleInput,
+  Settlement,
+  settleTurn,
+} from "./engine/settleTurn"
 import { assignCellsToSlices, sliceDistance } from "../utils/radialSlices"
 
 export interface SnakeGameState {
@@ -258,16 +263,14 @@ export class TeamSnekProcessor {
   }
 
   // One turn, one encoding. Movement, every collision and the whole end-of-turn
-  // settlement live in engine/resolveTurn.ts — the same pure module a client
+  // settlement live in engine/settleTurn.ts — the same pure module a client
   // vendors to predict a turn. This method is the game-level shell around it:
-  // Firestore state in, potions/orientation/scoring/wire out.
+  // Firestore state in, spawns/orientation/promotion/scoring/wire out.
   applyMoves(currentTurn: Turn, moves: Move[]): Turn {
     try {
       if (currentTurn.fertileTiles && currentTurn.fertileTiles.length > 0) {
         this.fertileTiles = currentTurn.fertileTiles
       }
-      const currentTurnNumber = this.gameState.turns.length
-
       // 1. Setup
       const gameState = this.initializeGameState(currentTurn)
       const originSquares = this.captureOriginSquares(gameState)
@@ -276,9 +279,10 @@ export class TeamSnekProcessor {
       })
 
       // 2. Settle the turn: grammar, collision phase, collision deaths, food
-      //    and growth, exhaustion deaths, sever truncation, regicide — and
-      //    then the ally-buff cancel for vulnerable units that died or were
-      //    severed, and effect expiry, both of which the module now owns.
+      //    and growth, exhaustion deaths, sever truncation, regicide — then
+      //    the ally-buff cancel for vulnerable units that died or were
+      //    severed, potion collection, and effect expiry, all of which the
+      //    module now owns.
       this.applySettlement(gameState, settleTurn(this.settleInput(gameState)))
 
       // Orientation rewrites after the last phase that can kill, so the map it
@@ -286,8 +290,7 @@ export class TeamSnekProcessor {
       // promotion, so a pawn that promotes this turn keeps its pawn orientation.
       this.updateOrientation(gameState, originSquares)
 
-      // 3. Potions and spawns
-      this.processInvulnerabilityPotionCollection(gameState, currentTurnNumber)
+      // 3. Spawns
       this.generateNewFood(gameState)
       this.generateNewInvulnerabilityPotions(gameState)
 
@@ -333,6 +336,10 @@ export class TeamSnekProcessor {
       turn: this.gameState.turns.length,
       teamOf,
       effects: gameState.activeEffects,
+      potions: gameState.newInvulnerabilityPotions,
+      potionsEnabled: this.gameSetup.invulnerabilityPotionEnabled === true,
+      potionWindowTurns:
+        this.gameSetup.invulnerabilityPotionWindowTurns ?? DEFAULT_POTION_WINDOW_TURNS,
       units: gameState.newAlivePlayers.map((playerID) => ({
         id: playerID,
         type: gameState.unitTypes[playerID],
@@ -389,6 +396,7 @@ export class TeamSnekProcessor {
     // buffs a vulnerable collision voids, and given back every lapsed level.
     gameState.activeEffects = resolution.effects
     gameState.playerInvulnerabilityLevel = resolution.tiers
+    gameState.newInvulnerabilityPotions = resolution.potions
 
     resolution.vulnerableCollided.forEach((playerID) => {
       const teamID = this.gameSetup.gamePlayers.find((p) => p.id === playerID)?.teamID
@@ -555,64 +563,6 @@ export class TeamSnekProcessor {
       severedCells: {},
       subStepCount: 1,
     }
-  }
-
-  private processInvulnerabilityPotionCollection(gameState: SnakeGameState, currentTurnNumber: number): void {
-    if (!this.gameSetup.invulnerabilityPotionEnabled) return
-
-    const collectors: { playerID: string; potionIndex: number }[] = []
-
-    gameState.newAlivePlayers.forEach(playerID => {
-      const snake = gameState.newSnakes[playerID]
-      if (!snake) return
-      const headPos = snake[0]
-      const potionIdx = gameState.newInvulnerabilityPotions.indexOf(headPos)
-      if (potionIdx !== -1) {
-        collectors.push({ playerID, potionIndex: potionIdx })
-      }
-    })
-
-    const indicesToRemove = new Set<number>()
-    collectors.forEach(({ playerID, potionIndex }) => {
-      indicesToRemove.add(potionIndex)
-
-      gameState.playerInvulnerabilityLevel[playerID] = (gameState.playerInvulnerabilityLevel[playerID] ?? 0) - 1
-      gameState.activeEffects.push({
-        playerID,
-        type: 'invulnerability_debuff',
-        level: -1,
-        expiryTurn: currentTurnNumber + 3,
-        sourcePlayerID: playerID,
-      })
-
-      const collector = this.gameSetup.gamePlayers.find(p => p.id === playerID)
-      if (collector?.teamID) {
-        const allies = gameState.newAlivePlayers.filter(allyID => {
-          if (allyID === playerID) return false
-          const allyPlayer = this.gameSetup.gamePlayers.find(p => p.id === allyID)
-          return allyPlayer?.teamID === collector.teamID
-        })
-
-        allies.forEach(allyID => {
-          gameState.playerInvulnerabilityLevel[allyID] = (gameState.playerInvulnerabilityLevel[allyID] ?? 0) + 1
-          gameState.activeEffects.push({
-            playerID: allyID,
-            type: 'invulnerability_buff',
-            level: 1,
-            expiryTurn: currentTurnNumber + 3,
-            sourcePlayerID: playerID,
-          })
-        })
-      }
-
-      logger.info(
-        `Snek: Player ${playerID} collected invulnerability potion. Level now ${gameState.playerInvulnerabilityLevel[playerID]}.`,
-      )
-    })
-
-    gameState.newInvulnerabilityPotions = gameState.newInvulnerabilityPotions.filter(
-      (_, idx) => !indicesToRemove.has(idx)
-    )
   }
 
   private generateNewInvulnerabilityPotions(gameState: SnakeGameState): void {

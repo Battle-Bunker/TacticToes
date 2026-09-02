@@ -247,6 +247,19 @@ const serialise = (stream: Turn[]): string =>
   `${JSON.stringify(canonical(stream), null, 2)}\n`
 
 const GOLDEN = join(__dirname, "settlementReplay.golden.json")
+const GOLDEN_WINDOW_8 = join(__dirname, "settlementReplay.window8.golden.json")
+
+/**
+ * The same stream with every `expiryTurn` blanked. Two runs whose blanked
+ * serialisations match differ in expiry turns and in nothing whatsoever else
+ * — not a board, not a health, not a tier, not the order of an effect.
+ */
+const withoutExpiryTurns = (stream: Turn[]): string =>
+  serialise(stream).replace(/"expiryTurn": -?\d+/g, '"expiryTurn": <n>')
+
+/** Every effect on the last replayed turn, as (owner, expiry) pairs. */
+const finalSchedule = (stream: Turn[]): [string, number][] =>
+  (stream[stream.length - 1].activeEffects ?? []).map((e) => [e.playerID, e.expiryTurn])
 
 /** Set UPDATE_GOLDEN=1 to re-record. Only ever legitimate before a move. */
 const check = (actual: string, path: string): void => {
@@ -257,6 +270,34 @@ const check = (actual: string, path: string): void => {
 describe("golden settlement replay", () => {
   it("replays a potions-on game turn by turn, byte for byte", () => {
     check(serialise(runReplay()), GOLDEN)
+  })
+
+  it("plays the pinned game when the window is written out as its default of 3", () => {
+    check(serialise(runReplay({ invulnerabilityPotionWindowTurns: 3 })), GOLDEN)
+  })
+
+  it("differs only in expiry turns when the window is 8 instead of 3", () => {
+    // The whole point of lifting the hardcoded `+3` into an input: the value
+    // sweep has to be RUNNABLE, and runnable means the difference it makes is
+    // legible. Ten turns of the same game at a window of 8 move no unit, kill
+    // nobody and change no tier — every collection made during the replay is
+    // still live when it ends either way. What moves is when they are due.
+    const three = runReplay()
+    const eight = runReplay({ invulnerabilityPotionWindowTurns: 8 })
+
+    expect(withoutExpiryTurns(eight)).toBe(withoutExpiryTurns(three))
+    expect(finalSchedule(three)).toEqual([
+      ["t1#2", 8 + 3],
+      ["t2#2", 9 + 3],
+      ["t2", 9 + 3],
+    ])
+    expect(finalSchedule(eight)).toEqual([
+      ["t1#2", 8 + 8],
+      ["t2#2", 9 + 8],
+      ["t2", 9 + 8],
+    ])
+
+    check(serialise(eight), GOLDEN_WINDOW_8)
   })
 
   it("fires every mechanic the migration moves, so the fixture is not vacuous", () => {

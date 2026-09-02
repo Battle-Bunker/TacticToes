@@ -99,6 +99,12 @@ export interface GameSetup {
   foodSpawnRate?: number // Expected food spawned per turn (0-5, defaults to 0.5)
   invulnerabilityPotionEnabled?: boolean
   invulnerabilityPotionSpawnRate?: number // 0.05 to 1, defaults to 0.15
+  /**
+   * How many turns a collected potion's debuff — and the buffs it hands the
+   * collector's allies — last for. Defaults to 3, which is the value that was
+   * hardcoded in the processor before the window became configurable.
+   */
+  invulnerabilityPotionWindowTurns?: number
   tournamentMode?: boolean
   scheduledStartTime?: Timestamp | null
   remainingRounds?: number
