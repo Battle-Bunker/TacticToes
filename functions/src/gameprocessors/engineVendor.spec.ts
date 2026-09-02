@@ -5,7 +5,9 @@
 //
 // See engine/VENDOR.md for the file list and the rest of the contract.
 
-import { readFileSync, readdirSync } from "fs"
+import { execFileSync } from "child_process"
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "fs"
+import { tmpdir } from "os"
 import { join } from "path"
 
 const ENGINE_DIR = join(__dirname, "engine")
@@ -23,9 +25,11 @@ describe("engine/ is vendorable", () => {
   it("contains the files VENDOR.md promises, and nothing else", () => {
     expect(engineFiles.sort()).toEqual([
       "adjudicate.ts",
+      "claims.ts",
       "moveGrammar.ts",
       "queries.ts",
       "resolveTurn.ts",
+      "settlePartial.ts",
       "settleTurn.ts",
       "spawn.ts",
       "turnEngine.ts",
@@ -58,4 +62,54 @@ describe("engine/ is vendorable", () => {
     // A pure function of its input: no clock, no RNG, no network.
     expect(source).not.toMatch(/Math\.random|Date\.now|new Date\(|fetch\(/)
   })
+})
+
+// The contract's last clause, and the only one review cannot check: that the
+// directory COMPILES on its own. Copied out, with no node_modules, no ambient
+// types and nothing but the wire types beside it — which is the state it is in
+// once it has been vendored. A stray `@types/node` reference or an import of a
+// package that happens to be installed here passes every check above and
+// fails only in the destination repo, weeks later.
+describe("engine/ compiles standing alone", () => {
+  it("type-checks with no node_modules and no ambient types", () => {
+    const root = mkdtempSync(join(tmpdir(), "engine-vendor-"))
+    try {
+      mkdirSync(join(root, "engine"))
+      mkdirSync(join(root, "shared", "types"), { recursive: true })
+      engineFiles.forEach((file) =>
+        writeFileSync(join(root, "engine", file), readFileSync(join(ENGINE_DIR, file))),
+      )
+      writeFileSync(
+        join(root, "shared", "types", "Game.ts"),
+        readFileSync(join(__dirname, "..", "..", "..", "shared", "types", "Game.ts")),
+      )
+      writeFileSync(
+        join(root, "tsconfig.json"),
+        JSON.stringify({
+          compilerOptions: {
+            module: "commonjs",
+            target: "ES2020",
+            strict: true,
+            noImplicitReturns: true,
+            noUnusedLocals: true,
+            moduleResolution: "node",
+            noEmit: true,
+            types: [],
+            baseUrl: ".",
+            paths: { "@shared/*": ["shared/*"] },
+          },
+          include: ["engine", "shared"],
+        }),
+      )
+
+      const tsc = join(__dirname, "..", "..", "node_modules", "typescript", "bin", "tsc")
+      const output = execFileSync(process.execPath, [tsc, "--noEmit", "-p", root], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      })
+      expect(output.trim()).toBe("")
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  }, 120000)
 })

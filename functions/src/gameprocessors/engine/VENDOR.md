@@ -18,6 +18,8 @@ Copy exactly these, together, keeping their relative layout:
 | `spawn.ts` | Where a food or a potion may land and how many arrive, behind an injected RNG. |
 | `moveGrammar.ts` | The movement grammar: staged cell → the path a unit of that kind walks, plus spawn orientation and the per-kind property flags. |
 | `queries.ts` | The grammar asked questions instead of applied: which cells may be staged, what a unit would walk, what it covers. |
+| `settlePartial.ts` | **The same turn with some units' moves unknown.** `settleTurn`'s phases over a board where some movers are held, plus the ledger of every point a concrete world could differ at. A mode of the one engine, not a second one. |
+| `claims.ts` | What a held unit could be doing: where it could be at each sub-step, how strong it could be, and whether it could be gone — derived from the grammar through `queries.ts`. |
 | `VENDOR.md` | This file. |
 
 Plus the one type module they depend on:
@@ -75,9 +77,10 @@ Two things, and they are not rules:
 - **Firestore, and the `Turn` wire assembly.** Documents, timestamps and
   transactions. The module takes plain numbers and hands plain numbers back.
 
-Everything else a turn does is in here, including the two that used to be
-argued out of it: spawning (the rules travel, the die is injected) and
-adjudication (who won, and on which board).
+Everything else a turn does is in here, including the three that used to be
+argued out of it: spawning (the rules travel, the die is injected),
+adjudication (who won, and on which board), and settling a turn whose movers
+are not all known (a mode, not a mirror).
 
 ## Using it
 
@@ -163,6 +166,53 @@ surface has one import site. Note what the answers include, because these are
 the three a re-derivation gets wrong: a trail unit may legally stage a WALL
 (fatal, and still a move the server accepts), a hazard blocks nothing, and a
 pawn's diagonal is legal only onto food or a body.
+
+**Settling a turn nobody has fully staged.** A search does not have a move for
+every unit; `settleTurn` demands one. That is a shape problem, not a rules
+problem, so it is a MODE of this module rather than an engine of its own:
+
+```ts
+import { settlePartial } from "./engine/settlePartial"
+
+const settled = settlePartial({
+  ...theSameInputSettleTurnTakes,
+  held: [{ id: "u3", observedTurn: turn }],   // ...and optionally `options`
+}, NO_SPAWN)                                   // the normal choice in this mode
+
+settled.ledger   // every (cell, subStep, unitId, heldId, kind) a world could differ at
+settled.fates    // per unit: "alive" and "dead" are proofs, "contingent" is a work list
+settled.claims   // where each held unit could be, and how strong — hoistable, see below
+// ...and every field settleTurn returns, for the units that WERE modelled.
+```
+
+**An empty ledger is a proof; a non-empty one is a work list.** With no
+entries, every modelled unit's disposition — where it went, whether it lived,
+its health, its weight, what it ate, and the game's `outcome` — is what it is
+in every world the held units could have chosen. With entries, the entries name
+every place a world could differ and nothing else does. That property is
+established by ENUMERATION in `../settlePartial.spec.ts`: random boards with
+one to three held units, every legal concrete assignment settled with the
+ordinary `settleTurn`, and the two compared coordinate for coordinate. With no
+held units at all, `settlePartial` *is* `settleTurn`, which is the reduction
+that makes "one engine" a fact rather than a slogan.
+
+A held unit's OWN position is not in the ledger — it is inherently unknown, and
+what is known about it is its `Claim`. `Claim` is a pure function of the held
+records, the board, the terrain, the items, the effect schedule, the turn span
+and the narrowing — of nothing any particular plan does — so a caller sweeping
+many plans over one held set computes it ONCE with `computeClaims` and hands it
+back as `settlePartial`'s third argument.
+
+**A caller that computes a held unit's reach for itself has written the grammar
+a second time.** "Where could that unit get to over n turns" is a grammar
+question, and `claims.ts` answers it by asking `legalTargets`/`pathOf` — the
+same calls the server stages with. Read `claims`, exactly as you read `tiers`
+and `unitTypes`.
+
+`turnEngine.ts` exports the two rules a caller pricing a cell it has not walked
+into needs: `outranks(a, b)` is the contest comparison itself — tier, then
+frozen weight — and `COST_PER_CELL` is what a step costs in health. Both are
+the engine's own; restating either is how the comparator came to exist twice.
 
 **`outcome` is the end of the game, not the score of it.** It names the kind
 of ending, the winning team ids, the weight behind each team and WHICH board
