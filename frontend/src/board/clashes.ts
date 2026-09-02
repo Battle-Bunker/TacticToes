@@ -151,7 +151,7 @@ export const clashHeadline = (kind: BoardClashKind): string => {
     case "hazard":
       return "Exhausted by hazard damage"
     case "exhaustion":
-      return "Exhausted — out of health"
+      return "Exhausted — out of energy"
     case "wall":
       return "Hit the wall"
     case "self":
@@ -173,9 +173,9 @@ export const deathHeadline = (cause: BoardClashKind): string => {
     case "bodyBlock":
       return "Ran into a body"
     case "hazard":
-      return "Hazard damage emptied its health — collapsed here"
+      return "Hazard damage emptied its energy — collapsed here"
     case "exhaustion":
-      return "Ran out of health and collapsed here"
+      return "Ran out of energy and collapsed here"
     case "wall":
       return "Hit the wall"
     case "self":
@@ -192,7 +192,7 @@ export const deathHeadline = (cause: BoardClashKind): string => {
 }
 
 /**
- * The two kinds that empty a unit's health where it stands. Neither is fatal on
+ * The two kinds that empty a unit's energy where it stands. Neither is fatal on
  * its own: exhaustion is a PROVISIONAL death — the unit halts, stays a
  * collision object, and dies only if it is still at or below zero when the turn
  * ends. One that eats on its halt square lives, and the record it leaves behind

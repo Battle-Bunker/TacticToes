@@ -86,11 +86,11 @@ import { settleTurn } from "./engine/settleTurn"
 
 const settled = settleTurn({
   units: [
-    { id, type, teamID, isKing, tier, health, occupancy, orientation, stagedMove },
+    { id, type, teamID, isKing, tier, energy, occupancy, orientation, stagedMove },
     // ...one per unit alive at the start of the turn
   ],
   boardWidth, boardHeight, walls, hazards, hazardDamage, food,
-  maxHealth,          // per-kind overrides; the rest default to 100
+  maxEnergy,          // per-kind overrides; the rest default to 100
   regicideTeamIDs,    // teams configured with at least one king
   turn,               // the turn being resolved
   teamOf,             // unit id -> team id, for every configured unit
@@ -104,7 +104,7 @@ const settled = settleTurn({
 }, randomSpawner({ foodSpawnRate, potionsEnabled, potionSpawnRate, fertileTiles },
                  { next: () => Math.random() }))   // or NO_SPAWN
 
-settled.board          // survivors: final occupancy and health
+settled.board          // survivors: final occupancy and energy
 settled.deaths         // every unit removed, with cell / subStep / cause
 settled.eliminatedTeamIDs
 settled.effects        // the schedule as the turn closed
@@ -128,7 +128,7 @@ this directory exists to prevent. Read `tiers`.
 only kind change in the game, and settlement is where it happens: the kinds a
 caller sends in are the kinds the turn was played at, and `unitTypes` is the
 kinds the next turn opens with. A caller that promotes for itself has written
-the threshold, the weight-1 collapse and the queen health clamp a second time.
+the threshold, the weight-1 collapse and the queen energy clamp a second time.
 
 Promotion runs last of the unit phases, after the food phase (so a pawn that
 ate its way to the threshold promotes on that turn) and after the orientation

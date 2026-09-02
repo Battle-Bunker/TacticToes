@@ -39,7 +39,7 @@
 //
 // Turn 3 walks the pawn onto the second food, which takes it to weight 3 and
 // the configured promotion threshold: it becomes a queen, its stack collapses
-// to the single square it stands on, and its health is clamped from the
+// to the single square it stands on, and its energy is clamped from the
 // pawn's max of 100 to the queen's of 40. It is a queen for turns 4 and 5,
 // which is how the fixture knows promotion happened at all — the two staged
 // slides are legal for a queen and illegal for a pawn, so a pawn would have
@@ -115,9 +115,9 @@ const SECOND_MEAL = at(8, 9)
 const PROMOTION_WEIGHT = 3
 const PROMOTION_TURN = 3
 
-/** Health caps: the pawn tops up to 100, the queen it becomes may hold 40. */
-const PAWN_MAX_HEALTH = 100
-const QUEEN_MAX_HEALTH = 40
+/** Energy caps: the pawn tops up to 100, the queen it becomes may hold 40. */
+const PAWN_MAX_ENERGY = 100
+const QUEEN_MAX_ENERGY = 40
 
 /**
  * What each unit stages, turn by turn. Team two stages nothing ever, and an
@@ -183,7 +183,7 @@ const mkSetup = (overrides: Partial<StartedGameSetup> = {}): StartedGameSetup =>
   started: true,
   timeCreated: Timestamp.fromMillis(0),
   pawnPromotionWeight: PROMOTION_WEIGHT,
-  maxHealthPerUnit: { pawn: PAWN_MAX_HEALTH, queen: QUEEN_MAX_HEALTH },
+  maxEnergyPerUnit: { pawn: PAWN_MAX_ENERGY, queen: QUEEN_MAX_ENERGY },
   // The food on the board is the food on the wire; potions are off entirely.
   foodSpawnRate: 0,
   invulnerabilityPotionEnabled: false,
@@ -197,7 +197,7 @@ const startingTurn = (): Turn => {
     unitTypes[p.id] = p.unitType ?? "snake"
   })
   return {
-    playerHealth: Object.fromEntries(ids.map((id) => [id, 100])),
+    playerEnergy: Object.fromEntries(ids.map((id) => [id, 100])),
     startTime: Timestamp.fromMillis(0),
     endTime: Timestamp.fromMillis(5000),
     scores: Object.fromEntries(ids.map((id) => [id, 1])),
@@ -358,7 +358,7 @@ describe("golden piece replay", () => {
     // Turn 1: the rotation. It staged the square to its right, did not enter
     // it, paid no movement cost — and came out facing that way.
     expect(turnOf(1).playerPieces["t1#5"]).toEqual([at(6, 10)])
-    expect(turnOf(1).playerHealth["t1#5"]).toBe(100)
+    expect(turnOf(1).playerEnergy["t1#5"]).toBe(100)
     expect(turnOf(1).orientation["t1#5"]).toEqual({ dx: 1, dy: 0 })
 
     // Turn 2: THE EXCEPTION. It moved diagonally — {1,-1} from (6,10) to
@@ -378,7 +378,7 @@ describe("golden piece replay", () => {
     expect(turnOf(5).orientation["t1#5"]).toEqual({ dx: 0, dy: 1 })
   })
 
-  it("promotes the pawn at the threshold: weight 1, queen health, still alive", () => {
+  it("promotes the pawn at the threshold: weight 1, queen energy, still alive", () => {
     const stream = runReplay()
     const turnOf = (n: number): Turn => stream[n - 1]
 
@@ -397,18 +397,18 @@ describe("golden piece replay", () => {
     expect(turnOf(PROMOTION_TURN).alivePlayers).toContain("t1#5")
     expect(turnOf(PROMOTION_TURN).deaths["t1#5"]).toBeUndefined()
 
-    // Health: the meal topped it up to the PAWN's max, and promotion then
-    // clamped it to the QUEEN's. Nothing else in the game touches health but
+    // Energy: the meal topped it up to the PAWN's max, and promotion then
+    // clamped it to the QUEEN's. Nothing else in the game touches energy but
     // movement cost, so the clamp is the only way to read 40 here.
-    expect(turnOf(2).playerHealth["t1#5"]).toBe(PAWN_MAX_HEALTH)
-    expect(turnOf(PROMOTION_TURN).playerHealth["t1#5"]).toBe(QUEEN_MAX_HEALTH)
+    expect(turnOf(2).playerEnergy["t1#5"]).toBe(PAWN_MAX_ENERGY)
+    expect(turnOf(PROMOTION_TURN).playerEnergy["t1#5"]).toBe(QUEEN_MAX_ENERGY)
 
     // And it goes on playing as a queen: two rays a pawn could not have
     // staged, so a fixture where promotion silently stopped happening would
     // show the unit standing still instead.
     expect(turnOf(4).playerPieces["t1#5"]).toEqual([at(6, 7)])
     expect(turnOf(5).playerPieces["t1#5"]).toEqual([at(6, 10)])
-    expect(turnOf(5).playerHealth["t1#5"]).toBe(QUEEN_MAX_HEALTH - 5)
+    expect(turnOf(5).playerEnergy["t1#5"]).toBe(QUEEN_MAX_ENERGY - 5)
   })
 
   it("plays the same game with the food spawner running", () => {

@@ -255,7 +255,7 @@ describe("coverOf", () => {
   })
 
   it("treats a hazard as open ground, because the engine does", () => {
-    // Hazards cost health; they do not block, and a cover set that stopped at
+    // Hazards cost energy; they do not block, and a cover set that stopped at
     // one would under-report every square behind it.
     const rook = unit("rook", at(1, 4))
     const hazardous = board({ hazards: [at(3, 4)] })

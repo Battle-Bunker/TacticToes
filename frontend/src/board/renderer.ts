@@ -36,8 +36,8 @@ export interface BoardUnit {
   body: Cell[]
   /** Snakes: body length. Pieces: the weight stacked on their square. */
   weight: number
-  health: number
-  maxHealth: number
+  energy: number
+  maxEnergy: number
   orientation?: Orientation
   invulnerabilityLevel: number
   /** Absolute turn the unit's earliest invulnerability effect lapses on. */
@@ -66,7 +66,7 @@ export type BoardClashKind =
  *   - `combat` — killed in a fight (contest, edge exchange, body block, wall,
  *     its own body, a king's fall taking its team with it): a solid disc in the
  *     victim's colour with a white ✗.
- *   - `exhausted` — health ran out (movement cost or hazard damage), the unit
+ *   - `exhausted` — energy ran out (movement cost or hazard damage), the unit
  *     halted where it stood, and it was STILL at or below zero when the turn
  *     ended: a HOLLOW ring in the victim's colour around a drained, ash-pale
  *     middle, barred through. Solid versus hollow is the difference a reader
@@ -118,7 +118,7 @@ export interface SeverMark {
 }
 
 /**
- * A cell a unit ran out of health on and GOT BACK UP from: it exhausted
+ * A cell a unit ran out of energy on and GOT BACK UP from: it exhausted
  * mid-move, halted short of where it was going, ate what was on the square and
  * ended the turn alive. A near-death, not a death — the death registry never
  * names it, and neither does any mark that looks like a grave.
@@ -129,7 +129,7 @@ export interface RecoveryMark {
   letter: string
   teamName: string
   color: string
-  /** `exhaustion` or `hazard`: what emptied its health before it recovered. */
+  /** `exhaustion` or `hazard`: what emptied its energy before it recovered. */
   cause: BoardClashKind
 }
 
@@ -187,7 +187,7 @@ export interface BoardClash {
 
 /**
  * A unit the board has dropped — dead — at its LAST-KNOWN state. It has no
- * body and no health, but it keeps its identity and the weight it died with, so
+ * body and no energy, but it keeps its identity and the weight it died with, so
  * a scoreboard can list it (struck through, scoring nothing) instead of letting
  * it silently vanish from its team.
  */
@@ -750,8 +750,8 @@ function drawHeadGlyph(
   cellSize: number,
 ) {
   const cx = hx + cellSize / 2
-  // Nudged slightly above center so the glyph clears the health bar anchored to
-  // the cell's bottom edge (drawHealthBar).
+  // Nudged slightly above center so the glyph clears the energy bar anchored to
+  // the cell's bottom edge (drawEnergyBar).
   const cy = hy + cellSize / 2 - cellSize * 0.06
   ctx.save()
   ctx.beginPath()
@@ -864,7 +864,7 @@ function drawHazardIcon(
 // extra-vulnerability (the hazard triangle) are drawn paths rather than
 // characters, so neither carries an entry here.
 export const STAT_ICON = {
-  health: "\u2665", // heart, tinted by healthBarColor
+  energy: "\u2665", // heart, tinted by energyBarColor
   invulnerable: "\u{1F6E1}\uFE0F", // shield (positive level)
 }
 
@@ -895,7 +895,7 @@ const STAT_MARK: Record<MarkName, DrawnMark> = {
 // directions — so a symbol stacked over a number can only be sized and centred
 // against numbers if it is measured by its ink.
 const STAT_GLYPH_INK: Record<string, { h: number; mid: number }> = {
-  [STAT_ICON.health]: { h: 0.58, mid: 0.27 },
+  [STAT_ICON.energy]: { h: 0.58, mid: 0.27 },
   [STAT_ICON.invulnerable]: { h: 1.18, mid: 0.34 },
 }
 // A glyph nobody has measured: assume it behaves like a capital letter. The fit
@@ -907,10 +907,10 @@ const STAT_GLYPH_INK_DEFAULT = { h: 0.7, mid: 0.35 }
 // baseline both follow from its font size.
 const DIGIT_INK_HEIGHT = 0.7
 
-// The on-cell health bar's track is SOLID BLACK: it sits on the unit's own body
+// The on-cell energy bar's track is SOLID BLACK: it sits on the unit's own body
 // colour, and only an opaque track keeps the empty part of the bar reading as
-// "missing health" rather than as a tint of the team colour.
-const HEALTH_BAR_CELL_TRACK = "#000000"
+// "missing energy" rather than as a tint of the team colour.
+const ENERGY_BAR_CELL_TRACK = "#000000"
 
 // The invulnerability mark for a level: the shield GLYPH when protected, the
 // drawn red hazard MARK when the level is negative (extra-vulnerable).
@@ -933,44 +933,44 @@ export function invulnerabilityTurnsRemaining(
   return remaining >= 1 ? remaining : null
 }
 
-// Health-bar fill colour by remaining fraction: red when nearly spent, orange
+// Energy-bar fill colour by remaining fraction: red when nearly spent, orange
 // when low, green otherwise. Shared by the board bar and the stat plates so the
 // two readouts always agree.
-export function healthBarColor(frac: number): string {
+export function energyBarColor(frac: number): string {
   if (frac < 0.1) return "#e53935"
   if (frac < 0.25) return "#fb8c00"
   return "#43a047"
 }
 
-// Health fraction: health over the unit's configured per-type max, clamped.
-export function healthFraction(unit: BoardUnit): number {
-  const max = unit.maxHealth ?? 100
+// Energy fraction: energy over the unit's configured per-type max, clamped.
+export function energyFraction(unit: BoardUnit): number {
+  const max = unit.maxEnergy ?? 100
   if (!(max > 0)) return 0
-  return Math.max(0, Math.min(1, (unit.health ?? 0) / max))
+  return Math.max(0, Math.min(1, (unit.energy ?? 0) / max))
 }
 
-// Prominent per-unit health bar on the unit's key cell (snake head cell / piece
+// Prominent per-unit energy bar on the unit's key cell (snake head cell / piece
 // cell): bottom-anchored, ~90% of the cell wide, ~15% tall, a BLACK track under
 // a red/orange/green fill.
-function drawHealthBar(
+function drawEnergyBar(
   ctx: CanvasRenderingContext2D,
   unit: BoardUnit,
   hx: number,
   hy: number,
   cellSize: number,
 ) {
-  if (typeof unit.health !== "number") return
-  const frac = healthFraction(unit)
+  if (typeof unit.energy !== "number") return
+  const frac = energyFraction(unit)
   const barW = cellSize * 0.9
   const barH = Math.max(2, cellSize * 0.15)
   const inset = Math.max(1, cellSize * 0.03)
   const bx = hx + (cellSize - barW) / 2
   const by = hy + cellSize - barH - inset
   ctx.save()
-  ctx.fillStyle = HEALTH_BAR_CELL_TRACK
+  ctx.fillStyle = ENERGY_BAR_CELL_TRACK
   ctx.fillRect(bx, by, barW, barH)
   if (frac > 0) {
-    ctx.fillStyle = healthBarColor(frac)
+    ctx.fillStyle = energyBarColor(frac)
     ctx.fillRect(bx, by, barW * frac, barH)
   }
   ctx.restore()
@@ -1086,7 +1086,7 @@ function drawWallCell(
 //   head        the unit's LETTER, on the same plate every stat behind it uses,
 //               filled with its own body colour
 //   neck        weight, under the silver anvil
-//   2nd cell    health, under the heart tinted by the shared thresholds
+//   2nd cell    energy, under the heart tinted by the shared thresholds
 //   3rd cell    the TURNS of invulnerability still to run, under the shield /
 //               hazard mark — only while a level is running
 //   tail        how many body parts are STACKED on the tail cell — only when
@@ -1123,8 +1123,8 @@ const BODY_ITEM_TEXT = "#14181e"
 // than as pills each taking whatever width its own number happens to want. The
 // side is a fraction of the body's own THICKNESS, not the cell's, which is what
 // keeps the unit's colour showing all the way round the plate at every cell size
-// — and what keeps the head's plate clear of the health BAR along that cell's
-// bottom edge (drawHealthBar).
+// — and what keeps the head's plate clear of the energy BAR along that cell's
+// bottom edge (drawEnergyBar).
 const BODY_PLATE_SIDE = 0.86
 // How much of the plate its content may spend, in BOTH directions; the rest is
 // the margin that keeps a number, and the symbol stacked over it, off the
@@ -1508,12 +1508,12 @@ function unitBodyInfoPlan(
   const flow: StatItem[] = [
     { kind: "stat", mark: "anvil", text: String(unit.weight ?? body.length) },
   ]
-  if (typeof unit.health === "number") {
+  if (typeof unit.energy === "number") {
     flow.push({
       kind: "stat",
-      icon: STAT_ICON.health,
-      iconColor: healthBarColor(healthFraction(unit)),
-      text: String(unit.health),
+      icon: STAT_ICON.energy,
+      iconColor: energyBarColor(energyFraction(unit)),
+      text: String(unit.energy),
     })
   }
   // The buff writes the TURNS it still has to run, and nothing else: its LEVEL
@@ -1880,7 +1880,7 @@ interface MarkGeometry {
  *
  * The two corners are spoken for: a DEATH badge takes the top-left, a RECOVERY
  * badge the top-right, so a cell that somehow carries both shows both. The
- * bottom edge belongs to the health bar and the middle to the unit's letter,
+ * bottom edge belongs to the energy bar and the middle to the unit's letter,
  * which is why neither is offered.
  */
 type MarkCorner = "topLeft" | "topRight"
@@ -2049,7 +2049,7 @@ function drawQueryGlyph(
 }
 
 /**
- * A near-death: the unit ran out of health here, halted where it stood, ate
+ * A near-death: the unit ran out of energy here, halted where it stood, ate
  * what was on the square and finished the turn alive.
  *
  * It is built from the fatal exhaustion mark's own parts — the drained middle,
@@ -2320,9 +2320,9 @@ function statIconWidth(
 
 // Draw ONE unit tag: a rounded white pill whose LETTER SQUARE is its anchor,
 // sitting on the cell diagonally adjacent to the unit's head. The body carries
-// the unit's WEIGHT behind the silver anvil, its numeric HEALTH behind a heart
-// tinted by the shared health thresholds, and its remaining INVULNERABILITY
-// turns behind the shared shield/warning mark. The tag carries no health BAR:
+// the unit's WEIGHT behind the silver anvil, its numeric ENERGY behind a heart
+// tinted by the shared energy thresholds, and its remaining INVULNERABILITY
+// turns behind the shared shield/warning mark. The tag carries no energy BAR:
 // the numeric heart says it, and the unit's own cell already wears the bar.
 // `letterAtEnd` flips the body's reading order: the square stays on the anchor
 // cell while the stats run to its LEFT, which is what lets a tag near the
@@ -2462,8 +2462,8 @@ function renderUnitTags(
     const unitColor = unit.color || "#888888"
     const letter = unit.letter || "?"
     const weight = unit.weight ?? unit.body.length
-    const health = typeof unit.health === "number" ? unit.health : null
-    const frac = health != null ? healthFraction(unit) : 0
+    const energy = typeof unit.energy === "number" ? unit.energy : null
+    const frac = energy != null ? energyFraction(unit) : 0
     const invulnLevel = unit.invulnerabilityLevel || 0
 
     // Text sizes are floored in PIXELS as well as scaled off the cell, so a
@@ -2477,15 +2477,15 @@ function renderUnitTags(
     const padX = fontSize * 0.45
     const gap = fontSize * 0.45
     const iconGap = fontSize * 0.16
-    // Stat pairs: weight, health, invulnerability. Weight rides the drawn silver
-    // anvil and a negative invulnerability the drawn red hazard mark; the health
+    // Stat pairs: weight, energy, invulnerability. Weight rides the drawn silver
+    // anvil and a negative invulnerability the drawn red hazard mark; the energy
     // heart is the one tinted glyph, the shield a plain one.
     const stats: TagStat[] = [{ mark: "anvil", iconColor: null, text: String(weight) }]
-    if (health != null) {
+    if (energy != null) {
       stats.push({
-        icon: STAT_ICON.health,
-        iconColor: healthBarColor(frac),
-        text: String(health),
+        icon: STAT_ICON.energy,
+        iconColor: energyBarColor(frac),
+        text: String(energy),
       })
     }
     // The tag writes the buff's TURNS, same as the body plate — its LEVEL is
@@ -2792,9 +2792,9 @@ export function renderBoard(
     if (head) {
       const hx = head.x * cellSize
       const hy = (board.height - 1 - head.y) * cellSize
-      // Health bar first: a south-facing unit's orientation eye lands on the
+      // Energy bar first: a south-facing unit's orientation eye lands on the
       // same bottom edge, and the eye is the one that must stay whole.
-      drawHealthBar(ctx, unit, hx, hy, cellSize)
+      drawEnergyBar(ctx, unit, hx, hy, cellSize)
       // A piece is one cell and keeps its icon (and its eye) there; a snake's
       // head cell carries its LETTER instead, drawn with the rest of its body
       // information below.
@@ -2802,7 +2802,7 @@ export function renderBoard(
         drawHeadGlyph(ctx, unit, hx, hy, cellSize)
       }
     }
-    // The unit's own numbers, along its own body — letter, weight, health, buff,
+    // The unit's own numbers, along its own body — letter, weight, energy, buff,
     // tail stack — in whatever of them this cell size can hold.
     const plan = bodyPlans.get(unit.id)
     if (plan) drawUnitBodyInfo(ctx, plan)

@@ -9,7 +9,7 @@
 //
 // So this file plays a whole potions-on game, turn by turn, and pins the
 // complete produced turn stream as a byte-for-byte fixture. Every wire field
-// of every turn is in it: boards, health, deaths, clashes, moves, scores,
+// of every turn is in it: boards, energy, deaths, clashes, moves, scores,
 // potions, tiers and the effect schedule. Move a phase past another one and
 // the fixture disagrees somewhere.
 //
@@ -153,7 +153,7 @@ const startingTurn = (): Turn => {
   })
   const ids = Object.keys(playerPieces)
   return {
-    playerHealth: Object.fromEntries(ids.map((id) => [id, 100])),
+    playerEnergy: Object.fromEntries(ids.map((id) => [id, 100])),
     startTime: Timestamp.fromMillis(0),
     endTime: Timestamp.fromMillis(5000),
     scores: Object.fromEntries(ids.map((id) => [id, playerPieces[id].length])),
@@ -271,7 +271,7 @@ const SPAWNERS_ON: Partial<StartedGameSetup> = {
 /**
  * The same stream with every `expiryTurn` blanked. Two runs whose blanked
  * serialisations match differ in expiry turns and in nothing whatsoever else
- * — not a board, not a health, not a tier, not the order of an effect.
+ * — not a board, not an energy, not a tier, not the order of an effect.
  */
 const withoutExpiryTurns = (stream: Turn[]): string =>
   serialise(stream).replace(/"expiryTurn": -?\d+/g, '"expiryTurn": <n>')

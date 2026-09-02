@@ -111,7 +111,7 @@ export const SnekConfiguration: React.FC<SnekConfigurationProps> = ({
             onChange={onHazardDamageChange}
             min={1} max={1000} step={1} round={Math.round}
             sx={{ mt: 1, width: 200 }}
-            helperText="Health lost per hazard square entered"
+            helperText="Energy lost per hazard square entered"
           />
         )}
       </Box>

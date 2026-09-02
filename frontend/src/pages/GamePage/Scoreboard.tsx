@@ -7,8 +7,8 @@ import {
   BoardUnit,
   RosterUnit,
   STAT_ICON,
-  healthBarColor,
-  healthFraction,
+  energyBarColor,
+  energyFraction,
   invulnerabilityMark,
   invulnerabilityTurnsRemaining,
 } from "../../board/renderer"
@@ -16,7 +16,7 @@ import {
 // ── The scoreboard ──────────────────────────────────────────────────────────
 //
 // One team group per team, each headed by that team's NAME and its SCORE, and
-// listing every unit the team has ever had: letter, type, weight, health and
+// listing every unit the team has ever had: letter, type, weight, energy and
 // any invulnerability, with the dead kept in place — struck through, greyed,
 // scoring nothing.
 //
@@ -141,7 +141,7 @@ const UnitRow: React.FC<{ row: Row; turn: number }> = ({ row, turn }) => {
     !dead && invulnLevel !== 0
       ? invulnerabilityTurnsRemaining(unit, turn)
       : null
-  const frac = dead ? 0 : healthFraction(unit)
+  const frac = dead ? 0 : energyFraction(unit)
 
   return (
     <Box
@@ -205,9 +205,9 @@ const UnitRow: React.FC<{ row: Row; turn: number }> = ({ row, turn }) => {
             {unit.weight}
           </Stat>
           {!dead && (
-            <Stat title="Health">
-              <Box component="span" sx={{ color: healthBarColor(frac) }}>
-                {STAT_ICON.health}
+            <Stat title="Energy">
+              <Box component="span" sx={{ color: energyBarColor(frac) }}>
+                {STAT_ICON.energy}
               </Box>
               <Box
                 sx={{
@@ -223,11 +223,11 @@ const UnitRow: React.FC<{ row: Row; turn: number }> = ({ row, turn }) => {
                   sx={{
                     width: `${frac * 100}%`,
                     height: "100%",
-                    backgroundColor: healthBarColor(frac),
+                    backgroundColor: energyBarColor(frac),
                   }}
                 />
               </Box>
-              {unit.health}
+              {unit.energy}
             </Stat>
           )}
           {invulnTurns != null && (

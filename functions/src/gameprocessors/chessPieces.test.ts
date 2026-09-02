@@ -45,7 +45,7 @@ const mkTurn = (
 ): Turn => {
   const ids = Object.keys(playerPieces)
   return {
-    playerHealth: Object.fromEntries(ids.map((id) => [id, 100])),
+    playerEnergy: Object.fromEntries(ids.map((id) => [id, 100])),
     startTime: Timestamp.fromMillis(0),
     endTime: Timestamp.fromMillis(5000),
     scores: Object.fromEntries(ids.map((id) => [id, playerPieces[id].length])),
@@ -149,7 +149,7 @@ describe("chess pieces: within-turn movement and collisions", () => {
     expect(next.moves.t1).toBe(blocker) // applied move = actual stop square
     expect(next.paths?.t1).toEqual([at(2, 5), at(3, 5), blocker])
     // 3 squares traversed, no base tick
-    expect(next.playerHealth.t1).toBe(97)
+    expect(next.playerEnergy.t1).toBe(97)
     const clash = next.clashes.find((c) => c.index === blocker)
     expect(clash).toMatchObject({
       kind: "contest",
@@ -205,7 +205,7 @@ describe("chess pieces: within-turn movement and collisions", () => {
     expect(
       next.clashes.some((c) => c.reason === REASON.sever)
     ).toBe(true)
-    expect(next.playerHealth.t1).toBe(96) // 4 squares traversed
+    expect(next.playerEnergy.t1).toBe(96) // 4 squares traversed
   })
 
   it("a snake head entering a stationary piece's square resolves by weight", () => {
@@ -255,7 +255,7 @@ describe("chess pieces: within-turn movement and collisions", () => {
 
     expect(next.alivePlayers.sort()).toEqual(["t1", "t2"])
     expect(next.playerPieces.t1).toEqual([at(5, 6)])
-    expect(next.playerHealth.t1).toBe(99) // the jump costs a flat 1
+    expect(next.playerEnergy.t1).toBe(99) // the jump costs a flat 1
   })
 
   it("food is eaten at the destination only — squares passed over keep their food", () => {
@@ -271,7 +271,7 @@ describe("chess pieces: within-turn movement and collisions", () => {
 
     expect(next.food).toEqual([passedFood])
     expect(next.playerPieces.t1).toEqual([destFood, destFood]) // grew to weight 2
-    expect(next.playerHealth.t1).toBe(100)
+    expect(next.playerEnergy.t1).toBe(100)
   })
 
   it("a slider entering a hazard square mid-path dies there", () => {
@@ -294,7 +294,7 @@ describe("chess pieces: within-turn movement and collisions", () => {
     expect(next.paths?.t1).toEqual([at(2, 5), at(3, 5), hazard])
   })
 
-  it("a piece with nothing staged (or an illegal destination) stays and spends no health", () => {
+  it("a piece with nothing staged (or an illegal destination) stays and spends no energy", () => {
     const players = [gp("t1", "t1", "A", "rook"), gp("t2", "t2", "A", "bishop")]
     const rookAt = at(3, 3)
     const bishopAt = at(7, 7)
@@ -308,8 +308,8 @@ describe("chess pieces: within-turn movement and collisions", () => {
     expect(next.playerPieces.t2).toEqual([bishopAt])
     expect(next.moves.t1).toBe(rookAt)
     expect(next.moves.t2).toBe(bishopAt)
-    expect(next.playerHealth.t1).toBe(100)
-    expect(next.playerHealth.t2).toBe(100)
+    expect(next.playerEnergy.t1).toBe(100)
+    expect(next.playerEnergy.t2).toBe(100)
   })
 })
 
@@ -348,7 +348,7 @@ describe("chess pieces: in-flight edge swaps", () => {
     expect(next.playerPieces.t1).toEqual([b, b])
     expect(next.moves.t1).toBe(b)
     expect(next.paths?.t1).toEqual([a, b])
-    expect(next.playerHealth.t1).toBe(98) // 2 squares traversed
+    expect(next.playerEnergy.t1).toBe(98) // 2 squares traversed
 
     // Loser: dead on b, the square it was blocked on — never on a, the square
     // it tried to swap into.
@@ -407,7 +407,7 @@ describe("chess pieces: in-flight edge swaps", () => {
     const next = swapRooks(
       [start, start],
       [at(5, 5)],
-      { hazards: [a], playerHealth: { t1: 100, t2: 10 } },
+      { hazards: [a], playerEnergy: { t1: 100, t2: 10 } },
       { hazardDamage: 30 }
     )
 
@@ -435,7 +435,7 @@ describe("chess pieces: in-flight edge swaps", () => {
 
     expect(next.alivePlayers).toEqual(["t1"])
     expect(next.playerPieces.t1).toEqual([b, b])
-    expect(next.playerHealth.t1).toBe(68) // one 30 dose on entry + 2 squares
+    expect(next.playerEnergy.t1).toBe(68) // one 30 dose on entry + 2 squares
   })
 
   it("regression: a head-on meeting on ONE square is unchanged — no revert", () => {
@@ -675,17 +675,17 @@ describe("chess pieces: death squares on the wire", () => {
   // settled once, in the food phase, so a piece could complete a ray it could
   // not afford and die on the staged destination. The engine now charges each
   // cell as it is entered, so the piece EXHAUSTS mid-ray and halts where its
-  // health ran out — three cells short of where it was going. Nothing revives
+  // energy ran out — three cells short of where it was going. Nothing revives
   // it here, so the halt is where it dies.
   it("a piece that exhausts mid-ray halts and dies on the cell that drained it", () => {
     const players = [gp("t1", "t1", "A", "rook"), gp("t2", "t2", "A", "king")]
     const dest = at(5, 5)
-    const drained = at(4, 5) // the third cell entered: 3 health, 1 per cell
+    const drained = at(4, 5) // the third cell entered: 3 energy, 1 per cell
     const next = run(
       players,
       { t1: [at(1, 5)], t2: [at(9, 9)] },
       [mv("t1", dest)],
-      { playerHealth: { t1: 3, t2: 100 } }
+      { playerEnergy: { t1: 3, t2: 100 } }
     )
 
     expect(next.alivePlayers).toEqual(["t2"])
@@ -726,7 +726,7 @@ describe("chess pieces: pawns", () => {
     expect(next.playerPieces.t1).toEqual([pawnAt]) // did not move
     expect(next.moves.t1).toBe(pawnAt)
     expect(next.orientation.t1).toEqual({ dx: 0, dy: -1 })
-    expect(next.playerHealth.t1).toBe(100) // no movement cost
+    expect(next.playerEnergy.t1).toBe(100) // no movement cost
   })
 
   it("moves straight forward; diagonal only onto food or a unit; never backward", () => {
@@ -750,7 +750,7 @@ describe("chess pieces: pawns", () => {
       { ...withOrientation, food: [at(4, 4)] }
     )
     expect(diagFood.playerPieces.t1).toEqual([at(4, 4), at(4, 4)])
-    expect(diagFood.playerHealth.t1).toBe(100)
+    expect(diagFood.playerEnergy.t1).toBe(100)
 
     // Backward is illegal — pawn stays.
     const back = run(players, { t1: [pawnAt], t2: [at(8, 8)] }, [mv("t1", at(2, 5))], withOrientation)
@@ -816,7 +816,7 @@ describe("chess pieces: pawns", () => {
 
     expect(next.unitTypes?.t1).toBe("queen")
     expect(next.playerPieces.t1).toEqual([at(4, 5)])
-    expect(next.playerHealth.t1).toBe(99) // one step, no eat: normal movement cost
+    expect(next.playerEnergy.t1).toBe(99) // one step, no eat: normal movement cost
   })
 
   it("a promoting team's score drops but the team is not eliminated", () => {
@@ -1146,17 +1146,17 @@ describe("configurable hazard damage", () => {
     expect(next.alivePlayers.sort()).toEqual(["t1", "t2"])
     expect(next.playerPieces.t1).toEqual([at(8, 5)]) // completed the slide
     // one 30 dose on the hazard square + 7 squares traversed
-    expect(next.playerHealth.t1).toBe(63)
+    expect(next.playerEnergy.t1).toBe(63)
     expect(next.clashes).toEqual([])
   })
 
-  it("a low-health slider dies mid-flight on the hazard square that drained it", () => {
+  it("a low-energy slider dies mid-flight on the hazard square that drained it", () => {
     const players = [gp("t1", "t1", "A", "rook"), gp("t2", "t2", "A", "king")]
     const next = run(
       players,
       { t1: [at(1, 5)], t2: [at(9, 9)] },
       [mv("t1", at(9, 5))],
-      { hazards: [at(3, 5), at(5, 5)], playerHealth: { t1: 50, t2: 100 } },
+      { hazards: [at(3, 5), at(5, 5)], playerEnergy: { t1: 50, t2: 100 } },
       { hazardDamage: 30 }
     )
 
@@ -1179,8 +1179,8 @@ describe("configurable hazard damage", () => {
     )
 
     expect(next.alivePlayers.sort()).toEqual(["t1", "t2"])
-    expect(next.playerHealth.t1).toBe(70) // exactly one dose, no movement cost
-    expect(next.playerHealth.t2).toBe(100)
+    expect(next.playerEnergy.t1).toBe(70) // exactly one dose, no movement cost
+    expect(next.playerEnergy.t2).toBe(100)
   })
 
   it("a mover that stops on a hazard square pays the entry dose exactly once", () => {
@@ -1197,24 +1197,24 @@ describe("configurable hazard damage", () => {
     expect(next.alivePlayers.sort()).toEqual(["t1", "t2"])
     expect(next.playerPieces.t1).toEqual([hazard])
     // one 30 dose on entry + 3 squares traversed — no extra stationary dose
-    expect(next.playerHealth.t1).toBe(67)
+    expect(next.playerEnergy.t1).toBe(67)
   })
 
-  it("a king holding still loses no health across a turn, even at 1 health", () => {
+  it("a king holding still loses no energy across a turn, even at 1 energy", () => {
     const players = [gp("t1", "t1", "A", "king"), gp("t2", "t2", "A", "rook")]
     const next = run(
       players,
       { t1: [at(5, 5)], t2: [at(8, 8)] },
       [mv("t2", at(8, 6))],
-      { playerHealth: { t1: 1, t2: 100 } }
+      { playerEnergy: { t1: 1, t2: 100 } }
     )
 
     expect(next.alivePlayers.sort()).toEqual(["t1", "t2"])
-    expect(next.playerHealth.t1).toBe(1) // holding is free
-    expect(next.playerHealth.t2).toBe(98) // rook paid its 2 squares
+    expect(next.playerEnergy.t1).toBe(1) // holding is free
+    expect(next.playerEnergy.t2).toBe(98) // rook paid its 2 squares
   })
 
-  it("a snake in a chess game still loses exactly 1 health per turn", () => {
+  it("a snake in a chess game still loses exactly 1 energy per turn", () => {
     const players = [gp("t1", "t1", "A", "snake"), gp("t2", "t2", "A", "king")]
     const next = run(
       players,
@@ -1222,20 +1222,20 @@ describe("configurable hazard damage", () => {
       [mv("t1", at(5, 5))]
     )
 
-    expect(next.playerHealth.t1).toBe(99)
-    expect(next.playerHealth.t2).toBe(100)
+    expect(next.playerEnergy.t1).toBe(99)
+    expect(next.playerEnergy.t2).toBe(100)
   })
 })
 
-describe("configurable per-unit-type max health", () => {
-  it("initial health honors the per-type config, defaulting missing types to 100", () => {
+describe("configurable per-unit-type max energy", () => {
+  it("initial energy honors the per-type config, defaulting missing types to 100", () => {
     const players = [
       gp("t1", "t1", "A", "snake"),
       gp("t1#2", "t1", "B", "knight"),
       gp("t2", "t2", "A", "rook"),
     ]
     const setup = mkSetup(twoTeams, players, {
-      maxHealthPerUnit: { snake: 150, rook: 60 },
+      maxEnergyPerUnit: { snake: 150, rook: 60 },
     })
     const processor = new TeamSnekProcessor({
       setup,
@@ -1246,9 +1246,9 @@ describe("configurable per-unit-type max health", () => {
     })
     const turn0 = processor.firstTurn()
 
-    expect(turn0.playerHealth.t1).toBe(150) // configured snake max
-    expect(turn0.playerHealth["t1#2"]).toBe(100) // knight not configured
-    expect(turn0.playerHealth.t2).toBe(60) // configured rook max
+    expect(turn0.playerEnergy.t1).toBe(150) // configured snake max
+    expect(turn0.playerEnergy["t1#2"]).toBe(100) // knight not configured
+    expect(turn0.playerEnergy.t2).toBe(60) // configured rook max
   })
 
   it("snake path: eating restores to the configured snake max", () => {
@@ -1259,12 +1259,12 @@ describe("configurable per-unit-type max health", () => {
       players,
       { t1: [at(4, 5), at(3, 5), at(2, 5)], t2: [at(8, 8), at(8, 7), at(8, 6)] },
       [mv("t1", foodAt), mv("t2", at(8, 9))],
-      { food: [foodAt], playerHealth: { t1: 10, t2: 100 } },
-      { maxHealthPerUnit: { snake: 40 } }
+      { food: [foodAt], playerEnergy: { t1: 10, t2: 100 } },
+      { maxEnergyPerUnit: { snake: 40 } }
     )
 
-    expect(next.playerHealth.t1).toBe(40) // restored to configured max, not 100
-    expect(next.playerHealth.t2).toBe(99) // normal 1/turn drain untouched
+    expect(next.playerEnergy.t1).toBe(40) // restored to configured max, not 100
+    expect(next.playerEnergy.t2).toBe(99) // normal 1/turn drain untouched
   })
 
   it("chess path: eating restores to the unit's current type's configured max", () => {
@@ -1274,15 +1274,15 @@ describe("configurable per-unit-type max health", () => {
       players,
       { t1: [at(1, 5)], t2: [at(8, 8)] },
       [mv("t1", foodAt)],
-      { food: [foodAt], playerHealth: { t1: 20, t2: 100 } },
-      { maxHealthPerUnit: { rook: 55 } }
+      { food: [foodAt], playerEnergy: { t1: 20, t2: 100 } },
+      { maxEnergyPerUnit: { rook: 55 } }
     )
 
-    expect(next.playerHealth.t1).toBe(55) // rook max, despite traversal costs
-    expect(next.playerHealth.t2).toBe(100) // king stayed put: spends nothing
+    expect(next.playerEnergy.t1).toBe(55) // rook max, despite traversal costs
+    expect(next.playerEnergy.t2).toBe(100) // king stayed put: spends nothing
   })
 
-  it("pawn promotion clamps carried health to the queen's configured max", () => {
+  it("pawn promotion clamps carried energy to the queen's configured max", () => {
     const players = [gp("t1", "t1", "A", "pawn"), gp("t2", "t2", "A", "king")]
     const pawnAt = at(3, 5)
     const next = run(
@@ -1290,16 +1290,16 @@ describe("configurable per-unit-type max health", () => {
       { t1: [pawnAt, pawnAt], t2: [at(8, 8)] }, // weight 2, threshold 3
       [mv("t1", at(4, 5))],
       { orientation: { t1: { dx: 1, dy: 0 } }, food: [at(4, 5)] },
-      { pawnPromotionWeight: 3, maxHealthPerUnit: { pawn: 200, queen: 50 } }
+      { pawnPromotionWeight: 3, maxEnergyPerUnit: { pawn: 200, queen: 50 } }
     )
 
     expect(next.unitTypes?.t1).toBe("queen")
     // Ate as a pawn (restored to 200), then clamped to the queen max on promotion.
-    expect(next.playerHealth.t1).toBe(50)
+    expect(next.playerEnergy.t1).toBe(50)
     expect(next.playerPieces.t1).toEqual([at(4, 5)]) // and reset to weight 1
   })
 
-  it("pawn promotion leaves health alone when it is within the queen's max", () => {
+  it("pawn promotion leaves energy alone when it is within the queen's max", () => {
     const players = [gp("t1", "t1", "A", "pawn"), gp("t2", "t2", "A", "king")]
     const pawnAt = at(3, 5)
     const next = run(
@@ -1307,13 +1307,13 @@ describe("configurable per-unit-type max health", () => {
       { t1: [pawnAt, pawnAt], t2: [at(8, 8)] },
       [mv("t1", at(4, 5))],
       { orientation: { t1: { dx: 1, dy: 0 } }, food: [at(4, 5)] },
-      { pawnPromotionWeight: 3, maxHealthPerUnit: { pawn: 80, queen: 500 } }
+      { pawnPromotionWeight: 3, maxEnergyPerUnit: { pawn: 80, queen: 500 } }
     )
 
     expect(next.unitTypes?.t1).toBe("queen")
-    // Health is never topped up by promotion, only clamped: the pawn's 80
+    // Energy is never topped up by promotion, only clamped: the pawn's 80
     // carries through even though the queen may hold 500.
-    expect(next.playerHealth.t1).toBe(80)
+    expect(next.playerEnergy.t1).toBe(80)
   })
 
   it("config absent: everything restores to 100 exactly as before", () => {
@@ -1323,11 +1323,11 @@ describe("configurable per-unit-type max health", () => {
       players,
       { t1: [at(1, 5)], t2: [at(8, 8)] },
       [mv("t1", foodAt)],
-      { food: [foodAt], playerHealth: { t1: 20, t2: 100 } }
+      { food: [foodAt], playerEnergy: { t1: 20, t2: 100 } }
     )
 
-    expect(next.playerHealth.t1).toBe(100)
-    expect(next.playerHealth.t2).toBe(100) // stationary king spends nothing
+    expect(next.playerEnergy.t1).toBe(100)
+    expect(next.playerEnergy.t2).toBe(100) // stationary king spends nothing
   })
 })
 
@@ -1370,9 +1370,9 @@ describe("chess pieces: snake bodies are walls for allies too", () => {
     expect(clash!.subStep).toBe(2)
     expect(clash!.reason).toBe(REASON.bodyBlock)
 
-    // It never reaches the food: no eat, no weight, no health restore.
+    // It never reaches the food: no eat, no weight, no energy restore.
     expect(next.food).toContain(at(6, 6))
-    expect(next.playerHealth.b).toBeUndefined()
+    expect(next.playerEnergy.b).toBeUndefined()
     expect(next.scores.b).toBe(0) // dead: weight never grew
   })
 
@@ -1429,7 +1429,7 @@ describe("chess pieces: snake bodies are walls for allies too", () => {
     expect(next.moves.b).toBe(at(4, 4))
     expect(next.paths?.b).toEqual([at(3, 3), at(4, 4)])
     expect(next.food).toContain(at(6, 6))
-    expect(next.playerHealth.b).toBe(98) // 2 squares traversed, no restore
+    expect(next.playerEnergy.b).toBe(98) // 2 squares traversed, no restore
     expect(
       next.clashes.some((c) => c.reason === REASON.sever)
     ).toBe(true)
@@ -1455,7 +1455,7 @@ describe("chess pieces: snake bodies are walls for allies too", () => {
     expect(next.moves.b).toBe(at(6, 6))
     expect(next.paths?.b).toEqual([at(3, 3), at(4, 4), at(5, 5), at(6, 6)])
     expect(next.playerPieces.b).toEqual([at(6, 6), at(6, 6)]) // ate: weight 2
-    expect(next.playerHealth.b).toBe(100) // eating restores in full
+    expect(next.playerEnergy.b).toBe(100) // eating restores in full
     expect(next.food).not.toContain(at(6, 6))
   })
 

@@ -236,7 +236,7 @@ wire contract is unchanged in shape; what varies for a piece unit:
   self | regicide` — plus `playerIDs` (everyone involved), `victimIDs` (who
   died at that cell) and, when there is one, `survivorID`. `reason` is
   display text: read `kind` and the id lists, never the string.
-- `hazard` and `exhaustion` records mark a unit that ran out of health and
+- `hazard` and `exhaustion` records mark a unit that ran out of energy and
   HALTED there. That is provisional death only: the unit stays on the board
   and contests normally, and it dies of it only if it is still at or below
   zero once the end-of-turn food phase has run — so a unit that halted on food

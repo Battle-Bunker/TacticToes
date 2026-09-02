@@ -27,7 +27,7 @@ const unit = (over: Partial<ResolveUnit> & Pick<ResolveUnit, "id" | "occupancy">
   type: "rook",
   teamID: over.id,
   tier: 0,
-  health: 100,
+  energy: 100,
   orientation: { dx: 1, dy: 0 },
   ...over,
 })
@@ -60,7 +60,7 @@ describe("resolveTurn, called from outside the processor", () => {
 
     expect(Object.keys(settled.board)).toEqual(["heavy"])
     expect(settled.board.heavy.occupancy).toEqual([light, light])
-    expect(settled.board.heavy.health).toBe(99) // one cell entered
+    expect(settled.board.heavy.energy).toBe(99) // one cell entered
 
     expect(settled.deaths).toEqual({
       light: { cell: light, subStep: 1, cause: "edge" },
@@ -78,17 +78,17 @@ describe("resolveTurn, called from outside the processor", () => {
   })
 
   it("reports an exhaustion recovery: halted, alive, and fed", () => {
-    // A rook with 2 health starts a long ray and runs dry on the second cell.
+    // A rook with 2 energy starts a long ray and runs dry on the second cell.
     // Food is waiting exactly there, so it eats, grows and survives — halted
     // well short of the cell it staged.
     const halt = at(3, 5)
     const settled = settle(
-      [unit({ id: "r", occupancy: [at(1, 5)], health: 2, stagedMove: at(9, 5) })],
+      [unit({ id: "r", occupancy: [at(1, 5)], energy: 2, stagedMove: at(9, 5) })],
       { food: [halt] }
     )
 
     expect(settled.deaths).toEqual({})
-    expect(settled.board.r).toEqual({ occupancy: [halt, halt], health: 100 })
+    expect(settled.board.r).toEqual({ occupancy: [halt, halt], energy: 100 })
     expect(settled.finalCell.r).toBe(halt)
     expect(settled.traversed.r).toEqual([at(2, 5), halt])
     expect(settled.food).toEqual([])
@@ -101,7 +101,7 @@ describe("resolveTurn, called from outside the processor", () => {
   it("takes the same ray away when nothing is waiting at the halt cell", () => {
     const halt = at(3, 5)
     const settled = settle([
-      unit({ id: "r", occupancy: [at(1, 5)], health: 2, stagedMove: at(9, 5) }),
+      unit({ id: "r", occupancy: [at(1, 5)], energy: 2, stagedMove: at(9, 5) }),
     ])
 
     expect(settled.board).toEqual({})
@@ -203,7 +203,7 @@ describe("resolveTurn, called from outside the processor", () => {
 
     expect(settled.board.r.occupancy).toEqual([at(3, 5)])
     expect(settled.traversed.r).toEqual([at(2, 5), at(3, 5)])
-    expect(settled.board.r.health).toBe(98)
+    expect(settled.board.r.energy).toBe(98)
   })
 
   it("reports a rotation rather than applying it", () => {
@@ -216,6 +216,6 @@ describe("resolveTurn, called from outside the processor", () => {
 
     expect(settled.rotations).toEqual({ p: { dx: 0, dy: -1 } })
     expect(settled.board.p.occupancy).toEqual([pawnAt])
-    expect(settled.board.p.health).toBe(100) // rotating is free
+    expect(settled.board.p.energy).toBe(100) // rotating is free
   })
 })

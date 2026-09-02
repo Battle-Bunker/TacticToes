@@ -30,14 +30,14 @@ import { EngineUnit, ExhaustionEvent, REASON, runTurnEngine } from "./turnEngine
 
 export interface ResolveUnit {
   id: string
-  /** Current kind. Only the movement grammar and max-health lookup read it. */
+  /** Current kind. Only the movement grammar and max-energy lookup read it. */
   type: UnitType
   teamID: string
   /** Configured as a king at spawn. Kings never change kind, so this is stable. */
   isKing?: boolean
   /** Invulnerability tier. Frozen for the whole turn by the engine. */
   tier: number
-  health: number
+  energy: number
   /** Board occupancy, index 0 = head. Never mutated. */
   occupancy: number[]
   /** Facing — pawn legality and the trail-unit default both read it. */
@@ -54,13 +54,13 @@ export interface ResolveTurnInput {
   boardHeight: number
   walls: number[]
   hazards: number[]
-  /** Health lost per hazard cell entered. */
+  /** Energy lost per hazard cell entered. */
   hazardDamage: number
   food: number[]
-  /** Per-kind max health; kinds absent here use `defaultMaxHealth`. */
-  maxHealth?: { [K in UnitType]?: number }
-  /** Default max health for kinds `maxHealth` does not name. Defaults to 100. */
-  defaultMaxHealth?: number
+  /** Per-kind max energy; kinds absent here use `defaultMaxEnergy`. */
+  maxEnergy?: { [K in UnitType]?: number }
+  /** Default max energy for kinds `maxEnergy` does not name. Defaults to 100. */
+  defaultMaxEnergy?: number
   /**
    * Teams that play under regicide — those configured with at least one king,
    * whether or not a king is still standing. A team here loses every remaining
@@ -72,18 +72,18 @@ export interface ResolveTurnInput {
 /** A unit still on the board when the turn closed. */
 export interface ResolvedUnit {
   occupancy: number[]
-  health: number
+  energy: number
 }
 
 export interface TurnResolution {
-  /** Survivors only, by id: final occupancy (post-sever, post-growth) and health. */
+  /** Survivors only, by id: final occupancy (post-sever, post-growth) and energy. */
   board: { [unitID: string]: ResolvedUnit }
   /** Every unit removed this turn, by id. The authoritative registry. */
   deaths: { [unitID: string]: UnitDeath }
   /** Typed events, engine order followed by any regicide records. */
   clashes: Clash[]
   /**
-   * Units that ran out of health and halted. Already settled: an event whose
+   * Units that ran out of energy and halted. Already settled: an event whose
    * unit is absent from `deaths` recovered on food at its halt cell.
    */
   exhaustions: ExhaustionEvent[]
@@ -110,9 +110,9 @@ export interface TurnResolution {
 
 export const resolveTurn = (input: ResolveTurnInput): TurnResolution => {
   const { units, boardWidth, boardHeight } = input
-  const defaultMaxHealth = input.defaultMaxHealth ?? 100
-  const maxHealthFor = (type: UnitType): number =>
-    input.maxHealth?.[type] ?? defaultMaxHealth
+  const defaultMaxEnergy = input.defaultMaxEnergy ?? 100
+  const maxEnergyFor = (type: UnitType): number =>
+    input.maxEnergy?.[type] ?? defaultMaxEnergy
 
   // 1. Movement grammar: every staged cell becomes the path the unit walks,
   // one cell per sub-step. An illegal or missing destination falls back to the
@@ -146,14 +146,14 @@ export const resolveTurn = (input: ResolveTurnInput): TurnResolution => {
   })
 
   // 2. The collision phase: every sub-step, every collision, sever truncation
-  // and all in-turn health accounting.
+  // and all in-turn energy accounting.
   const engineUnits: EngineUnit[] = units.map((u) => ({
     id: u.id,
     leavesTrail: leavesTrail(u.type),
     traversesEdges: traversesEdges(u.type),
     occupancy: u.occupancy,
     tier: u.tier,
-    health: u.health,
+    energy: u.energy,
     path: paths[u.id] ?? [],
   }))
   const subStepCount = Math.max(1, ...engineUnits.map((u) => u.path.length))
@@ -182,11 +182,11 @@ export const resolveTurn = (input: ResolveTurnInput): TurnResolution => {
     if (dead.has(u.id)) return
     board[u.id] = {
       occupancy: engine.occupancy.get(u.id) as number[],
-      health: engine.health.get(u.id) as number,
+      energy: engine.energy.get(u.id) as number,
     }
   })
 
-  // 4. Food: every surviving unit standing on food eats it, restoring health
+  // 4. Food: every surviving unit standing on food eats it, restoring energy
   // to its kind's max and adding one weight/length — exhausted units included,
   // and this is the only way one ever comes back. Movement cost is not settled
   // here; the engine charged it as it was spent.
@@ -196,7 +196,7 @@ export const resolveTurn = (input: ResolveTurnInput): TurnResolution => {
     if (index === -1) return
     food.splice(index, 1)
     unit.occupancy.push(unit.occupancy[unit.occupancy.length - 1])
-    unit.health = maxHealthFor(typeOf.get(id) as UnitType)
+    unit.energy = maxEnergyFor(typeOf.get(id) as UnitType)
   })
 
   // 5. Exhaustion stops being provisional. A unit the food phase brought back
@@ -207,7 +207,7 @@ export const resolveTurn = (input: ResolveTurnInput): TurnResolution => {
   engine.exhaustions.forEach((event) => {
     if (dead.has(event.unitID)) return
     const unit = board[event.unitID]
-    if (!unit || unit.health > 0) return
+    if (!unit || unit.energy > 0) return
 
     dead.add(event.unitID)
     delete board[event.unitID]

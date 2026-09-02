@@ -265,9 +265,9 @@ export const settleTurn = (input: SettleInput, spawn: Spawner): Settlement => {
   // Promotion trades the accumulated mass for the queen's mobility — the
   // stack collapses to the single square the unit occupies, weight 1 and
   // never 0, so nothing is ever eliminated by promoting; only its score
-  // drops. A promoted pawn may also be carrying more health than a queen is
+  // drops. A promoted pawn may also be carrying more energy than a queen is
   // allowed, so it is clamped to the queen's max; nothing else in settlement
-  // touches health.
+  // touches energy.
   //
   // A piece's occupancy is N copies of ONE square, never a body, so the
   // collapse frees no cell. That is what lets a caller run its own item
@@ -275,7 +275,7 @@ export const settleTurn = (input: SettleInput, spawn: Spawner): Settlement => {
   // free-cell set it would have seen before.
   const unitTypes: { [unitID: string]: UnitType } = {}
   const promoted: string[] = []
-  const queenMaxHealth = input.maxHealth?.queen ?? input.defaultMaxHealth ?? 100
+  const queenMaxEnergy = input.maxEnergy?.queen ?? input.defaultMaxEnergy ?? 100
   input.units.forEach((u) => {
     if (!alive.has(u.id)) return
     unitTypes[u.id] = u.type
@@ -286,7 +286,7 @@ export const settleTurn = (input: SettleInput, spawn: Spawner): Settlement => {
     unitTypes[u.id] = "queen"
     promoted.push(u.id)
     settled.occupancy = [settled.occupancy[0]]
-    if (settled.health > queenMaxHealth) settled.health = queenMaxHealth
+    if (settled.energy > queenMaxEnergy) settled.energy = queenMaxEnergy
   })
 
   // 6. Spawning, last of the board phases and after promotion, exactly where
