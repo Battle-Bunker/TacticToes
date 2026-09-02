@@ -24,6 +24,7 @@ describe("engine/ is vendorable", () => {
     expect(engineFiles.sort()).toEqual([
       "adjudicate.ts",
       "moveGrammar.ts",
+      "queries.ts",
       "resolveTurn.ts",
       "settleTurn.ts",
       "spawn.ts",
