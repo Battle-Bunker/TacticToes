@@ -1,7 +1,7 @@
 import { UnitType } from "@shared/types/Game"
 import { ORTHOGONALS, Orientation, leavesTrail, traversesEdges } from "./moveGrammar"
 import { BoardShape, GrammarUnit, actionOf, coverOf, legalTargets } from "./queries"
-import { ResolveUnit } from "./resolveTurn"
+import { DEFAULT_FOOD_ENERGY, ResolveUnit } from "./resolveTurn"
 import { SettleInput } from "./settleTurn"
 
 /**
@@ -430,10 +430,13 @@ const claimOf = (
 
   // Weight. Eating is the only way up (one meal per turn at most, and only as
   // many as there are meals in reach); a sever and a promotion are the two
-  // ways down, and both can take it to one.
+  // ways down, and both can take it to one. A meal only grows the eater when
+  // it FILLS it, so the meals it could take are a ceiling on the lengths it
+  // could gain rather than a count of them — which is the direction a claim
+  // is allowed to be wrong in.
   const foodInReach = input.food.filter((cell) => everHead.has(cell)).length
-  const growth = Math.min(span, foodInReach)
-  const weightMax = length + growth
+  const meals = Math.min(span, foodInReach)
+  const weightMax = length + meals
   const promotionPossible = record.type === "pawn" && weightMax >= input.pawnPromotionWeight
 
   // The body, turn by turn: segment j at turn n was the head of turn n - j, so
@@ -469,14 +472,16 @@ const claimOf = (
   // always hold, and may always leave, so nothing about it is certain at all.
   const certainIfAlive = trail ? sorted(record.occupancy.slice(0, Math.max(0, length - span))) : []
 
-  // Energy. A meal restores to the kind's maximum, so the ceiling is the
-  // biggest maximum any kind it could be is allowed, and the floor is what it
-  // was observed with minus the cheapest way to spend the span.
+  // Energy. A meal is `foodEnergy` ADDED and clamped to the kind's max, not a
+  // free refill to it, so the ceiling is what it was observed with plus every
+  // meal it could take, held down by the biggest maximum any kind it could be
+  // is allowed. Energy never rises any other way, and a record carrying more
+  // than that maximum already (a kind whose max was lowered under it) still
+  // has what it has — hence the floor at `record.energy`.
   const defaultMax = input.defaultMaxEnergy ?? 100
-  const energyMax =
-    foodInReach > 0
-      ? Math.max(...kinds.map((k) => input.maxEnergy?.[k] ?? defaultMax))
-      : record.energy
+  const kindMax = Math.max(...kinds.map((k) => input.maxEnergy?.[k] ?? defaultMax))
+  const foodEnergy = input.foodEnergy ?? DEFAULT_FOOD_ENERGY
+  const energyMax = Math.max(record.energy, Math.min(kindMax, record.energy + meals * foodEnergy))
 
   // Tier. Only two things move it: an effect of the schedule lapsing before
   // this turn, which is arithmetic the caller cannot be asked to redo, and a

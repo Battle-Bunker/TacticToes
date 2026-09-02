@@ -151,6 +151,11 @@ export const makeBoard = (seed: number): PartialSettleInput => {
     food,
     defaultMaxEnergy: 100,
     maxEnergy: { queen: 80 },
+    // A third of the boards play a food worth far less than a tank, where a
+    // meal feeds without growing and an exhausted unit's rescue is not
+    // automatic. Derived from the seed rather than drawn, so every board's
+    // units, items and terrain are the ones they always were.
+    foodEnergy: seed % 3 === 0 ? 5 : 100,
     regicideTeamIDs: units.some((u) => u.isKing) ? ["A", "B"] : [],
     turn,
     teamOf,
@@ -401,6 +406,12 @@ const claimFailures = (
   if (settled.occupancy.length < claim.weightMin || settled.occupancy.length > claim.weightMax) {
     out.push(`CLAIM weight ${tag} ${settled.occupancy.length} vs [${claim.weightMin},${claim.weightMax}]`)
   }
+  // Energy is a coordinate a rule reads (exhaustion), and its ceiling is now
+  // arithmetic — observed energy plus what the meals in reach are worth —
+  // rather than "there was food, so assume a full tank". Worth enumerating.
+  if (settled.energy > claim.energyMax) {
+    out.push(`CLAIM energy ${tag} ${settled.energy} vs max ${claim.energyMax}`)
+  }
   const body = claim.bodyPossible[claim.bodyPossible.length - 1]
   const front = claim.headPossible[claim.headPossible.length - 1]
   settled.occupancy.forEach((cell) => {
@@ -648,6 +659,28 @@ describe("computeClaims", () => {
     if (piece) {
       expect(computeClaims(held(base, [piece.id]))[0].certainIfAlive).toEqual([])
     }
+  })
+
+  it("prices a held unit's meal at `foodEnergy`, not at a full tank", () => {
+    // The ceiling on what a held unit could be carrying is what it was seen
+    // with plus every meal it could reach, clamped to its kind's max. Under a
+    // lean food that is well short of the tank the old rule assumed.
+    const snake: ResolveUnit = {
+      id: "s",
+      type: "snake",
+      teamID: "A",
+      tier: 0,
+      energy: 50,
+      occupancy: [at(4, 4), at(3, 4), at(2, 4)],
+      orientation: { dx: 1, dy: 0 },
+    }
+    const fed = bench([snake], {
+      food: [at(5, 4)],
+      held: [{ id: "s", observedTurn: 3 }],
+    })
+    expect(computeClaims(fed)[0].energyMax).toBe(100) // default food = a tank
+    expect(computeClaims({ ...fed, foodEnergy: 5 })[0].energyMax).toBe(55)
+    expect(computeClaims({ ...fed, foodEnergy: 5, food: [] })[0].energyMax).toBe(50)
   })
 
   it("forks a pawn's kinds at the promotion threshold and nowhere else", () => {

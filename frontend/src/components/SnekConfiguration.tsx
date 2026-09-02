@@ -32,6 +32,8 @@ interface SnekConfigurationProps {
   onFertileGroundClusteringChange: (clustering: number) => void
   foodSpawnRate: number
   onFoodSpawnRateChange: (rate: number) => void
+  foodEnergy: number
+  onFoodEnergyChange: (energy: number) => void
   boardWidth: number
   boardHeight: number
   usePreviewBoard: boolean
@@ -52,6 +54,7 @@ export const SnekConfiguration: React.FC<SnekConfigurationProps> = ({
   fertileGroundDensity, onFertileGroundDensityChange,
   fertileGroundClustering, onFertileGroundClusteringChange,
   foodSpawnRate, onFoodSpawnRateChange,
+  foodEnergy, onFoodEnergyChange,
   boardWidth, boardHeight,
   usePreviewBoard, onUsePreviewBoardChange,
   syncedPreviewData,
@@ -120,6 +123,13 @@ export const SnekConfiguration: React.FC<SnekConfigurationProps> = ({
         <Slider
           value={foodSpawnRate} onChange={(_e, value) => onFoodSpawnRateChange(value as number)}
           min={0} max={5} step={0.25} valueLabelDisplay="auto" valueLabelFormat={(v) => `${v}/turn`} sx={{ mx: 1 }}
+        />
+        <NumericField
+          label="Food energy" size="small" value={foodEnergy}
+          onChange={onFoodEnergyChange}
+          min={1} max={1000} step={1} round={Math.round}
+          sx={{ mt: 1, width: 260 }}
+          helperText="Energy per food; a meal grows the eater only when it fills the tank"
         />
       </Box>
       <Box sx={{ mt: 1 }}>

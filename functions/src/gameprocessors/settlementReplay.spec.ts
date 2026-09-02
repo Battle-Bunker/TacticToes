@@ -249,6 +249,7 @@ const serialise = (stream: Turn[]): string =>
 const GOLDEN = join(__dirname, "settlementReplay.golden.json")
 const GOLDEN_WINDOW_8 = join(__dirname, "settlementReplay.window8.golden.json")
 const GOLDEN_SPAWNERS_ON = join(__dirname, "settlementReplay.spawners.golden.json")
+const GOLDEN_LEAN_FOOD = join(__dirname, "settlementReplay.leanfood.golden.json")
 
 /**
  * The same game with BOTH spawners running: a food every turn and a potion
@@ -328,6 +329,42 @@ describe("golden settlement replay", () => {
     // shows up here as a different board.
     const stream = runReplay(SPAWNERS_ON)
     check(serialise(stream), GOLDEN_SPAWNERS_ON)
+  })
+
+  /**
+   * The same spawners-on game with a food worth 5 instead of a whole tank.
+   *
+   * The base and window-8 replays never eat — both spawn rates are zero — so
+   * the food rule needs the spawners-on board to be visible at all, and it
+   * needs a `foodEnergy` small enough that a meal does NOT fill a snake that
+   * has spent a handful of energy walking its circuit. Here two snakes each
+   * eat one food (turns 8 and 9); at 100 the meal fills the tank and both grow
+   * to weight 4, at 5 it feeds them and neither does. That is the whole rule,
+   * pinned on a real board rather than a two-unit fixture: growth is what a
+   * full tank costs.
+   */
+  const LEAN_FOOD: Partial<StartedGameSetup> = { ...SPAWNERS_ON, foodEnergy: 5 }
+
+  it("feeds without growing when one food is worth less than the tank", () => {
+    const lean = runReplay(LEAN_FOOD)
+    check(serialise(lean), GOLDEN_LEAN_FOOD)
+
+    const full = runReplay(SPAWNERS_ON)
+    // The two meals of this replay, as (index into the produced stream, eater).
+    const meals: [number, string][] = [
+      [8, "t2"],
+      [9, "t1#2"],
+    ]
+    meals.forEach(([i, eater]) => {
+      const spentWalking = lean[i - 1].playerEnergy[eater]
+      // Fed to the brim: at max, and a length longer for it.
+      expect(full[i].playerEnergy[eater]).toBe(100)
+      expect(full[i].playerPieces[eater].length).toBe(4)
+      // Fed 5: one square's walking charged, five back, and no length. The
+      // snake is better off than it was and no heavier for it.
+      expect(lean[i].playerEnergy[eater]).toBe(spentWalking - 1 + 5)
+      expect(lean[i].playerPieces[eater].length).toBe(3)
+    })
   })
 
   it("spawns, and has the spawns collected, so the spawner fixture is not vacuous", () => {

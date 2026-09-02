@@ -9,11 +9,15 @@ export const TeamSnekRules: React.FC = () => {
         simultaneously every turn; humans spectate.
       </Typography>
       <Typography>
-        Eat 🎃 food to grow longer and restore energy to full. Energy is spent
-        per square moved — a snake always moves, so it pays 1 every turn and
-        dies when its energy runs out. Entering a hazard tile costs a
-        configurable chunk of energy (default 100 — usually lethal). Max
-        energy is configurable per unit type (default 100).
+        Eat 🎃 food to refill energy, and grow longer on the meal that fills
+        the tank. One food is worth a configurable amount of energy (default
+        100 — a whole tank, so by default every meal fills and every meal
+        grows); a meal that leaves a unit short of its max feeds it without
+        lengthening it. Energy is spent per square moved — a snake always
+        moves, so it pays 1 every turn and dies when its energy runs out.
+        Entering a hazard tile costs a configurable chunk of energy (default
+        100 — usually lethal). Max energy is configurable per unit type
+        (default 100).
       </Typography>
       <Typography>
         Hitting a wall or a snake's body is fatal. Head-to-head, the shorter
@@ -33,7 +37,8 @@ export const TeamSnekRules: React.FC = () => {
         Teams may also field chess pieces ♟♞♝♜♛♚. Pieces move like in chess,
         but every square travelled costs 1 energy (a knight's jump costs a
         flat 1), and a piece that stays put spends nothing — holding ground
-        is free. Eating food adds weight, and weight settles collisions: when
+        is free. A meal that fills a piece's tank adds weight, and weight
+        settles collisions: when
         units meet — including mid-flight during a turn — the heaviest
         survives and ties kill everyone involved.
       </Typography>

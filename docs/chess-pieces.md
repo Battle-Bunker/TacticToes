@@ -46,8 +46,9 @@ Occupancy on the wire (`Turn.playerPieces`) is unchanged: a snake's body
 Weight = array length, so scoring, team scores, winner adjudication and the
 wire format all work unchanged.
 
-Pieces start at weight 1, snakes at 3. Eating: +1 weight and energy restored
-to the type's configured max. A promoting pawn is the one place weight goes
+Pieces start at weight 1, snakes at 3. Eating: `foodEnergy` added and clamped
+to the type's configured max, +1 weight when the meal reaches that max. A
+promoting pawn is the one place weight goes
 down without a death: it returns to weight 1 as a queen. Weight never decays.
 Nothing is gained from a kill.
 
@@ -194,18 +195,22 @@ nothing else:
   kill is an ordinary **collision** death (`contest`), not an exhaustion one,
   and the unit appears in `Turn.deaths` exactly once, with that cause.
 - **Exhaustion kills only if the unit is still at or below zero at END OF
-  TURN.** Food is the only heal in the game, and it is eaten at a unit's final
-  cell in the end-of-turn food phase — which now runs BEFORE exhaustion is
-  settled. So, with no carve-out anywhere: an exhausted unit whose halt cell
-  holds food eats, restores to its type's max, grows, and survives — halted,
-  short of where it was going, but alive. An exhausted unit anywhere else dies
-  on its halt cell, entering `Turn.deaths` with cause `"exhaustion"` (movement
-  cost) or `"hazard"` (a hazard dose), and the sub-step it halted on.
+  TURN.** Food is the only refill in the game, and it is eaten at a unit's
+  final cell in the end-of-turn food phase — which now runs BEFORE exhaustion
+  is settled. So, with no carve-out anywhere: an exhausted unit whose halt cell
+  holds food eats, and survives if that meal carries it back above zero —
+  halted, short of where it was going, but alive. A meal is worth `foodEnergy`
+  (default 100), not automatically a full tank, so a deeply drained unit can
+  eat and still finish the turn at or below zero, and then it dies as if it had
+  found nothing. An exhausted unit anywhere else dies on its halt cell,
+  entering `Turn.deaths` with cause `"exhaustion"` (movement cost) or
+  `"hazard"` (a hazard dose), and the sub-step it halted on.
 
 A snake at 1 energy stepping onto food therefore exhausts on the food cell and
-comes straight back. A slider that cannot afford its ray still dies, unless it
-happens to halt on food — food further along the ray is no use to a unit that
-never reaches it.
+comes straight back — and at the default `foodEnergy` of 100 it comes back
+full, so it grows too. A slider that cannot afford its ray still dies, unless
+it happens to halt on food — food further along the ray is no use to a unit
+that never reaches it.
 
 **On the wire**, the halt is always visible. The engine emits a clash at the
 halt cell with kind `"exhaustion"` or `"hazard"` the moment it happens:
@@ -219,9 +224,30 @@ halt cell with kind `"exhaustion"` or `"hazard"` the moment it happens:
 ### Eating
 
 Eating happens in the end-of-turn food phase: every unit still on the board
-and standing on food consumes it, restores energy to its current kind's
-configured max (`maxEnergyPerUnit`, default 100) and gains one weight/length.
-It no longer replaces the movement cost — that was already charged in-sim.
+and standing on food consumes it. A meal is `GameSetup.foodEnergy` (default
+100), **added** to the eater's energy and clamped to its current kind's max
+(`maxEnergyPerUnit`, default 100).
+
+**Growth is what a full tank costs.** A meal adds one weight/length ONLY when
+it brings the unit TO its max — energy at or above max before the clamp. A
+unit that eats while nearly empty gets fuel and no length; the meal that tops
+it off is the one that grows it. A unit already sitting at max grows on every
+meal it takes, because the clamp leaves it at max and max is what the rule
+asks. At the shipped defaults — a food worth 100, a tank of 100 — every meal
+fills and every meal grows, which is exactly the rule food used to play.
+
+Set `foodEnergy` below a kind's max and that kind must eat several times to
+fill, growing on the meal that finishes the job. That is the knob: it decouples
+"stay alive" from "get heavy", so a unit can be kept running without being fed
+into promotion range.
+
+Food is eaten at the cell a unit ENDS on — a slider passing over food leaves it
+— and the spawner never puts two items on one cell, so exactly one meal per
+unit per turn is reachable. The phase applies its rule per food regardless, in
+board order, so a preset board that stacks two foods on one cell settles each
+meal in turn: add, clamp, grow if full.
+
+Eating no longer replaces the movement cost — that was already charged in-sim.
 The phase runs after the collision dead are removed but BEFORE exhaustion is
 settled, which is the whole mechanism by which an exhausted unit recovers.
 

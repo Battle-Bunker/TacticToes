@@ -94,6 +94,7 @@ const settled = settleTurn({
   ],
   boardWidth, boardHeight, walls, hazards, hazardDamage, food,
   maxEnergy,          // per-kind overrides; the rest default to 100
+  foodEnergy,         // energy one food replenishes (100)
   regicideTeamIDs,    // teams configured with at least one king
   turn,               // the turn being resolved
   teamOf,             // unit id -> team id, for every configured unit
@@ -138,6 +139,31 @@ ate its way to the threshold promotes on that turn) and after the orientation
 rewrite (so it was still a pawn when its facing was decided), and before
 spawning — which changes nothing either way, because a piece's occupancy is N
 copies of one square and the collapse frees no cell.
+
+**Eating adds `foodEnergy`, and only a FULL TANK grows.** A meal is
+`foodEnergy` (default 100) added to the eater and clamped to its kind's max,
+and it adds one weight/length only when it brings the unit TO that max. So
+growth is not what eating costs — it is what filling up costs. Three
+consequences a caller predicting a turn has to carry:
+
+- A unit already at max grows on every meal (the clamp leaves it at max, and
+  max is what the rule asks for). At the shipped defaults — food 100, tank 100
+  — every meal fills and every meal grows, which is the rule food always
+  played, so a default game is unchanged.
+- An exhausted unit's rescue is no longer automatic. It halts at or below
+  zero, eats `foodEnergy`, and lives only if that carries it above zero; if it
+  does not reach max it lives WITHOUT growing. Read `deaths`, never "it was on
+  food, so it survived".
+- Promotion follows weight, so it now follows full tanks. A pawn eating its way
+  to `pawnPromotionWeight` needs each of those meals to fill it.
+- A held unit's `Claim` is priced the same way: `energyMax` is what the unit
+  was observed carrying plus every meal it could reach, clamped to its kind's
+  max — not that max on the strength of any food at all being in reach.
+
+Food is eaten at the cell a unit ENDS on, and the spawner never stacks two
+items on one cell, so one meal per unit per turn is all that is reachable; the
+phase applies the rule per food in board order regardless, so a preset board
+that doubles up a cell settles each meal in turn.
 
 **Take `orientation` whole.** It is rebuilt each turn from the units still
 standing, with rotations folded in and the dead dropped. Carrying the previous

@@ -455,8 +455,13 @@ describe("exhaustion is provisional death", () => {
       setup: { hazardDamage: 30 },
     })
 
+    // 20, minus a cell each into (2,5) and (3,5), minus a cell and a 30 dose
+    // at (4,5): −13, and it halts. The meal is worth 100, so it comes back at
+    // 87 — alive, and NOT at max, so the rescue costs it the length it would
+    // once have gained. A meal only grows the eater when it fills the tank.
     expect(next.alivePlayers.sort()).toEqual(["t1", "t2"])
-    expect(next.playerEnergy.t1).toBe(100)
+    expect(next.playerEnergy.t1).toBe(87)
+    expect(next.playerPieces.t1).toEqual([at(4, 5)]) // fed, not grown
     expect(next.deaths).toEqual({})
     expect(next.clashes.find((c) => c.kind === "hazard")!.victimIDs).toEqual([])
   })
@@ -1126,9 +1131,12 @@ describe("off-parity snakes", () => {
       { hazardDamage: 30 }
     )
 
+    // 10, minus the cell entered and a 30 dose on the hazard: −21, halted.
+    // The 100 meal carries it back to 79 — alive, short of its max, so it is
+    // fed rather than grown and the body stays length 2.
     expect(next.alivePlayers.sort()).toEqual(["s1", "sb1", "sb2"])
-    expect(next.playerEnergy.s1).toBe(100)
-    expect(next.playerPieces.s1).toEqual([at(6, 5), at(5, 5), at(5, 5)]) // ate and grew
+    expect(next.playerEnergy.s1).toBe(79)
+    expect(next.playerPieces.s1).toEqual([at(6, 5), at(5, 5)]) // ate, did not fill, did not grow
     expect(next.deaths).toEqual({
       s2: { cell: at(6, 5), subStep: 1, cause: "edge" },
     })
