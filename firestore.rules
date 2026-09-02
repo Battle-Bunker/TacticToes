@@ -116,6 +116,9 @@ service cloud.firestore {
         (!('firstTurnTime' in setup.keys()) || (setup.firstTurnTime is int && setup.firstTurnTime > 0)) &&
         (!('pawnPromotionWeight' in setup.keys()) || (setup.pawnPromotionWeight is int && setup.pawnPromotionWeight >= 2 && setup.pawnPromotionWeight <= 100)) &&
         (!('hazardDamage' in setup.keys()) || (setup.hazardDamage is int && setup.hazardDamage >= 1 && setup.hazardDamage <= 1000)) &&
+        // Energy one food replenishes. Same 1..1000 band as max energy, since a
+        // meal is measured against a tank and a tank tops out at 1000.
+        (!('foodEnergy' in setup.keys()) || (setup.foodEnergy is int && setup.foodEnergy >= 1 && setup.foodEnergy <= 1000)) &&
         (!('unitsPerTeam' in setup.keys()) || isValidUnitCounts(setup.unitsPerTeam)) &&
         (!('maxEnergyPerUnit' in setup.keys()) || isValidUnitMaxEnergy(setup.maxEnergyPerUnit))
       );

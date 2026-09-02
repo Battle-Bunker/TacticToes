@@ -360,6 +360,9 @@ const GameSetup: React.FC = () => {
   const [foodSpawnRate, setFoodSpawnRate] = useState<number>(
     gameSetup?.foodSpawnRate ?? 0.5,
   );
+  const [foodEnergy, setFoodEnergy] = useState<number>(
+    gameSetup?.foodEnergy ?? 100,
+  );
   const [invulnerabilityPotionEnabled, setInvulnerabilityPotionEnabled] = useState<boolean>(
     gameSetup?.invulnerabilityPotionEnabled ?? false,
   );
@@ -535,6 +538,7 @@ const GameSetup: React.FC = () => {
       setFertileGroundDensity(gameSetup.fertileGroundDensity ?? 30);
       setFertileGroundClustering(gameSetup.fertileGroundClustering ?? 10);
       setFoodSpawnRate(gameSetup.foodSpawnRate ?? 0.5);
+      setFoodEnergy(gameSetup.foodEnergy ?? 100);
       setInvulnerabilityPotionEnabled(gameSetup.invulnerabilityPotionEnabled ?? false);
       setInvulnerabilityPotionSpawnRate(gameSetup.invulnerabilityPotionSpawnRate ?? 0.15);
       setPawnPromotionWeight(gameSetup.pawnPromotionWeight ?? 10);
@@ -787,6 +791,14 @@ const GameSetup: React.FC = () => {
     max: 5,
     round: (v) => Math.round(v * 4) / 4,
     setLocal: setFoodSpawnRate,
+  });
+
+  // How much one food is worth. Only energy accounting: no preview regen.
+  const handleFoodEnergyChange = setupNumberField("foodEnergy", {
+    min: 1,
+    max: 1000,
+    round: Math.round,
+    setLocal: setFoodEnergy,
   });
 
   const handleTeamClustersToggle = setupToggleField("teamClustersEnabled", {
@@ -1322,6 +1334,8 @@ const GameSetup: React.FC = () => {
               onFertileGroundClusteringChange={handleFertileGroundClusteringChange}
               foodSpawnRate={foodSpawnRate}
               onFoodSpawnRateChange={handleFoodSpawnRateChange}
+              foodEnergy={foodEnergy}
+              onFoodEnergyChange={handleFoodEnergyChange}
               boardWidth={gameSetup.boardWidth}
               boardHeight={gameSetup.boardHeight}
               usePreviewBoard={usePreviewBoard}

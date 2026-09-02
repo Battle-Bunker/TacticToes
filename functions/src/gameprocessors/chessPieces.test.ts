@@ -1289,14 +1289,44 @@ describe("configurable per-unit-type max energy", () => {
       players,
       { t1: [pawnAt, pawnAt], t2: [at(8, 8)] }, // weight 2, threshold 3
       [mv("t1", at(4, 5))],
-      { orientation: { t1: { dx: 1, dy: 0 } }, food: [at(4, 5)] },
+      // 101 so the step down to 100 plus a 100 meal lands exactly on the
+      // pawn's 200 max: growth is what a FULL TANK costs now, and this pawn
+      // has to promote by eating, so the meal has to fill it.
+      {
+        orientation: { t1: { dx: 1, dy: 0 } },
+        food: [at(4, 5)],
+        playerEnergy: { t1: 101, t2: 100 },
+      },
       { pawnPromotionWeight: 3, maxEnergyPerUnit: { pawn: 200, queen: 50 } }
     )
 
     expect(next.unitTypes?.t1).toBe("queen")
-    // Ate as a pawn (restored to 200), then clamped to the queen max on promotion.
+    // Ate as a pawn (filled to 200), then clamped to the queen max on promotion.
     expect(next.playerEnergy.t1).toBe(50)
     expect(next.playerPieces.t1).toEqual([at(4, 5)]) // and reset to weight 1
+  })
+
+  it("a pawn whose meal does not fill it gains no weight, and so does not promote", () => {
+    // Promotion counts WEIGHT, and weight now follows full tanks. This pawn is
+    // one length short of the threshold and eats — but the meal is worth 5
+    // against a tank of 100, so it is fed and not grown, and it stays a pawn.
+    const players = [gp("t1", "t1", "A", "pawn"), gp("t2", "t2", "A", "king")]
+    const pawnAt = at(3, 5)
+    const next = run(
+      players,
+      { t1: [pawnAt, pawnAt], t2: [at(8, 8)] }, // weight 2, threshold 3
+      [mv("t1", at(4, 5))],
+      {
+        orientation: { t1: { dx: 1, dy: 0 } },
+        food: [at(4, 5)],
+        playerEnergy: { t1: 50, t2: 100 },
+      },
+      { pawnPromotionWeight: 3, foodEnergy: 5, maxEnergyPerUnit: { pawn: 200 } }
+    )
+
+    expect(next.unitTypes?.t1).toBe("pawn")
+    expect(next.playerEnergy.t1).toBe(54) // 50, one step, five back
+    expect(next.playerPieces.t1).toEqual([at(4, 5), at(4, 5)]) // still weight 2
   })
 
   it("pawn promotion leaves energy alone when it is within the queen's max", () => {

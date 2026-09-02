@@ -27,9 +27,11 @@ import { Clash, ClashKind } from "@shared/types/Game"
  * lighter arrivals on frozen tier and weight, and a heavier arrival can still
  * kill it — which is an ordinary collision death, not an exhaustion one.
  * Whether exhaustion itself kills is decided at END OF TURN by the caller,
- * after the food phase: food is the only heal, and it is eaten at a unit's
- * final cell, so an exhausted unit that halted on food recovers and lives.
- * The engine therefore reports exhaustions rather than acting on them.
+ * after the food phase: food is the only refill, and it is eaten at a unit's
+ * final cell, so an exhausted unit that halted on food may come back — it
+ * lives if the meal's energy carries it above zero, and a meal is worth
+ * `foodEnergy`, not a full tank. The engine therefore reports exhaustions
+ * rather than acting on them.
  *
  * ## Sub-step loop: snapshot → resolve → apply
  *

@@ -27,6 +27,7 @@ import {
   Settlement,
   settleTurn,
 } from "./engine/settleTurn"
+import { DEFAULT_FOOD_ENERGY } from "./engine/resolveTurn"
 import {
   Spawner,
   freeCells,
@@ -363,6 +364,7 @@ export class TeamSnekProcessor {
       hazardDamage: this.hazardDamage(),
       food: gameState.newFood,
       maxEnergy: this.gameSetup.maxEnergyPerUnit,
+      foodEnergy: this.foodEnergy(),
       regicideTeamIDs: this.regicideTeamIDs(),
     }
   }
@@ -449,6 +451,13 @@ export class TeamSnekProcessor {
   // 100. An absent type means "snake".
   private maxEnergyFor(type: UnitType | undefined): number {
     return this.gameSetup.maxEnergyPerUnit?.[type ?? "snake"] ?? 100
+  }
+
+  // Energy one food replenishes. Default 100 — the default max energy — so an
+  // unconfigured game keeps food's old meaning: one meal fills the tank, and
+  // filling the tank is what grows the eater.
+  private foodEnergy(): number {
+    return this.gameSetup.foodEnergy ?? DEFAULT_FOOD_ENERGY
   }
 
   // Energy lost per hazard square entered (and per turn spent sitting on

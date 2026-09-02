@@ -195,8 +195,9 @@ export const deathHeadline = (cause: BoardClashKind): string => {
  * The two kinds that empty a unit's energy where it stands. Neither is fatal on
  * its own: exhaustion is a PROVISIONAL death — the unit halts, stays a
  * collision object, and dies only if it is still at or below zero when the turn
- * ends. One that eats on its halt square lives, and the record it leaves behind
- * is one of these kinds with an EMPTY victim list.
+ * ends. One whose meal on its halt square carries it back above zero lives,
+ * and the record it leaves behind is one of these kinds with an EMPTY victim
+ * list.
  */
 export const EXHAUSTION_KINDS: ReadonlySet<BoardClashKind> = new Set<BoardClashKind>([
   "exhaustion",
