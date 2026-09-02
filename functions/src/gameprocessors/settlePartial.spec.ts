@@ -201,7 +201,7 @@ export const concrete = (
   )
 
 /** Every concrete world, or null when the product is bigger than the budget. */
-const worlds = (
+const worldsOf = (
   input: PartialSettleInput,
   budget: number,
 ): ReadonlyArray<Map<string, number | undefined>> | null => {
@@ -236,7 +236,7 @@ export const headsOf = (settlement: Settlement, unit: ResolveUnit, subSteps: num
  * The first sub-step at which two settlements disagree about one unit, or
  * null when they agree about everything a rule reads.
  */
-const divergedAt = (
+const divergedAtFor = (
   a: Settlement,
   b: Settlement,
   unit: ResolveUnit,
@@ -307,7 +307,7 @@ const sweep = (
     const ids = base.units.slice(0, heldCount).map((u) => u.id)
     if (ids.length < heldCount) return
     const input = held(base, ids)
-    const all = worlds(input, budget)
+    const all = worldsOf(input, budget)
     if (!all) {
       coverage.skipped++
       return
@@ -321,6 +321,22 @@ const sweep = (
 
     const heldIds = new Set(ids)
     const live = input.units.filter((u) => !heldIds.has(u.id))
+    const liveIds = new Set(live.map((u) => u.id))
+
+    // ATTRIBUTION. `heldId` is a held unit on every entry, whatever route the
+    // uncertainty took to get there, and `via` is the route: modelled units,
+    // in order, each named once and none of them the root.
+    partial.ledger.forEach((entry) => {
+      if (!heldIds.has(entry.heldId)) {
+        fail(`CHAIN seed=${seed} entry heldId=${entry.heldId} is not held`)
+      }
+      if (new Set(entry.via).size !== entry.via.length) {
+        fail(`CHAIN seed=${seed} via repeats a unit: ${entry.via.join(">")}`)
+      }
+      entry.via.forEach((link) => {
+        if (!liveIds.has(link)) fail(`CHAIN seed=${seed} via link ${link} is not modelled`)
+      })
+    })
     const named = new Set(partial.ledger.map((e) => e.unitId))
     const subSteps = Math.max(
       partial.subStepCount,
@@ -333,7 +349,7 @@ const sweep = (
 
       // T1 — divergence containment, and its corollary.
       live.forEach((unit) => {
-        const at = divergedAt(partial, truth, unit, subSteps)
+        const at = divergedAtFor(partial, truth, unit, subSteps)
         if (at === null) return
         const entries = partial.ledger.filter((e) => e.unitId === unit.id)
         if (entries.length === 0) {
@@ -371,7 +387,7 @@ const sweep = (
       // T3 — a unit no entry names is settled identically in every world.
       live.forEach((unit) => {
         if (named.has(unit.id)) return
-        const at = divergedAt(partial, truth, unit, subSteps)
+        const at = divergedAtFor(partial, truth, unit, subSteps)
         if (at !== null) fail(`T3 seed=${seed} unit=${unit.id} unnamed but diverges at ${at}`)
       })
 
@@ -557,7 +573,7 @@ describe("T1–T3 by enumeration — a unit observed a turn ago", () => {
           )
           const world = `${a1}/${a2}`
           live.forEach((unit) => {
-            const at = divergedAt(partial, truth, unit, subSteps)
+            const at = divergedAtFor(partial, truth, unit, subSteps)
             if (at === null) return
             if (!named.has(unit.id) && failures.length < 4) {
               failures.push(`SPAN2 seed=${seed} unit=${unit.id}(${unit.type}) at=${at} ${world}`)
@@ -580,6 +596,147 @@ describe("T1–T3 by enumeration — a unit observed a turn ago", () => {
     report("span 2", coverage)
     expect(coverage.boards).toBeGreaterThan(200)
     expect(coverage.worlds).toBeGreaterThan(15000)
+  })
+})
+
+// ----------------------------------------- the causal chain, by enumeration
+//
+// The cascade property, on the shape the search actually meets: OUR units,
+// modelled, and ONE enemy nobody modelled. Three things are asked of it, and
+// the third is the one the bot cannot work without.
+//
+//   · T1/T2/T3 as ever, over every concrete world;
+//   · CERTAINTY BEFORE THE FIRST ENTRY. Everything a modelled ally did
+//     strictly before the earliest sub-step the ledger names it at is what it
+//     did in every world. A cascade that wrote every unit off from sub-step 1
+//     would leave nothing here to check, which is exactly how it went unnoticed;
+//   · ATTRIBUTION ALL THE WAY DOWN. However many modelled allies the
+//     uncertainty travelled through, `heldId` is the held enemy — so a caller
+//     partitions by ITS options, not by our own roster — and `via` is the road
+//     it came by.
+
+interface ChainCoverage extends Coverage {
+  chained: number
+  certainCells: number
+  contingent: number
+}
+
+describe("the causal chain — two modelled allies and one held enemy", () => {
+  it("attributes every divergence to the enemy, and keeps the rest certain", () => {
+    const coverage: ChainCoverage = {
+      boards: 0,
+      skipped: 0,
+      worlds: 0,
+      entries: 0,
+      emptyLedgers: 0,
+      chained: 0,
+      certainCells: 0,
+      contingent: 0,
+    }
+    const failures: string[] = []
+    const fail = (what: string): void => {
+      if (failures.length < 6) failures.push(what)
+    }
+
+    for (let seed = 4001; seed <= 4400; seed++) {
+      const base = makeBoard(seed)
+      const allies = base.units.filter((u) => u.teamID === "A")
+      const enemies = base.units.filter((u) => u.teamID === "B")
+      if (allies.length < 2 || enemies.length < 1) continue
+      const enemy = enemies[0].id
+      const input = held(base, [enemy])
+      const all = worldsOf(input, 200)
+      if (!all) {
+        coverage.skipped++
+        continue
+      }
+      coverage.boards++
+      coverage.worlds += all.length
+
+      const partial = settlePartial(input, NO_SPAWN)
+      coverage.entries += partial.ledger.length
+      if (partial.ledger.length === 0) coverage.emptyLedgers++
+      if (partial.ledger.some((e) => e.via.length > 0)) coverage.chained++
+
+      const live = input.units.filter((u) => u.id !== enemy)
+      const named = new Set(partial.ledger.map((e) => e.unitId))
+      const subSteps = Math.max(
+        partial.subStepCount,
+        ...partial.claims.map((c) => c.headPossible.length - 1),
+      )
+
+      // ATTRIBUTION. One held unit, so every entry — direct, cascaded through
+      // an ally, or carried by the regicide rule — must name it and nothing else.
+      partial.ledger.forEach((entry) => {
+        if (entry.heldId !== enemy) {
+          fail(`CHAIN seed=${seed} heldId=${entry.heldId} via=[${entry.via.join(">")}] not ${enemy}`)
+        }
+        if (entry.via.includes(enemy)) {
+          fail(`CHAIN seed=${seed} the root appears in its own via chain`)
+        }
+      })
+
+      // CERTAINTY. The sub-step each modelled unit is first named at is the
+      // frontier: before it, this timeline is a statement about every world.
+      const frontier = new Map<string, number>()
+      partial.ledger.forEach((e) => {
+        const known = frontier.get(e.unitId)
+        if (known === undefined || e.subStep < known) frontier.set(e.unitId, e.subStep)
+      })
+      live.forEach((unit) => {
+        const first = frontier.get(unit.id)
+        if (first === undefined) return
+        coverage.contingent++
+        coverage.certainCells += Math.max(0, first)
+      })
+
+      all.forEach((assignment) => {
+        const truth = concrete(input, assignment)
+        const world = JSON.stringify(Array.from(assignment.entries()))
+
+        live.forEach((unit) => {
+          const first = frontier.get(unit.id) ?? Infinity
+          const here = headsOf(partial, unit, subSteps)
+          const there = headsOf(truth, unit, subSteps)
+          for (let k = 0; k < Math.min(first, subSteps + 1); k++) {
+            if (here[k] !== there[k]) {
+              fail(
+                `CERTAIN seed=${seed} unit=${unit.id}(${unit.type}) k=${k} ` +
+                  `first=${first} ${here[k]} vs ${there[k]} world=${world}`,
+              )
+            }
+          }
+
+          // T1/T2/T3, restated on this shape.
+          const at = divergedAtFor(partial, truth, unit, subSteps)
+          if (at !== null && !named.has(unit.id)) {
+            fail(`T1 seed=${seed} unit=${unit.id} diverges at ${at} unledgered, world=${world}`)
+          }
+          const fate = partial.fates[unit.id]
+          if (fate === "dead" && truth.board[unit.id]) {
+            fail(`T2 seed=${seed} unit=${unit.id} called dead but lives, world=${world}`)
+          }
+          if (fate === "alive" && !truth.board[unit.id]) {
+            fail(`T2 seed=${seed} unit=${unit.id} called alive but dies, world=${world}`)
+          }
+        })
+      })
+    }
+
+    expect(failures).toEqual([])
+    process.stdout.write(
+      `  chain: ${coverage.boards} boards, ${coverage.worlds} worlds, ` +
+        `${coverage.skipped} skipped over budget, ${coverage.entries} ledger entries, ` +
+        `${coverage.chained} boards whose ledger carries a via chain, ` +
+        `${coverage.contingent} contingent units holding ` +
+        `${coverage.certainCells} certain pre-divergence sub-steps\n`,
+    )
+    expect(coverage.boards).toBeGreaterThan(150)
+    expect(coverage.worlds).toBeGreaterThan(2000)
+    // The cascade must actually travel, or the attribution proves nothing.
+    expect(coverage.chained).toBeGreaterThan(0)
+    // And it must stop somewhere, or there is nothing certain left to keep.
+    expect(coverage.certainCells).toBeGreaterThan(0)
   })
 })
 

@@ -53,17 +53,31 @@ import { outranks } from "./turnEngine"
  * its survival. A caller reading the ledger for a held unit's whereabouts has
  * the wrong object in hand.
  *
- * ## Contingency propagates
+ * ## Contingency propagates, and it propagates ALONG A PATH
  *
  * A unit a claim could have halted did not go on to kill what it killed here,
  * and a unit a claim could have killed was not standing where this timeline
  * has it standing. So contingency spreads: a modelled unit whose own outcome
  * is contingent becomes, for the rest of the turn, a second source of
- * unknown presence — able to be standing on any cell of its own traversal —
- * and a second source of unknown absence, at every clash it took part in
- * afterwards. The ledger is closed under that spread before it is returned,
- * which is why `heldId` names *the unit whose unknown disposition creates the
- * difference* rather than always a held one.
+ * unknown presence — and a second source of unknown absence, at every clash it
+ * took part in afterwards. The ledger is closed under that spread before it is
+ * returned.
+ *
+ * Two things bound the spread, and both matter to a caller that has to
+ * discriminate between plans rather than merely stay sound.
+ *
+ *   · IN SPACE AND TIME. A modelled unit that becomes contingent at sub-step
+ *     `s` is contingent THERE and from `s` on, along ITS OWN traversal: the
+ *     cells it walked, not the board. Everything it did strictly before `s` is
+ *     what it is in every world, which is what lets a caller keep a unit's
+ *     pre-divergence cells as certain instead of writing the unit off.
+ *
+ *   · IN ATTRIBUTION. `heldId` is always the HELD unit at the root of the
+ *     chain — never a modelled one. When the uncertainty travelled through
+ *     modelled units to get here, `via` lists them in order, so a caller can
+ *     still partition the worlds by the held unit's OPTIONS. A ledger that
+ *     named our own roster as the cause would ask a searcher to enumerate the
+ *     moves it already knows, and every candidate would carry the same answer.
  *
  * ## Purity
  *
@@ -88,6 +102,7 @@ export type DivergenceKind =
   | "potion" // a claim could have taken the potion this unit took
   | "exhaustion" // energy spent here depends on whether a claim halted it
   | "promotion" // the weight the threshold is read against could differ
+  | "regicide" // a king that could fall takes this team-mate off the board
 
 export interface Divergence {
   readonly cell: number
@@ -98,10 +113,21 @@ export interface Divergence {
    */
   readonly unitId: string
   /**
-   * The unit whose unknown disposition creates the difference — a held unit,
-   * or a modelled unit whose own outcome is already contingent.
+   * The HELD unit whose unknown move is the root cause. Always one of
+   * `input.held`, so a caller can partition the worlds by its options.
    */
   readonly heldId: string
+  /**
+   * The modelled units the uncertainty travelled through to reach `unitId`,
+   * in order — empty when `heldId` acts on `unitId` directly. Each is a unit
+   * whose own outcome is contingent, and each is contingent only from its own
+   * first divergence on, along its own traversal.
+   *
+   * For a `regicide` entry the last link is the KING whose fall carries the
+   * team, so `via[via.length - 1] ?? heldId` names it and a caller can price
+   * the shot at that one unit.
+   */
+  readonly via: ReadonlyArray<string>
   readonly kind: DivergenceKind
   /**
    * WHICH ENDPOINT RIDES ON IT.
@@ -142,6 +168,10 @@ export interface PartialSettlement extends Settlement {
 /** Anything whose presence at a cell is unknown: a claim, or a contingent unit. */
 interface Ghost {
   readonly id: string
+  /** The held unit at the root of this ghost's uncertainty. */
+  readonly origin: string
+  /** The modelled units between `origin` and this ghost, in order. */
+  readonly via: ReadonlyArray<string>
   readonly narrowed: boolean
   readonly leavesTrail: boolean
   readonly traversesEdges: boolean
@@ -178,6 +208,27 @@ interface Track {
 
 const setOf = (cells: Iterable<number>): Set<number> => new Set(cells)
 const EMPTY: ReadonlySet<number> = new Set<number>()
+const NO_VIA: ReadonlyArray<string> = []
+
+/**
+ * One modelled unit's contingency, as one held unit caused it. Keyed by the
+ * PAIR, because a unit two held units could each have changed must be
+ * partitionable by either of them, and a single slot would keep only one.
+ */
+interface Contingency {
+  readonly unitId: string
+  /** The held unit at the root. */
+  readonly origin: string
+  /** Sub-step from which this unit's disposition is unknown, for that root. */
+  readonly subStep: number
+  readonly narrowed: boolean
+  /** The modelled units between `origin` and `unitId`, in order. */
+  readonly via: ReadonlyArray<string>
+}
+
+/** The chain, extended by one link — and never through the same unit twice. */
+const through = (via: ReadonlyArray<string>, id: string): ReadonlyArray<string> =>
+  via.includes(id) ? via : [...via, id]
 
 /**
  * Settle a turn some of whose movers are unknown.
@@ -235,15 +286,27 @@ export const settlePartial = (
   // sub-step on, exactly the same kind of unknown presence a claim is — and
   // exactly the same kind of unknown ABSENCE at every clash it took part in
   // afterwards. Both directions, to a fixpoint.
-  const contingent = new Map<string, { subStep: number; narrowed: boolean }>()
+  //
+  // The state is keyed by (unit, HELD ROOT) rather than by unit: the whole
+  // point of the closure is to hand a caller a work list of held units, and a
+  // unit that two held units could each have changed is two pieces of work,
+  // not one. The chain that got here rides along so every entry the expansion
+  // adds can name the root and the route.
+  const contingent = new Map<string, Contingency>()
   const seed = (): boolean => {
     let grew = false
     entries.forEach((entry) => {
-      const track = trackById.get(entry.unitId)
-      if (!track) return
-      const known = contingent.get(entry.unitId)
+      if (!trackById.has(entry.unitId)) return
+      const key = `${entry.unitId}|${entry.heldId}`
+      const known = contingent.get(key)
       if (known && known.subStep <= entry.subStep) return
-      contingent.set(entry.unitId, { subStep: entry.subStep, narrowed: entry.narrowed })
+      contingent.set(key, {
+        unitId: entry.unitId,
+        origin: entry.heldId,
+        subStep: entry.subStep,
+        narrowed: entry.narrowed,
+        via: entry.via,
+      })
       grew = true
     })
     return grew
@@ -253,13 +316,13 @@ export const settlePartial = (
   for (let pass = 0; pass < tracks.length + 1; pass++) {
     if (!seed()) break
     let opened = false
-    contingent.forEach((state, id) => {
-      const stamp = `${id}@${state.subStep}`
+    contingent.forEach((state, key) => {
+      const stamp = `${key}@${state.subStep}`
       if (expanded.has(stamp)) return
       expanded.add(stamp)
       opened = true
-      const track = trackById.get(id) as Track
-      entangle(ghostOfTrack(track, state.subStep, state.narrowed), tracks, subSteps, add)
+      const track = trackById.get(state.unitId) as Track
+      entangle(ghostOfTrack(track, state), tracks, subSteps, add)
       absences(track, state, settlement.clashes, trackById, add)
     })
     if (!opened) break
@@ -395,6 +458,8 @@ const ghostOfClaim = (claim: Claim): Ghost => {
     sets.length === 0 ? EMPTY : sets[Math.min(k, sets.length - 1)]
   return {
     id: claim.id,
+    origin: claim.id,
+    via: NO_VIA,
     narrowed: claim.narrowed,
     leavesTrail: claim.leavesTrail,
     traversesEdges: claim.traversesEdges,
@@ -417,7 +482,8 @@ const ghostOfClaim = (claim: Claim): Ghost => {
  * on. Its strength is not an interval — it is a unit, and its tier and weight
  * are frozen and known.
  */
-const ghostOfTrack = (track: Track, from: number, narrowed: boolean): Ghost => {
+const ghostOfTrack = (track: Track, state: Contingency): Ghost => {
+  const from = state.subStep
   const possible = (k: number): ReadonlySet<number> => {
     const cells = new Set<number>()
     for (let j = Math.max(0, from - 1); j < Math.min(k, track.head.length); j++) {
@@ -428,7 +494,9 @@ const ghostOfTrack = (track: Track, from: number, narrowed: boolean): Ghost => {
   }
   return {
     id: track.id,
-    narrowed,
+    origin: state.origin,
+    via: through(state.via, track.id),
+    narrowed: state.narrowed,
     leavesTrail: track.leavesTrail,
     traversesEdges: track.traversesEdges,
     tierMin: track.tier,
@@ -468,7 +536,8 @@ const entangle = (
     if (track.id === ghost.id) return
     const base = {
       unitId: track.id,
-      heldId: ghost.id,
+      heldId: ghost.origin,
+      via: ghost.via,
       narrowed: ghost.narrowed,
     }
     for (let k = Math.max(1, ghost.from); k <= Math.min(subSteps, track.lastSubStep); k++) {
@@ -569,11 +638,12 @@ const entangle = (
  */
 const absences = (
   track: Track,
-  state: { subStep: number; narrowed: boolean },
+  state: Contingency,
   clashes: ReadonlyArray<Clash>,
   trackById: Map<string, Track>,
   add: (entry: Divergence) => void,
 ): void => {
+  const via = through(state.via, track.id)
   clashes.forEach((clash) => {
     if (clash.subStep < state.subStep) return
     if (!clash.playerIDs.includes(track.id)) return
@@ -585,7 +655,8 @@ const absences = (
         cell: clash.index,
         subStep: clash.subStep,
         unitId: other,
-        heldId: track.id,
+        heldId: state.origin,
+        via,
         kind,
         assumedPresent: true,
         couldBeat: clash.victimIDs.includes(other),
@@ -606,15 +677,29 @@ const ABSENCE_KIND: { [K in ClashKind]?: DivergenceKind } = {
 }
 
 /**
- * Regicide is a team-wide verdict off one unit's death, so a contingent king
- * makes its whole team contingent — the one place a divergence travels
+ * Regicide is a team-wide verdict off one unit's death, so a king that could
+ * fall makes its whole team contingent — the one place a divergence travels
  * without a cell to travel through.
+ *
+ * TWO THINGS KEEP IT FROM SWALLOWING THE BOARD.
+ *
+ * It fires only for a king whose death is actually in doubt. A held king's is
+ * its claim's own `deathPossible`, which no longer carries the cascade term it
+ * would be reading about itself; a modelled king's is in doubt exactly when
+ * something made it contingent. A king nothing can touch takes nobody with it,
+ * and a caller sweeping candidates gets to see that.
+ *
+ * And it is attributed to the HELD unit at the root rather than to the king.
+ * A modelled king is one of ours: keying the entry to it would tell a searcher
+ * to enumerate our own move, which it already knows, and every candidate would
+ * come back with the same work list. `via` ends at the king, so the entry
+ * still says which one unit's fall is being priced.
  */
 const regicideSpread = (
   input: PartialSettleInput,
   settlement: Settlement,
   claims: ReadonlyArray<Claim>,
-  contingent: Map<string, { subStep: number; narrowed: boolean }>,
+  contingent: Map<string, Contingency>,
   trackById: Map<string, Track>,
   add: (entry: Divergence) => void,
 ): void => {
@@ -623,26 +708,45 @@ const regicideSpread = (
   const claimById = new Map(claims.map((claim) => [claim.id, claim]))
   input.units.forEach((king) => {
     if (!king.isKing || !regicide.has(king.teamID)) return
+
+    // Who the fall would be charged to, and by what route. A held king is its
+    // own root; a modelled one is a link in every chain that reached it, and
+    // each of those chains is a separate partition of the worlds.
+    const routes: { origin: string; via: ReadonlyArray<string>; narrowed: boolean }[] = []
     const claim = claimById.get(king.id)
-    const state = contingent.get(king.id)
-    // A held king's survival is unknown by construction; a modelled king's is
-    // unknown once anything has made it contingent.
-    if (!claim && !state) return
-    if (claim && !claim.deathPossible) return
+    if (claim) {
+      if (!claim.deathPossible) return
+      routes.push({ origin: king.id, via: NO_VIA, narrowed: claim.narrowed })
+    } else {
+      contingent.forEach((state) => {
+        if (state.unitId !== king.id) return
+        routes.push({
+          origin: state.origin,
+          via: through(state.via, king.id),
+          narrowed: state.narrowed,
+        })
+      })
+    }
+    if (routes.length === 0) return
+
     input.units.forEach((unit) => {
       if (unit.teamID !== king.teamID || unit.id === king.id) return
       const track = trackById.get(unit.id)
       if (!track) return
-      add({
-        cell: settlement.deaths[unit.id]?.cell ?? track.head[track.lastSubStep],
-        subStep: settlement.subStepCount,
-        unitId: unit.id,
-        heldId: king.id,
-        kind: "contest",
-        assumedPresent: true,
-        couldBeat: true,
-        narrowed: claim?.narrowed ?? state?.narrowed ?? false,
-      })
+      const cell = settlement.deaths[unit.id]?.cell ?? track.head[track.lastSubStep]
+      routes.forEach((route) =>
+        add({
+          cell,
+          subStep: settlement.subStepCount,
+          unitId: unit.id,
+          heldId: route.origin,
+          via: route.via,
+          kind: "regicide",
+          assumedPresent: true,
+          couldBeat: true,
+          narrowed: route.narrowed,
+        }),
+      )
     })
   })
 }
@@ -666,22 +770,25 @@ const regicideSpread = (
 const scheduleSpread = (
   input: PartialSettleInput,
   settlement: Settlement,
-  contingent: Map<string, { subStep: number; narrowed: boolean }>,
+  contingent: Map<string, Contingency>,
   trackById: Map<string, Track>,
   add: (entry: Divergence) => void,
 ): void => {
   const potions = new Set(input.potionsEnabled ? input.potions : [])
-  contingent.forEach((state, id) => {
+  contingent.forEach((state) => {
+    const id = state.unitId
     const track = trackById.get(id)
     if (!track) return
     const teamID = input.teamOf[id]
+    const via = through(state.via, id)
     const where = settlement.deaths[id]?.cell ?? track.head[track.lastSubStep]
     const spread = (unitId: string, cell: number): void =>
       add({
         cell,
         subStep: settlement.subStepCount,
         unitId,
-        heldId: id,
+        heldId: state.origin,
+        via,
         kind: "potion",
         assumedPresent: true,
         couldBeat: false,
@@ -735,6 +842,7 @@ const itemDivergences = (
           subStep: settlement.subStepCount,
           unitId: track.id,
           heldId: claim.id,
+          via: NO_VIA,
           kind: "food",
           assumedPresent: false,
           couldBeat: false,
@@ -747,6 +855,7 @@ const itemDivergences = (
           subStep: settlement.subStepCount,
           unitId: track.id,
           heldId: claim.id,
+          via: NO_VIA,
           kind: "potion",
           assumedPresent: false,
           couldBeat: false,
@@ -778,6 +887,7 @@ const itemDivergences = (
         subStep,
         unitId: track.id,
         heldId: claim.id,
+        via: NO_VIA,
         kind: "potion",
         assumedPresent: false,
         couldBeat: false,
@@ -833,6 +943,7 @@ const derivedDivergences = (
       subStep: event.subStep,
       unitId: event.unitID,
       heldId: source.heldId,
+      via: source.via,
       kind: "exhaustion",
       assumedPresent: source.assumedPresent,
       couldBeat: true,
@@ -853,6 +964,7 @@ const derivedDivergences = (
       subStep: settlement.subStepCount,
       unitId: track.id,
       heldId: source.heldId,
+      via: source.via,
       kind: "promotion",
       assumedPresent: source.assumedPresent,
       couldBeat: false,

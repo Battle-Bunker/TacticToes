@@ -205,11 +205,34 @@ const settled = settlePartial({
   held: [{ id: "u3", observedTurn: turn }],   // ...and optionally `options`
 }, NO_SPAWN)                                   // the normal choice in this mode
 
-settled.ledger   // every (cell, subStep, unitId, heldId, kind) a world could differ at
+settled.ledger   // every (cell, subStep, unitId, heldId, via, kind) a world could differ at
 settled.fates    // per unit: "alive" and "dead" are proofs, "contingent" is a work list
 settled.claims   // where each held unit could be, and how strong — hoistable, see below
 // ...and every field settleTurn returns, for the units that WERE modelled.
 ```
+
+**`heldId` is always a HELD unit, and `via` is how the difference got there.**
+Contingency spreads: a modelled unit whose own outcome is unknown is, from its
+first divergence on and along its own traversal, a second source of unknown
+presence, and a second source of unknown absence at every clash it took part in
+afterwards. Every entry that spread produces is still charged to the held unit
+at the ROOT of the chain, with `via` listing the modelled units it travelled
+through, in order. A caller therefore partitions the worlds by a held unit's
+OPTIONS — which is the only enumeration that buys it anything — rather than by
+its own roster, whose moves it already knows. `via` is empty when the held unit
+acts on `unitId` directly.
+
+Two consequences worth naming, because a caller can spend them:
+
+- Everything a modelled unit did STRICTLY BEFORE the earliest sub-step the
+  ledger names it at is what it did in every world. A contingent unit is
+  contingent *there and afterwards*, not everywhere; its earlier cells are
+  certain and may be scored as such.
+- `kind: "regicide"` is the team-wide verdict off one king's fall — the one
+  divergence with no cell of its own to travel through. The king is the LAST
+  link of the chain, `via[via.length - 1] ?? heldId`, so a caller can price the
+  shot at that one unit instead of writing off the team. It is emitted only for
+  a king whose death is actually in doubt.
 
 **An empty ledger is a proof; a non-empty one is a work list.** With no
 entries, every modelled unit's disposition — where it went, whether it lived,
