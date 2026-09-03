@@ -1,7 +1,8 @@
 import { Clash, ClashKind } from "@shared/types/Game"
 import { BoardView, adjudicate } from "./adjudicate"
 import { Claim, PartialSettleInput, computeClaims } from "./claims"
-import { leavesTrail, traversesEdges } from "./moveGrammar"
+import { UnitAction, leavesTrail, traversesEdges } from "./moveGrammar"
+import { BoardShape, stagedAction } from "./queries"
 import { ResolveUnit } from "./resolveTurn"
 import { Settlement, settleTurn } from "./settleTurn"
 import { SpawnState, Spawner } from "./spawn"
@@ -103,6 +104,7 @@ export type DivergenceKind =
   | "exhaustion" // energy spent here depends on whether a claim halted it
   | "promotion" // the weight the threshold is read against could differ
   | "regicide" // a king that could fall takes this team-mate off the board
+  | "grammar" // whether this unit's staged action is legal at all reads a claim
 
 export interface Divergence {
   readonly cell: number
@@ -288,8 +290,27 @@ export const settlePartial = (
   const regicideTeamIDs = (input.regicideTeamIDs ?? []).filter((team) => !heldKings.has(team))
   const hidden = new Set<number>()
   claimList.forEach((claim) => claim.everPossible.forEach((cell) => hidden.add(cell)))
+
+  // THE BOARD THE STAGED CELLS ARE READ AGAINST is the board the turn OPENS
+  // on, held units included. `resolveTurn` re-reads every staged cell through
+  // the grammar, and one rule in the grammar reads the board rather than the
+  // mover: a pawn's diagonal step is legal only onto food or a body standing
+  // there as the turn opens. Read against a roster the held units have been
+  // taken out of, a capture staged onto one of their squares is not a legal
+  // action at all — the kind's default is substituted, a piece HOLDS, and the
+  // optimistic timeline settles a different move from the one it was handed,
+  // with nothing in the ledger, because a unit that never left its square ran
+  // into nothing to name. `presence` is the repair: the held bodies are on the
+  // board for LEGALITY and absent from the collision phase, which is exactly
+  // the split this mode is built on — a claim is not a unit, but it is a body
+  // the staging rule already saw when the turn opened.
+  const presence: number[] = [...(input.presence ?? [])]
+  input.held.forEach((h) => {
+    const record = byId.get(h.id)
+    if (record) record.occupancy.forEach((cell) => presence.push(cell))
+  })
   const settlement = settleTurn(
-    { ...input, units: live, regicideTeamIDs },
+    { ...input, units: live, regicideTeamIDs, presence },
     shield(spawn, Array.from(hidden)),
   )
 
@@ -318,6 +339,7 @@ export const settlePartial = (
 
   claimList.forEach((claim) => entangle(ghostOfClaim(claim), tracks, subSteps, arrivals, add))
   itemDivergences(input, settlement, claimList, tracks, add)
+  grammarDivergences(input, live, claimList, add)
 
   // Contingency closure. A unit whose own outcome is unknown is, from that
   // sub-step on, exactly the same kind of unknown presence a claim is — and
@@ -1054,6 +1076,104 @@ const scheduleSpread = (
       spread(ally.id, touched)
     })
   })
+}
+
+/**
+ * Whether a staged action is LEGAL AT ALL, where the answer reads a claim.
+ *
+ * The grammar reads the board in exactly one place — a pawn's diagonal step
+ * is an attack or a meal, so `planUnitAction` admits it only onto a cell in
+ * `pawnTargetsOf`: the food, plus every body standing there as the turn
+ * opens. The optimistic timeline reads that question against the board with
+ * every held unit at its OBSERVED cell (see `presence`), which is the right
+ * board and the only one, for a unit observed on THIS board: staging happens
+ * before anything moves, so a unit whose record is this turn's is standing
+ * where the record says whatever it goes on to choose. There is nothing to
+ * ledger, and the entries a caller reads stay about contact.
+ *
+ * A unit observed EARLIER is another matter. Its record cell is where it was
+ * a turn ago; by the time this turn opens it may have left, and it may be
+ * standing somewhere the timeline reads as empty ground. Either way the
+ * question "is this staged cell a legal target" can be answered differently
+ * in different worlds, and the whole action turns over on it — a capture in
+ * one world, the kind's default in another. That is a divergence like any
+ * other and it is written down like any other, keyed to the held unit whose
+ * whereabouts decide it, rather than settled by picking a world.
+ *
+ * The test is the grammar's own, asked twice: once against the board with
+ * every cell the claim could be on treated as occupied, once with its
+ * observed cells taken away. `pawnTargetsOf` is a union, so those two bracket
+ * every world's answer, and an action that survives both is an action this
+ * claim cannot touch. Nothing here knows WHICH rule read the board, so a
+ * second occupancy-reading rule is covered the day it is written.
+ */
+const grammarDivergences = (
+  input: PartialSettleInput,
+  live: ReadonlyArray<ResolveUnit>,
+  claims: ReadonlyArray<Claim>,
+  add: (entry: Divergence) => void,
+): void => {
+  // Observed on this very board: present at its observed cells when the turn
+  // opens, in every world. Only a longer span puts the presence in doubt.
+  const doubted = claims.filter((claim) => {
+    const record = input.held.find((h) => h.id === claim.id)
+    return record !== undefined && input.turn - record.observedTurn > 1
+  })
+  if (doubted.length === 0) return
+
+  const staged = live.filter((u) => u.path === undefined && u.stagedMove !== undefined)
+  if (staged.length === 0) return
+
+  const shapeOf = (occupancy: BoardShape["occupancy"]): BoardShape => ({
+    boardWidth: input.boardWidth,
+    boardHeight: input.boardHeight,
+    walls: input.walls,
+    hazards: input.hazards,
+    occupancy,
+    food: input.food,
+  })
+  const observed = input.units.map((u) => ({ id: u.id, cells: u.occupancy }))
+
+  doubted.forEach((claim) => {
+    const absent = shapeOf(observed.filter((entry) => entry.id !== claim.id))
+    const present = shapeOf([
+      ...absent.occupancy,
+      { id: claim.id, cells: [...claim.headPossible[0], ...claim.bodyPossible[0]] },
+    ])
+    staged.forEach((unit) => {
+      const most = stagedAction(unit, unit.stagedMove, present)
+      const least = stagedAction(unit, unit.stagedMove, absent)
+      if (sameAction(most, least)) return
+      add({
+        // The staged destination: the cell whose reading is what turned over.
+        cell: unit.stagedMove as number,
+        // The action decides the unit's whole walk, so the earliest sub-step
+        // it can show at is the first one.
+        subStep: 1,
+        unitId: unit.id,
+        heldId: claim.id,
+        via: NO_VIA,
+        kind: "grammar",
+        // The timeline read the claim as standing on its observed square.
+        assumedPresent: true,
+        // A unit that walks a different move can end anywhere the other move
+        // did not, a death included. Nothing here is a survival argument.
+        couldBeat: true,
+        narrowed: claim.narrowed,
+      })
+    })
+  })
+}
+
+/** Two planned actions, compared by everything `resolveTurn` reads off one. */
+const sameAction = (a: UnitAction, b: UnitAction): boolean => {
+  if (a.kind === "move" && b.kind === "move") {
+    return a.path.length === b.path.length && a.path.every((cell, i) => cell === b.path[i])
+  }
+  if (a.kind === "rotate" && b.kind === "rotate") {
+    return a.orientation.dx === b.orientation.dx && a.orientation.dy === b.orientation.dy
+  }
+  return a.kind === b.kind
 }
 
 /**

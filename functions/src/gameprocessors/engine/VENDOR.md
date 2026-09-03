@@ -251,6 +251,36 @@ pile, in which case the claim needs no tier argument and is itself the
 arrival. Ask "can this unit lose anything here" of every entry at the cell,
 never of the first one found.
 
+**A staged CELL is an action the grammar has still to plan, and one rule in
+the grammar reads the BOARD.** A pawn's diagonal step is an attack or a meal,
+so it is legal only onto food or a body standing there as the turn opens
+(`queries.ts::pawnTargetsOf`) — which means another unit's own square is what
+makes the capture a move at all. `settlePartial` settles its timeline over the
+units whose moves are known, so the held units are not in that roster, and the
+staged cells must not be re-read against it: take the held body away and the
+capture is not a legal action, the kind's default is substituted, a piece
+HOLDS, and the timeline settles a different move from the one it was handed —
+with nothing in the ledger, because a unit that never left its square ran into
+nothing to name. So the staged cells are read against the board the turn OPENS
+on, held units at their observed cells, through `ResolveTurnInput.presence`:
+cells that hold a body for STAGING LEGALITY only, invisible to the collision
+phase. `settlePartial` sets it; an ordinary `settleTurn` leaves it alone. It
+feeds `BoardShape.occupancy` and nothing else, so any occupancy read the
+grammar grows later is covered by the same field.
+
+**`kind: "grammar"` is that reading in doubt.** A unit observed on THIS board
+is standing where its record says when the staged cells are read — staging
+happens before anything moves — so the reading is a fact and no entry is
+emitted. A unit observed EARLIER has had a move since: its record cell may be
+empty by now, and it may be standing somewhere the timeline reads as open
+ground. Whether a staged action is legal AT ALL is then world-dependent, and
+the whole action turns over on it — a capture in one world, the kind's default
+in another. `settlePartial` writes that down, at the staged cell, at sub-step
+1, keyed to the held unit whose whereabouts decide it, with `couldBeat: true`,
+rather than picking a world. It is the one entry that is about a unit's own
+action rather than about a contact, and it can be the ONLY entry naming a unit
+that walks nowhere at all.
+
 **An empty ledger is a proof; a non-empty one is a work list.** With no
 entries, every modelled unit's disposition — where it went, whether it lived,
 its energy, its weight, what it ate, and the game's `outcome` — is what it is

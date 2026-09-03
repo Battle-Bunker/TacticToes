@@ -1576,3 +1576,136 @@ describe("a staged action a HOLD would make illegal is still the staged action",
     expect(deadly).toBeGreaterThan(0)
   })
 })
+
+// A unit observed on THIS board is standing where the record says when the
+// turn opens — staging happens before anything moves — so reading the staged
+// cells against it is a fact and not a guess. A unit observed a turn EARLIER
+// is the other case: it has had a move since, its record cell may be empty by
+// now, and whether our pawn's capture is a legal action at all is then a
+// question the worlds answer differently. That is a divergence like any
+// other, and it is written down rather than settled by picking a world.
+
+describe("a claim that may have left the square the staged action reads", () => {
+  // The rook is observed a COLUMN AWAY, so its own square is nowhere near the
+  // pawn and the cell the pawn stages is empty ground on the observed board:
+  // the capture is not a legal action there, and the optimistic timeline
+  // holds the pawn. It is the rook's UNKNOWN TURN that can put a body on that
+  // square, and the narrowing says it does exactly that. Nothing else in the
+  // ledger can cover this: the rook is a piece, so it drags no trail, and
+  // from the square it lands on it can never reach the pawn's own cell —
+  // `entangle` compares a claim against the cells a unit WALKED, and this
+  // pawn walks nowhere. Take the grammar entry away and the pawn's whole
+  // turn, its death included, is unledgered.
+  const CAPTURE = at(3, 2)
+  const spanTwoBoard = (observedTurn: number): PartialSettleInput =>
+    bench(
+      [
+        {
+          id: "p",
+          type: "pawn",
+          teamID: "A",
+          tier: 0,
+          energy: 50,
+          occupancy: [at(2, 3)],
+          orientation: { dx: 0, dy: -1 },
+          stagedMove: CAPTURE,
+        },
+        {
+          id: "r",
+          type: "rook",
+          teamID: "B",
+          tier: 0,
+          energy: 50,
+          occupancy: [at(3, 5), at(3, 5)],
+          orientation: { dx: 0, dy: -1 },
+        },
+      ],
+      { turn: 4, held: [{ id: "r", observedTurn, options: [CAPTURE] }] },
+    )
+
+  it("ledgers the legality itself, and holds over every two-move history", () => {
+    const input = spanTwoBoard(2)
+    const settled = settlePartial(input, NO_SPAWN)
+
+    // The timeline reads the staged cell against the board the turn opens on,
+    // where it is empty, so the pawn holds — and the ledger says which held
+    // unit that reading rides on, and that the pawn could lose on it.
+    expect(settled.traversed.p ?? []).toEqual([])
+    expect(settled.ledger.filter((e) => e.kind === "grammar")).toEqual([
+      {
+        cell: CAPTURE,
+        subStep: 1,
+        unitId: "p",
+        heldId: "r",
+        via: [],
+        kind: "grammar",
+        assumedPresent: true,
+        couldBeat: true,
+        narrowed: true,
+      },
+    ])
+    expect(settled.fates.p).toBe("contingent")
+    // Anti-vacuity for the paragraph above: no contact entry names the pawn,
+    // because nothing the rook could do ever touches the square it stands on.
+    expect(settled.ledger.filter((e) => e.unitId === "p" && e.kind !== "grammar")).toEqual([])
+
+    // The enumeration the entry is there for: the rook takes its one narrowed
+    // move alone, the turn under test opens on what that left behind, and the
+    // staged capture is a legal action after all.
+    const pawn = input.units[0]
+    const subSteps = Math.max(
+      settled.subStepCount,
+      ...settled.claims.map((c) => c.headPossible.length - 1),
+    )
+    const named = settled.ledger.filter((e) => e.unitId === "p")
+    const beatable = named.filter((e) => e.couldBeat)
+    const failures: string[] = []
+    let captured = 0
+    let deadly = 0
+    ;(input.held[0].options as ReadonlyArray<number>).forEach((a1) => {
+      const mid = advanceAlone(input, "r", a1) as PartialSettleInput
+      expect(mid).not.toBeNull()
+      optionsFor(mid, "r").forEach((a2) => {
+        const truth = settleTurn(
+          {
+            ...mid,
+            units: mid.units.map((u) => (u.id === "r" ? { ...u, stagedMove: a2 } : u)),
+          },
+          NO_SPAWN,
+        )
+        const world = `${a1}/${a2}`
+        if ((truth.traversed.p ?? []).length > 0) captured++
+        const when = divergedAtFor(settled, truth, pawn, subSteps)
+        if (when !== null) {
+          if (named.length === 0) failures.push(`SPAN2 pawn diverges at ${when} unledgered, ${world}`)
+          else if (Math.min(...named.map((e) => e.subStep)) > when) {
+            failures.push(`SPAN2 pawn diverges at ${when}, earliest entry later, ${world}`)
+          }
+        }
+        if (!truth.board.p) {
+          deadly++
+          if (settled.fates.p === "alive") failures.push(`SPAN2 pawn called alive, ${world}`)
+          if (beatable.length === 0) failures.push(`SPAN2 pawn dies ${world}, every entry wins`)
+          else if (Math.min(...beatable.map((e) => e.subStep)) > truth.deaths.p.subStep) {
+            failures.push(`SPAN2 pawn dies at ${truth.deaths.p.subStep}, entry later, ${world}`)
+          }
+        }
+      })
+    })
+    expect(failures).toEqual([])
+    // Both halves happened: worlds where the capture is legal after all, and
+    // worlds where taking it kills the pawn.
+    expect(captured).toBeGreaterThan(0)
+    expect(deadly).toBeGreaterThan(0)
+  })
+
+  it("says nothing at all when the claim was observed on this very board", () => {
+    // The other half, and the reason the entry is a condition rather than a
+    // constant: a unit whose record is this turn's IS on its square when the
+    // staged cells are read, so the reading is world-invariant and a ledger
+    // that cried doubt would be selling a caller a world that cannot exist.
+    const settled = settlePartial(spanTwoBoard(3), NO_SPAWN)
+    expect(settled.ledger.filter((e) => e.kind === "grammar")).toEqual([])
+    expect(settled.traversed.p ?? []).toEqual([])
+  })
+})

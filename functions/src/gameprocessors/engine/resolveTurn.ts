@@ -75,6 +75,27 @@ export interface ResolveTurnInput {
    * unit the moment its last king dies.
    */
   regicideTeamIDs?: string[]
+  /**
+   * Cells that hold a body for the purpose of STAGING LEGALITY ONLY — units
+   * that are on the board as the turn opens but are not in `units`, so the
+   * collision phase never sees them.
+   *
+   * There is exactly one caller, `settlePartial`, and exactly one reason. It
+   * settles a turn over the roster whose moves are known, which means the
+   * held units are absent from `units` — and the grammar reads the board:
+   * a pawn's diagonal step is legal only onto food or a body standing there
+   * when the turn opens (`queries.ts::pawnTargetsOf`). Re-read against a
+   * roster with the held unit taken out, a capture staged onto its square is
+   * not a legal action at all, the kind's default is substituted, and the
+   * unit settles a different move from the one it was staged for. The staged
+   * cells must therefore be interpreted against the board the turn OPENS on,
+   * which is the board with every unit on it.
+   *
+   * It feeds `BoardShape.occupancy` and nothing else, so every occupancy read
+   * in the grammar — this one and any that follows it — sees the same board,
+   * while the timeline still models only the units it was given.
+   */
+  presence?: number[]
 }
 
 /** A unit still on the board when the turn closed. */
@@ -123,6 +144,13 @@ export interface TurnResolution {
  */
 export const DEFAULT_FOOD_ENERGY = 100
 
+/**
+ * The id the `presence` cells are handed to the grammar under. Nothing reads
+ * an occupancy entry's id, and no unit can be called this, so a query can
+ * never confuse the two.
+ */
+const PRESENCE = "@presence"
+
 export const resolveTurn = (input: ResolveTurnInput): TurnResolution => {
   const { units, boardWidth, boardHeight } = input
   const defaultMaxEnergy = input.defaultMaxEnergy ?? 100
@@ -135,12 +163,19 @@ export const resolveTurn = (input: ResolveTurnInput): TurnResolution => {
   // kind's default — trail units continue straight, pieces hold. The step is
   // `stagedAction`, which is also what a caller asks when it wants to know
   // what a click will do (queries.ts): one staging rule, not two.
+  const standing = units.map((u) => ({ id: u.id, cells: u.occupancy }))
   const shape: BoardShape = {
     boardWidth,
     boardHeight,
     walls: input.walls,
     hazards: input.hazards,
-    occupancy: units.map((u) => ({ id: u.id, cells: u.occupancy })),
+    // Bodies the grammar must see but the collision phase must not: see
+    // `presence`. Empty in every ordinary settlement, so the shape is the
+    // roster's own occupancy and nothing else.
+    occupancy:
+      input.presence && input.presence.length > 0
+        ? [...standing, { id: PRESENCE, cells: input.presence }]
+        : standing,
     food: input.food,
   }
 
