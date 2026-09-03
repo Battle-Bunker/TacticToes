@@ -1423,3 +1423,156 @@ describe("a sever the resolver can make fatal", () => {
     all.forEach((assignment) => expect(concrete(input, assignment).board.rs).toBeDefined())
   })
 })
+
+// ------------------------------- a staged action whose legality reads the board
+//
+// EVERY OTHER RULE IN THE GRAMMAR IS GEOMETRY. A pawn's diagonal step is the
+// one that is not: `planUnitAction` admits it only onto a cell in
+// `pawnTargetsOf` — the food, plus every body standing on the board as the
+// turn OPENS. So another unit's own square is what makes the capture a legal
+// move at all.
+//
+// `settlePartial` settles its optimistic timeline over the units whose moves
+// are known, and `resolveTurn` re-reads every staged cell through the grammar
+// against THAT roster. Take the held rook off it and the capture stops being
+// a legal action: `stagedAction` substitutes the kind's default, a piece
+// holds, and the timeline settles a pawn standing still with an empty ledger
+// — a proof that the turn is world-invariant, published for a turn whose
+// outcome is decided by the very unit that was removed to reach it.
+//
+// The board is the smallest one that shows it. Neither unit is decoration:
+// drop the rook and the diagonal is not a legal target for the pawn to stage
+// at all, and give the rook one square instead of two and the contest is a
+// tie that kills them both rather than one the pawn loses.
+
+const P = 5
+const pat = (x: number, y: number): number => y * P + x
+const P_WALLS = ((): number[] => {
+  const walls: number[] = []
+  for (let y = 0; y < P; y++) {
+    for (let x = 0; x < P; x++) {
+      if (x === 0 || y === 0 || x === P - 1 || y === P - 1) walls.push(pat(x, y))
+    }
+  }
+  return walls
+})()
+
+/** Our pawn facing -y, and one square diagonally forward a held enemy rook. */
+const pawnCaptureBoard = (): PartialSettleInput => {
+  const turn = 4
+  return {
+    units: [
+      {
+        id: "p",
+        type: "pawn",
+        teamID: "A",
+        tier: 0,
+        energy: 50,
+        occupancy: [pat(2, 3)],
+        orientation: { dx: 0, dy: -1 },
+        stagedMove: pat(3, 2),
+      },
+      {
+        id: "r",
+        type: "rook",
+        teamID: "B",
+        tier: 0,
+        energy: 50,
+        occupancy: [pat(3, 2), pat(3, 2)],
+        orientation: { dx: 0, dy: -1 },
+      },
+    ],
+    boardWidth: P,
+    boardHeight: P,
+    walls: P_WALLS,
+    hazards: [],
+    hazardDamage: 5,
+    food: [],
+    defaultMaxEnergy: 100,
+    turn,
+    teamOf: { p: "A", r: "B" },
+    effects: [],
+    potions: [],
+    potionsEnabled: false,
+    potionWindowTurns: 3,
+    pawnPromotionWeight: 10,
+    maxTurns: null,
+    held: [{ id: "r", observedTurn: turn - 1 }],
+  }
+}
+
+describe("a staged action a HOLD would make illegal is still the staged action", () => {
+  it("walks the capture the staged cell names, on the board the turn opens on", () => {
+    const input = pawnCaptureBoard()
+    // Anti-vacuity: the capture has to be a legal staged action on the
+    // OBSERVED board, or this board is not the fixture it claims to be.
+    expect(legalTargets(input.units[0], shapeOf(input))).toContain(pat(3, 2))
+
+    const settled = settlePartial(input, NO_SPAWN)
+    expect(settled.traversed.p).toEqual([pat(3, 2)])
+  })
+
+  it("holds T1 and T2 over every one of the rook's replies", () => {
+    const input = pawnCaptureBoard()
+    const settled = settlePartial(input, NO_SPAWN)
+    const all = worldsOf(input, 4000) as ReadonlyArray<Map<string, number | undefined>>
+    expect(all).not.toBeNull()
+    expect(all.length).toBeGreaterThan(4)
+
+    const pawn = input.units[0]
+    const subSteps = Math.max(
+      settled.subStepCount,
+      ...settled.claims.map((c) => c.headPossible.length - 1),
+    )
+    const named = settled.ledger.filter((e) => e.unitId === "p")
+    const beatable = named.filter((e) => e.couldBeat)
+
+    const failures: string[] = []
+    let deadly = 0
+    all.forEach((assignment) => {
+      const truth = concrete(input, assignment)
+      const world = JSON.stringify(Array.from(assignment.entries()))
+
+      // T1 — a world that differs from the timeline differs where the ledger
+      // said it could, and no earlier.
+      const at = divergedAtFor(settled, truth, pawn, subSteps)
+      if (at !== null) {
+        if (named.length === 0) failures.push(`T1 pawn diverges at ${at} unledgered, ${world}`)
+        else if (Math.min(...named.map((e) => e.subStep)) > at) {
+          failures.push(`T1 pawn diverges at ${at}, earliest entry later, ${world}`)
+        }
+      }
+
+      // T1b — a world that kills the pawn is admitted by an entry that says
+      // it could lose, at or before the sub-step it lost at.
+      if (settled.board.p && !truth.board.p) {
+        deadly++
+        const death = truth.deaths.p
+        if (beatable.length === 0) {
+          failures.push(`T1b pawn dies ${death.cause}@${death.cell} ${world}, every entry wins`)
+        } else if (Math.min(...beatable.map((e) => e.subStep)) > death.subStep) {
+          failures.push(`T1b pawn dies at ${death.subStep}, earliest couldBeat later, ${world}`)
+        }
+      }
+
+      // T2 — the fates are proofs in both directions.
+      if (settled.fates.p === "dead" && truth.board.p) failures.push(`T2 pawn lives, ${world}`)
+      if (settled.fates.p === "alive" && !truth.board.p) failures.push(`T2 pawn dies, ${world}`)
+      if (settled.fates.p === "contingent" && named.length === 0) {
+        failures.push("T2 pawn contingent with no entry")
+      }
+      settled.claims.forEach((claim) => {
+        if (claim.certainlyGone && truth.board[claim.id]) {
+          failures.push(`T2 claim ${claim.id} certainlyGone but lives, ${world}`)
+        }
+        if (!claim.deathPossible && !truth.board[claim.id]) {
+          failures.push(`T2 claim ${claim.id} deathPossible=false but dies, ${world}`)
+        }
+      })
+    })
+
+    expect(failures).toEqual([])
+    // Anti-vacuity: the worlds that kill the pawn exist, so T1b was asked.
+    expect(deadly).toBeGreaterThan(0)
+  })
+})
