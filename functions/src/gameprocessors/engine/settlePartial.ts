@@ -93,7 +93,7 @@ export type { Claim, HeldUnit, PartialSettleInput } from "./claims"
 
 /** Why a concrete world could disagree with the optimistic timeline here. */
 export type DivergenceKind =
-  | "contest" // a unit ended a sub-step where a claim could be standing
+  | "contest" // a cell this unit holds could be contested against a claim
   | "edge" // a claim could cross the same edge the other way
   | "bodyBlock" // a claim's trail could hold this cell
   | "sever" // a claim could sever this unit, or be severed by it
@@ -145,6 +145,13 @@ export interface Divergence {
    * claim's interval permits, including the tie that kills everyone in it.
    * False means the contact is real but this unit wins it in every world: a
    * divergence in timing and energy, not in survival.
+   *
+   * It is a property of the CONTACT, not of the cell, and one cell at one
+   * sub-step can carry two: a claim landing on a trail cell either cuts it,
+   * which is a weight loss (`sever`, false), or dies on it and leaves a pile
+   * the owner is in, which is not (`contest`, true). A caller asking "can
+   * this unit lose anything here" must read every entry at the cell, not the
+   * first.
    */
   readonly couldBeat: boolean
   /** True when this entry exists only because a caller's narrowing admitted
@@ -214,6 +221,15 @@ interface Track {
   readonly body: Set<number>[]
   /** Whether it entered `head[k]` on sub-step k, rather than standing there. */
   readonly moved: boolean[]
+  /**
+   * Cells this unit is already in the DURABLE PILE of without standing on
+   * them, and the sub-step it joined each from. Only `bodyBlock` puts a
+   * survivor in a pile it is not standing on: the arrival dies on the
+   * segment and the batch enters the segment's owners with it. A `contest`
+   * or `edge` survivor capture-stops, so its head IS the cell and the
+   * contest branch below already watches it.
+   */
+  readonly piled: ReadonlyMap<number, number>
   readonly lastSubStep: number
   readonly alive: boolean
 }
@@ -295,7 +311,12 @@ export const settlePartial = (
     order.push(entry)
   }
 
-  claimList.forEach((claim) => entangle(ghostOfClaim(claim), tracks, subSteps, add))
+  // Who could still be ENTERING a cell, and when. `entangle` is asked about
+  // one unknown presence at a time, and the pile composition below takes two:
+  // the claim that dies on a trail cell, and whatever arrives there after it.
+  const arrivals = arrivalsOf(claimList, tracks, subSteps)
+
+  claimList.forEach((claim) => entangle(ghostOfClaim(claim), tracks, subSteps, arrivals, add))
   itemDivergences(input, settlement, claimList, tracks, add)
 
   // Contingency closure. A unit whose own outcome is unknown is, from that
@@ -343,7 +364,7 @@ export const settlePartial = (
       expanded.add(stamp)
       opened = true
       const track = trackById.get(state.unitId) as Track
-      entangle(ghostOfTrack(track, state), tracks, subSteps, add)
+      entangle(ghostOfTrack(track, state), tracks, subSteps, arrivals, add)
       absences(track, state, settlement.clashes, trackById, add)
     })
     if (!opened) break
@@ -497,6 +518,14 @@ const trackOf = (unit: ResolveUnit, settlement: Settlement, subSteps: number): T
     }
   }
 
+  const piled = new Map<number, number>()
+  settlement.clashes.forEach((clash) => {
+    if (clash.kind !== "bodyBlock") return
+    if (!clash.playerIDs.includes(unit.id) || clash.victimIDs.includes(unit.id)) return
+    const known = piled.get(clash.index)
+    if (known === undefined || clash.subStep < known) piled.set(clash.index, clash.subStep)
+  })
+
   const death = settlement.deaths[unit.id]
   return {
     id: unit.id,
@@ -507,6 +536,7 @@ const trackOf = (unit: ResolveUnit, settlement: Settlement, subSteps: number): T
     head,
     body,
     moved,
+    piled,
     lastSubStep: death ? Math.min(death.subStep, subSteps) : subSteps,
     alive: !death,
   }
@@ -618,6 +648,60 @@ const ghostOfTrack = (track: Track, state: Contingency): Ghost => {
   }
 }
 
+/**
+ * Could anything other than `exceptId` ENTER `cell` at a sub-step strictly
+ * after `after`?
+ *
+ * The one question a pairwise entanglement cannot answer for itself.
+ * `entangle` is handed ONE unknown presence and asked what it could do to a
+ * modelled unit; the pile composition in the trail branch below needs a
+ * SECOND arrival, and the second one is not the ghost.
+ */
+type Arrivals = (cell: number, after: number, exceptId: string) => boolean
+
+/**
+ * Every unit that could enter a cell, as the LAST sub-step it could enter it
+ * at — which is what `after` has to be compared against, and which the two
+ * sources answer differently.
+ *
+ * A track's traversal is settled, so its entries are the sub-steps it
+ * actually walked in. A claim's `headPossible` is CUMULATIVE and so cannot
+ * separate an arrival at k from an arrival earlier that stopped there, which
+ * means a cell a claim can reach at all is a cell it could still be entering
+ * at the last sub-step of the turn. Over-wide in the one direction a ledger
+ * is allowed to be over-wide in: it may name a world the claims go on to
+ * prove impossible; it may never miss one.
+ */
+const arrivalsOf = (
+  claims: ReadonlyArray<Claim>,
+  tracks: ReadonlyArray<Track>,
+  subSteps: number,
+): Arrivals => {
+  const byCell = new Map<number, { id: string; last: number }[]>()
+  const note = (cell: number, id: string, at: number): void => {
+    const entries = byCell.get(cell)
+    if (entries === undefined) {
+      byCell.set(cell, [{ id, last: at }])
+      return
+    }
+    const known = entries.find((entry) => entry.id === id)
+    if (known === undefined) entries.push({ id, last: at })
+    else if (known.last < at) known.last = at
+  }
+  tracks.forEach((track) => {
+    const until = Math.min(subSteps, track.lastSubStep)
+    for (let k = 1; k <= until; k++) if (track.moved[k]) note(track.head[k], track.id, k)
+  })
+  claims.forEach((claim) => {
+    claim.headPossible.forEach((cells) => cells.forEach((cell) => note(cell, claim.id, subSteps)))
+  })
+  return (cell, after, exceptId) => {
+    const entries = byCell.get(cell)
+    if (entries === undefined) return false
+    return entries.some((entry) => entry.id !== exceptId && entry.last > after)
+  }
+}
+
 /** Could `track` fail to survive a contact with `ghost` — a tie included? */
 const couldLose = (track: Track, ghost: Ghost): boolean => {
   const beatsEverything =
@@ -637,6 +721,7 @@ const entangle = (
   ghost: Ghost,
   tracks: ReadonlyArray<Track>,
   subSteps: number,
+  arrivals: Arrivals,
   add: (entry: Divergence) => void,
 ): void => {
   tracks.forEach((track) => {
@@ -723,18 +808,65 @@ const entangle = (
 
       // The other half of the body rule: this unit's own trail is what the
       // claim could be arriving on, and a cut is a weight loss rather than a
-      // death.
+      // death — FOR ONE ARRIVAL.
+      //
+      // For two it is not, and the sever alone cannot say so. The claim's
+      // tier interval straddles this unit's here too: at a tier this unit
+      // matches or beats, the arrival does not cut the segment, it DIES on
+      // it — and a death removes nothing from the board. The cell becomes
+      // durable holding the corpse and, by the same batch, the SEGMENT'S
+      // OWNER. Anything arriving there afterwards is contested against that
+      // whole pile, and every member of it that is not the unique strict
+      // maximum is condemned; the owner is a member. So the owner can be
+      // killed at a cell it merely had a tail on, by a contact its own
+      // ledger entry called survivable.
+      //
+      // The two outcomes are two entries, because they are two different
+      // things a world can do at one cell: `sever` is the cut, which is a
+      // weight loss and never fatal, and `contest` is the pile. The owner is
+      // priced against that pile at the weight it carries ALL TURN — severs
+      // truncate only once the collision phase is over — so `couldLose` is
+      // not the question and the entry does not ask it: a pile of three
+      // whose top is an interval has no unique strict maximum to prove.
+      //
+      // The owner gets into the pile two ways, and the tier interval only
+      // opens the first:
+      //
+      //   · THIS claim dies on the segment, which needs a tier it does not
+      //     outrank the owner at, and then a SECOND arrival to contest what
+      //     the death left. `arrivals` is that second one, and it has to
+      //     enter strictly later — the sub-step of the death has already run
+      //     its arrival tier by the time the body tier kills anybody.
+      //   · The owner is in the pile ALREADY, because this timeline settled a
+      //     body block at the cell and entered it there. Then the claim needs
+      //     no tier argument at all and is itself the arrival: it contests
+      //     the standing pile the moment it lands, at any strength, and the
+      //     tier that severs the segment is exactly the tier that wins that
+      //     contest and leaves the owner condemned in it.
       if (track.leavesTrail) {
         track.body[k].forEach((segment) => {
           if (!ghost.head(segment, k)) return
+          const assumedPresent = ghost.certain(segment)
           add({
             ...base,
             cell: segment,
             subStep: k,
             kind: "sever",
-            assumedPresent: ghost.certain(segment),
+            assumedPresent,
             couldBeat: false,
           })
+          const makesPile = ghost.tierMin <= track.tier && arrivals(segment, k, ghost.id)
+          const alreadyPiled = (track.piled.get(segment) ?? subSteps + 1) < k
+          if (makesPile || alreadyPiled) {
+            add({
+              ...base,
+              cell: segment,
+              subStep: k,
+              kind: "contest",
+              assumedPresent,
+              couldBeat: true,
+            })
+          }
         })
       }
     }

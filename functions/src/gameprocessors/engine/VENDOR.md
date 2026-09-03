@@ -234,6 +234,23 @@ Two consequences worth naming, because a caller can spend them:
   shot at that one unit instead of writing off the team. It is emitted only for
   a king whose death is actually in doubt.
 
+**`couldBeat` is a property of the CONTACT, not of the cell, and one cell can
+carry two.** `false` is the strongest thing an entry says — the contact is real
+but this unit wins it in every world, so only its timing and its energy are in
+doubt — and a caller folding survival reads it as a proof. It is therefore
+per-entry: a claim landing on a trail cell either CUTS it, which is a weight
+loss and never fatal (`sever`, `couldBeat: false`), or, at a tier the owner
+matches or beats, DIES on it — and a death removes nothing from the board, so
+the cell becomes a durable pile with the segment's owner in it and the next
+arrival there contests the owner along with the corpse (`contest`,
+`couldBeat: true`). Both entries are emitted, at the same cell and sub-step,
+whenever the pile can form: either the claim's tier interval reaches down to
+the owner's and something else could still enter the cell after the death, or
+this timeline already settled a body block there and entered the owner in the
+pile, in which case the claim needs no tier argument and is itself the
+arrival. Ask "can this unit lose anything here" of every entry at the cell,
+never of the first one found.
+
 **An empty ledger is a proof; a non-empty one is a work list.** With no
 entries, every modelled unit's disposition — where it went, whether it lived,
 its energy, its weight, what it ate, and the game's `outcome` — is what it is
