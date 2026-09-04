@@ -616,6 +616,3 @@ export const FIXTURES: Fixture[] = [
 
 /** The turn every fixture is displayed at: the second, so a "before" exists. */
 export const FIXTURE_TURN_INDEX = 1
-
-export const BOARD_WIDTH = W
-export const BOARD_HEIGHT = H

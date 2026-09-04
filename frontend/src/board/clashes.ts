@@ -88,22 +88,11 @@ export const distinctClashes = (clashes: BoardClash[]): BoardClash[] => {
 }
 
 /**
- * Every cell worth clicking: one that carries a clash record, a death, sever
- * damage, or a note about what the record failed to say. All four are things the
- * inspector can explain, so all four are things the pointer should offer.
+ * Whether one cell has anything the inspector can say about it: a clash record,
+ * a death, sever damage, a recovery, or a note about what the record failed to
+ * say. All five are things the inspector can explain, so all five are things
+ * the pointer should offer.
  */
-export const inspectableCellKeys = (board: BoardModel): Set<string> => {
-  const keys = new Set<string>()
-  const add = (cell: Cell) => keys.add(`${cell.x},${cell.y}`)
-  board.clashes.forEach((c) => add(c.cell))
-  board.deaths.forEach((d) => add(d.cell))
-  board.severed.forEach((s) => add(s.cell))
-  board.recoveries.forEach((r) => add(r.cell))
-  board.uncertainties.forEach((u) => add(u.cell))
-  return keys
-}
-
-/** Whether one cell has anything the inspector can say about it. */
 export const isInspectable = (board: BoardModel, cell: Cell): boolean =>
   clashesAtCell(board, cell).length > 0 ||
   deathsAtCell(board, cell) !== null ||

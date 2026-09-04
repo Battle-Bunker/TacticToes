@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from "react"
 import { doc, setDoc } from "firebase/firestore"
 import { onAuthStateChanged, User } from "firebase/auth"
+import { UserProfile } from "@shared/types/Game"
 import { CenteredLoader } from "../components/CenteredLoader"
 import { auth, db } from "../firebaseConfig"
 import SignupPage from "../pages/SignupPage"
@@ -26,11 +27,10 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({
 
         // Persist the Google display name to Firestore so other consumers can read it.
         if (currentUser?.displayName) {
-          setDoc(
-            doc(db, "users", currentUser.uid),
-            { name: currentUser.displayName },
-            { merge: true },
-          ).catch((err) => console.error("Error syncing display name:", err))
+          const profile: UserProfile = { name: currentUser.displayName }
+          setDoc(doc(db, "users", currentUser.uid), profile, {
+            merge: true,
+          }).catch((err) => console.error("Error syncing display name:", err))
         }
       }),
     [],
