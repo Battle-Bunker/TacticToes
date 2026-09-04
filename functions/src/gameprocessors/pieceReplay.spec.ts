@@ -55,21 +55,12 @@
 // to its own fixture, which makes the interaction between promotion and the
 // spawners checkable rather than argued.
 
-import { readFileSync, writeFileSync } from "fs"
 import { join } from "path"
 import { Timestamp } from "firebase-admin/firestore"
-import {
-  GameState,
-  Move,
-  StartedGameSetup,
-  Team,
-  Turn,
-  UnitCounts,
-  UnitType,
-} from "@shared/types/Game"
+import { StartedGameSetup, Team, Turn, UnitCounts, UnitType } from "@shared/types/Game"
 import { expandTeams } from "../utils/expandTeams"
 import { Orientation } from "./engine/moveGrammar"
-import { TeamSnekProcessor } from "./TeamSnekProcessor"
+import { check, mv, runReplay as runReplayScript, serialise } from "./goldenReplay"
 
 // ── the board ──────────────────────────────────────────────────────────────
 
@@ -217,82 +208,22 @@ const startingTurn = (): Turn => {
   }
 }
 
-const mkGameState = (setup: StartedGameSetup, turns: Turn[]): GameState => ({
-  setup,
-  turns,
-  walls: [],
-  timeCreated: Timestamp.fromMillis(0),
-  timeFinished: null,
-})
-
-const mv = (playerID: string, move: number): Move => ({
-  gameID: "replay",
-  moveNumber: 0,
-  playerID,
-  move,
-  timestamp: Timestamp.fromMillis(0),
-})
-
 // ── the replay ─────────────────────────────────────────────────────────────
-
-/** A seeded LCG, so the replay owns its own randomness rather than borrowing. */
-const seededRandom = (seed: number): (() => number) => {
-  let state = seed >>> 0
-  return () => {
-    state = (state * 1664525 + 1013904223) >>> 0
-    return state / 0x100000000
-  }
-}
 
 const REPLAY_SEED = 0x9e3779b
 
 /** Plays REPLAY_TURNS turns and returns every turn the processor produced. */
-const runReplay = (setupOverrides: Partial<StartedGameSetup> = {}): Turn[] => {
-  const setup = mkSetup(setupOverrides)
-  const original = Math.random
-  Math.random = seededRandom(REPLAY_SEED)
-  try {
-    const turns: Turn[] = [startingTurn()]
-    const produced: Turn[] = []
-    for (let turn = 1; turn <= REPLAY_TURNS; turn++) {
-      const current = turns[turns.length - 1]
+const runReplay = (setupOverrides: Partial<StartedGameSetup> = {}): Turn[] =>
+  runReplayScript({
+    setup: mkSetup(setupOverrides),
+    startingTurn: startingTurn(),
+    moves: (turn, alive) => {
       const staged = SCRIPT[turn - 1]
-      const processor = new TeamSnekProcessor(mkGameState(setup, turns))
-      const moves = current.alivePlayers
-        .filter((id) => staged[id] !== undefined)
-        .map((id) => mv(id, staged[id]))
-      const next = processor.applyMoves(current, moves)
-      turns.push(next)
-      produced.push(next)
-    }
-    return produced
-  } finally {
-    Math.random = original
-  }
-}
-
-/**
- * Key order is not a wire fact (Firestore stores documents, not JSON text), so
- * the fixture is canonicalised with sorted keys. Array order IS a wire fact —
- * the clash stream and a piece's traversed path are both ordered — and is kept.
- */
-const canonical = (value: unknown): unknown => {
-  if (Array.isArray(value)) return value.map(canonical)
-  if (value && typeof value === "object") {
-    const source = value as { [key: string]: unknown }
-    const out: { [key: string]: unknown } = {}
-    Object.keys(source)
-      .sort()
-      .forEach((key) => {
-        out[key] = canonical(source[key])
-      })
-    return out
-  }
-  return value
-}
-
-const serialise = (stream: Turn[]): string =>
-  `${JSON.stringify(canonical(stream), null, 2)}\n`
+      return alive.filter((id) => staged[id] !== undefined).map((id) => mv(id, staged[id]))
+    },
+    turns: REPLAY_TURNS,
+    seed: REPLAY_SEED,
+  })
 
 const GOLDEN = join(__dirname, "pieceReplay.golden.json")
 const GOLDEN_SPAWNER_ON = join(__dirname, "pieceReplay.spawner.golden.json")
@@ -303,12 +234,6 @@ const GOLDEN_SPAWNER_ON = join(__dirname, "pieceReplay.spawner.golden.json")
  * not itself a draw.
  */
 const SPAWNER_ON: Partial<StartedGameSetup> = { foodSpawnRate: 1 }
-
-/** Set UPDATE_GOLDEN=1 to re-record. Only ever legitimate before a move. */
-const check = (actual: string, path: string): void => {
-  if (process.env.UPDATE_GOLDEN === "1") writeFileSync(path, actual)
-  expect(actual).toBe(readFileSync(path, "utf8"))
-}
 
 describe("golden piece replay", () => {
   it("replays a chess-piece game turn by turn, byte for byte", () => {
