@@ -38,7 +38,7 @@ const byLetter = (a: Row, b: Row): number =>
 
 /**
  * A team's SCORE, computed exactly as the game engine computes it
- * (TeamSnekProcessor.getTeamScore): the summed weight of its LIVING units — a
+ * (engine/adjudicate.ts::weighTeams): the summed weight of its LIVING units — a
  * snake's body length, a piece's stack weight. A dead unit contributes nothing,
  * which is why only the units still on the board are summed.
  */

@@ -1,6 +1,6 @@
-import { ClashKind, GameState, Turn, UnitDeath } from "@shared/types/Game"
+import { GameState, Turn, UnitDeath } from "@shared/types/Game"
 import { teamColorMap } from "../hooks/useTeamColors"
-import { EXHAUSTION_KINDS } from "./clashes"
+import { CLASH_HEADLINE, EXHAUSTION_KINDS } from "./clashes"
 import { isPieceType, unitTypeFor } from "../utils/unitTypes"
 import {
   BoardClash,
@@ -40,18 +40,14 @@ const NEUTRAL_COLOR = "#888888"
 // left the board with no death written for it all end up as an uncertainty
 // mark and a note, never as an invented death or an invented attacker.
 
-/** The kinds this board knows how to draw. */
-const KNOWN_KINDS: ReadonlySet<string> = new Set<ClashKind>([
-  "contest",
-  "edge",
-  "bodyBlock",
-  "sever",
-  "hazard",
-  "exhaustion",
-  "wall",
-  "self",
-  "regicide",
-])
+/**
+ * The kinds this board knows how to draw — derived from the headline table, so
+ * there is nothing to keep in step by hand. `unknown` is this board's own
+ * marker for a kind off a newer server, never something the wire can send.
+ */
+const KNOWN_KINDS: ReadonlySet<string> = new Set(
+  Object.keys(CLASH_HEADLINE).filter((kind) => kind !== "unknown"),
+)
 
 const boardKind = (kind: unknown): BoardClashKind =>
   typeof kind === "string" && KNOWN_KINDS.has(kind)

@@ -42,7 +42,7 @@ import {
   Theme,
   Typography,
 } from "@mui/material";
-import { Centaur, Team, UnitCounts, UnitMaxEnergy, UnitType } from "@shared/types/Game";
+import { Centaur, Team, UnitCounts, UnitMaxEnergy, UnitType, UserProfile } from "@shared/types/Game";
 import { PIECE_GLYPHS, SNAKE_GLYPH } from "../../utils/unitGlyphs";
 import { useGameStateContext } from "../../context/GameStateContext";
 
@@ -416,7 +416,7 @@ const GameSetup: React.FC = () => {
       const names: Record<string, string> = {};
       snapshots.forEach((snap) => {
         snap.forEach((d) => {
-          const data = d.data();
+          const data = d.data() as UserProfile;
           names[d.id] = data.name || d.id;
         });
       });
