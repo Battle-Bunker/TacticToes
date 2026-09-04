@@ -82,55 +82,44 @@ describe("snake start locations", () => {
     const gameState = createGameState(7, 7, 4)
     const game = new TeamSnekProcessor(gameState)
     const initializedGame = game.firstTurn()
-    const board = game.visualizeBoard(initializedGame)
-    const lines = board.split("\n")
-    expect(lines.length).toBe(7)
-    expect(lines[0].split(" ").length).toBe(7)
+    const positions = getPositionMap(gameState, initializedGame)
+    positions.forEach((pos) => {
+      expect(pos.x).toBeGreaterThanOrEqual(0)
+      expect(pos.x).toBeLessThan(gameState.setup.boardWidth)
+      expect(pos.y).toBeGreaterThanOrEqual(0)
+      expect(pos.y).toBeLessThan(gameState.setup.boardHeight)
+    })
   })
 
   test("places correct number of players", () => {
     const gameState = createGameState(9, 9, 4)
     const game = new TeamSnekProcessor(gameState)
     const initializedGame = game.firstTurn()
-    const board = game.visualizeBoard(initializedGame)
-    const playerCount = (board.match(/[1-4]/g) || []).length
-    expect(playerCount).toBe(4)
+    expect(Object.keys(initializedGame.playerPieces).length).toBe(4)
   })
 
   test("places players on even squares", () => {
     const gameState = createGameState(11, 11, 8)
     const game = new TeamSnekProcessor(gameState)
     const initializedGame = game.firstTurn()
-    const board = game.visualizeBoard(initializedGame)
-    const lines = board.split("\n")
-    for (let y = 0; y < lines.length; y++) {
-      const squares = lines[y].split(" ")
-      for (let x = 0; x < squares.length; x++) {
-        if (squares[x].match(/[1-8]/)) {
-          expect((x + y) % 2).toBe(0)
-        }
-      }
-    }
+    const positions = getPositionMap(gameState, initializedGame)
+    positions.forEach((pos) => {
+      expect((pos.x + pos.y) % 2).toBe(0)
+    })
   })
 
   test("places players near edges for small number of players", () => {
     const gameState = createGameState(7, 7, 2)
     const game = new TeamSnekProcessor(gameState)
     const initializedGame = game.firstTurn()
-    const board = game.visualizeBoard(initializedGame)
-    const lines = board.split("\n")
-    const playerPositions = []
-    for (let y = 0; y < lines.length; y++) {
-      const squares = lines[y].split(" ")
-      for (let x = 0; x < squares.length; x++) {
-        if (squares[x].match(/[1-2]/)) {
-          playerPositions.push({ x, y })
-        }
-      }
-    }
-    playerPositions.forEach((pos) => {
+    const positions = getPositionMap(gameState, initializedGame)
+    const { boardWidth, boardHeight } = gameState.setup
+    positions.forEach((pos) => {
       expect(
-        pos.x === 1 || pos.x === 5 || pos.y === 1 || pos.y === 5,
+        pos.x === 1 ||
+          pos.x === boardWidth - 2 ||
+          pos.y === 1 ||
+          pos.y === boardHeight - 2,
       ).toBeTruthy()
     })
   })
@@ -147,21 +136,15 @@ describe("snake start locations", () => {
       const gameState = createGameState(width, height, players)
       const game = new TeamSnekProcessor(gameState)
       const initializedGame = game.firstTurn()
-      const board = game.visualizeBoard(initializedGame)
-      const lines = board.split("\n")
+      const positions = getPositionMap(gameState, initializedGame)
 
-      expect(lines.length).toBe(height)
-      expect(lines[0].split(" ").length).toBe(width)
-
-      let playerCount = 0
-      lines.forEach((line) => {
-        line.split(" ").forEach((token) => {
-          if (/^\d+$/.test(token)) {
-            playerCount += 1
-          }
-        })
+      positions.forEach((pos) => {
+        expect(pos.x).toBeGreaterThanOrEqual(0)
+        expect(pos.x).toBeLessThan(width)
+        expect(pos.y).toBeGreaterThanOrEqual(0)
+        expect(pos.y).toBeLessThan(height)
       })
-      expect(playerCount).toBe(players)
+      expect(Object.keys(initializedGame.playerPieces).length).toBe(players)
     })
   })
 

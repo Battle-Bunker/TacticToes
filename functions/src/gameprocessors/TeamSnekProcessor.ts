@@ -600,38 +600,4 @@ export class TeamSnekProcessor {
     })
     return paths
   }
-
-
-  // Method for testing/visualization
-  visualizeBoard(turn: Turn): string {
-    const { boardWidth, boardHeight } = this.gameSetup
-    const board: string[][] = Array(boardHeight).fill(null).map(() => Array(boardWidth).fill("."))
-    
-    // Add walls
-    const walls = this.placement.walls
-    walls.forEach(pos => {
-      const x = pos % boardWidth
-      const y = Math.floor(pos / boardWidth)
-      board[y][x] = "#"
-    })
-    
-    // Add food
-    turn.food.forEach(pos => {
-      const x = pos % boardWidth
-      const y = Math.floor(pos / boardWidth)
-      board[y][x] = "F"
-    })
-    
-    // Add snakes
-    Object.entries(turn.playerPieces).forEach(([playerID, snake]) => {
-      const playerNumber = this.gameSetup.gamePlayers.findIndex(p => p.id === playerID) + 1
-      snake.forEach(pos => {
-        const x = pos % boardWidth
-        const y = Math.floor(pos / boardWidth)
-        board[y][x] = playerNumber.toString()
-      })
-    })
-    
-    return board.map(row => row.join(" ")).join("\n")
-  }
 }
