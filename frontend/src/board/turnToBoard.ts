@@ -1,5 +1,6 @@
 import { ClashKind, GameState, Turn, UnitDeath } from "@shared/types/Game"
 import { teamColorMap } from "../hooks/useTeamColors"
+import { EXHAUSTION_KINDS } from "./clashes"
 import { isPieceType, unitTypeFor } from "../utils/unitTypes"
 import {
   BoardClash,
@@ -52,10 +53,15 @@ const KNOWN_KINDS: ReadonlySet<string> = new Set<ClashKind>([
   "regicide",
 ])
 
+const boardKind = (kind: unknown): BoardClashKind =>
+  typeof kind === "string" && KNOWN_KINDS.has(kind)
+    ? (kind as BoardClashKind)
+    : "unknown"
+
 /**
- * The two causes that are not a killing: the unit's energy ran out mid-move and
- * it halted where it stood. Nobody beat it, and the board should not draw as
- * though somebody had.
+ * EXHAUSTION_KINDS are the two causes that are not a killing: the unit's energy
+ * ran out mid-move and it halted where it stood. Nobody beat it, and the board
+ * should not draw as though somebody had.
  *
  * Exhaustion is a PROVISIONAL death. A unit that is still at or below zero when
  * the turn ends is in the death registry and gets the hollow exhaustion mark;
@@ -63,19 +69,9 @@ const KNOWN_KINDS: ReadonlySet<string> = new Set<ClashKind>([
  * the recovery mark instead. Which of the two happened is never guessed here —
  * the registry decides it.
  */
-const EXHAUSTION_CAUSES: ReadonlySet<string> = new Set<ClashKind>([
-  "hazard",
-  "exhaustion",
-])
-
-const boardKind = (kind: unknown): BoardClashKind =>
-  typeof kind === "string" && KNOWN_KINDS.has(kind)
-    ? (kind as BoardClashKind)
-    : "unknown"
-
 const deathStyle = (cause: BoardClashKind): DeathStyle => {
   if (cause === "unknown" || cause === "sever") return "unknown"
-  return EXHAUSTION_CAUSES.has(cause) ? "exhausted" : "combat"
+  return EXHAUSTION_KINDS.has(cause) ? "exhausted" : "combat"
 }
 
 /**
