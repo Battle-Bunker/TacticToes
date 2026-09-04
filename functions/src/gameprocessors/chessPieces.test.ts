@@ -968,6 +968,9 @@ describe("unit orientation (Turn.orientation) — every unit in every game", () 
     expect(turn0.orientation.n).toEqual({ dx: -2, dy: -1 })
     expect(turn0.orientation.k).toEqual({ dx: 1, dy: 0 })
     expect(turn0.orientation.s).toEqual({ dx: 0, dy: 1 })
+    // Turn 0's score is the spawn weight: a piece is a single square, a snake
+    // its stacked triple — on a mixed roster, in the same turn.
+    expect(turn0.scores).toEqual({ p: 1, r: 1, b: 1, n: 1, k: 1, s: 3 })
   })
 
   it("spawn: ties on a symmetry axis resolve to one of the tied candidates", () => {
