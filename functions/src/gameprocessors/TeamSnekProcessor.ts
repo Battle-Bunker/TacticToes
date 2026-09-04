@@ -45,7 +45,6 @@ export interface SnakeGameState {
   // Mutable game state
   newSnakes: { [playerID: string]: number[] }
   newFood: number[]
-  newHazards: number[]
   newPlayerEnergy: { [playerID: string]: number }
   newAlivePlayers: string[]
   newInvulnerabilityPotions: number[]
@@ -308,7 +307,7 @@ export class TeamSnekProcessor {
       //    Spawning runs inside it too, as the last board phase: the rules
       //    for where an item may land are the module's, and the only thing
       //    this class still supplies is the die.
-      const settled = settleTurn(this.settleInput(gameState), this.spawner())
+      const settled = settleTurn(this.settleInput(gameState, currentTurn.hazards), this.spawner())
       this.applySettlement(gameState, settled)
 
       // 3. Winners and turn assembly. Settlement has already adjudicated the
@@ -355,7 +354,7 @@ export class TeamSnekProcessor {
   // The board, roster and effect schedule as the pure module wants them. Tier
   // is passed in per unit AND read back out of the settlement: the module owns
   // effect expiry now, so it owns the tier changes expiry causes.
-  private settleInput(gameState: SnakeGameState): SettleInput {
+  private settleInput(gameState: SnakeGameState, hazards: number[]): SettleInput {
     const kings = new Set(
       this.gameSetup.gamePlayers.filter((p) => p.unitType === "king").map((p) => p.id),
     )
@@ -385,7 +384,7 @@ export class TeamSnekProcessor {
       boardWidth: gameState.boardWidth,
       boardHeight: gameState.boardHeight,
       walls: this.walls,
-      hazards: gameState.newHazards,
+      hazards,
       hazardDamage: this.hazardDamage(),
       food: gameState.newFood,
       maxEnergy: this.gameSetup.maxEnergyPerUnit,
@@ -501,7 +500,6 @@ export class TeamSnekProcessor {
     const {
       playerPieces,
       food,
-      hazards,
       alivePlayers,
       playerEnergy,
     } = currentTurn
@@ -530,7 +528,6 @@ export class TeamSnekProcessor {
       boardHeight,
       newSnakes,
       newFood: [...food],
-      newHazards: [...hazards],
       newPlayerEnergy: { ...playerEnergy },
       newAlivePlayers: [...alivePlayers],
       newInvulnerabilityPotions: [...(currentTurn.invulnerabilityPotions ?? [])],
@@ -619,7 +616,6 @@ export class TeamSnekProcessor {
       scores: playerScores,
       alivePlayers: gameState.newAlivePlayers,
       food: gameState.newFood,
-      hazards: gameState.newHazards,
       playerPieces: gameState.newSnakes,
       clashes: gameState.clashes,
       deaths: gameState.deaths,
