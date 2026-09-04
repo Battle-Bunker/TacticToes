@@ -43,27 +43,14 @@ export interface Team {
 // Unit kinds. Absent unitType fields mean "snake".
 export type UnitType = "snake" | "pawn" | "knight" | "bishop" | "rook" | "queen" | "king"
 
+// One map shape, keyed by unit kind, reused for every per-kind config.
+export type PerUnitType<T> = { [K in UnitType]?: T }
+
 // Per-team unit counts. Absent → snakesPerTeam snakes.
-export interface UnitCounts {
-  snake?: number
-  pawn?: number
-  knight?: number
-  bishop?: number
-  rook?: number
-  queen?: number
-  king?: number
-}
+export type UnitCounts = PerUnitType<number>
 
 // Per-type max energy. Absent keys (or the whole map) mean 100.
-export interface UnitMaxEnergy {
-  snake?: number
-  pawn?: number
-  knight?: number
-  bishop?: number
-  rook?: number
-  queen?: number
-  king?: number
-}
+export type UnitMaxEnergy = PerUnitType<number>
 
 export interface GameSetup {
   teams: Team[]
