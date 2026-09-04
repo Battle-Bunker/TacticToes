@@ -66,10 +66,19 @@ const GameFinished: React.FC = () => {
 
   const sortedTeams = teamResults.sort((a, b) => b.teamScore - a.teamScore)
 
-  const draw =
-    sortedTeams.length > 1 &&
-    sortedTeams[0].teamScore === sortedTeams[1].teamScore
-  const winningTeam = !draw && sortedTeams.length > 0 ? sortedTeams[0] : null
+  // The verdict is the engine's, not this page's. `engine/adjudicate.ts` decided
+  // who won and on which board — the PREVIOUS committed one when every team was
+  // wiped on the same turn — and the server wrote that decision to
+  // `Turn.winners`. Re-deriving it from the settled board here got exactly that
+  // branch wrong: nobody is left standing, so every team weighs 0 and the page
+  // called a draw over a game the server had awarded (and paid MMR for, in the
+  // table below). `winnerRows` emits a row per PLAYER of a winning team, so
+  // several rows can carry one teamID — hence the Set. `winners` is non-empty by
+  // the guard above, so more than one distinct id is the engine's own draw.
+  const winningTeamIDs = new Set(winners.map((w) => w.teamID))
+  const draw = winningTeamIDs.size !== 1
+  const winningTeam =
+    sortedTeams.find((team) => winningTeamIDs.has(team.teamID)) ?? null
 
   return (
     <Box
