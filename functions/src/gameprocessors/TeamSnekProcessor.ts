@@ -54,11 +54,7 @@ export interface SnakeGameState {
 
   // Processing data
   playerMoves: { [playerID: string]: number }
-  deadPlayers: Set<string>
   clashes: Clash[]
-
-  // Computed data
-  newScores: { [playerID: string]: number }
 
   // Per-unit orientation, seeded from the current turn and replaced wholesale
   // by the settlement's rewritten map once the turn has resolved.
@@ -75,8 +71,6 @@ export interface SnakeGameState {
   // trail units, both straight off the engine's typed events.
   deaths: { [playerID: string]: UnitDeath }
   severedCells: { [playerID: string]: number[] }
-  // Sub-steps the engine ran, so end-of-turn removals can still name one.
-  subStepCount: number
 }
 
 // The board projection adjudication works on, with the mutable arrays the
@@ -381,7 +375,6 @@ export class TeamSnekProcessor {
     gameState.deaths = resolution.deaths
     gameState.traversed = resolution.traversed
     gameState.severedCells = resolution.severedCells
-    gameState.subStepCount = resolution.subStepCount
     gameState.newFood = resolution.food
 
     // The applied move is the cell the unit actually ended on — a truncated
@@ -389,16 +382,23 @@ export class TeamSnekProcessor {
     Object.entries(resolution.finalCell).forEach(([playerID, cell]) => {
       gameState.playerMoves[playerID] = cell
     })
-    Object.keys(resolution.deaths).forEach((playerID) => gameState.deadPlayers.add(playerID))
-    this.removeDeadPlayers(gameState)
+    // resolution.deaths is the turn's single death registry — the survivors'
+    // board and energy the module hands back next already omit them, so
+    // pruning here is the only bookkeeping this class still owns.
+    const dead = new Set(Object.keys(resolution.deaths))
+    gameState.newAlivePlayers = gameState.newAlivePlayers.filter((id) => !dead.has(id))
+    dead.forEach((id) => {
+      delete gameState.newSnakes[id]
+      delete gameState.newPlayerEnergy[id]
+    })
     Object.entries(resolution.board).forEach(([playerID, unit]) => {
       gameState.newSnakes[playerID] = unit.occupancy
       gameState.newPlayerEnergy[playerID] = unit.energy
     })
 
-    // The settled schedule and tiers replace the ones removeDeadPlayers just
-    // pruned: the module has already dropped the dead, cancelled the ally
-    // buffs a vulnerable collision voids, and given back every lapsed level.
+    // The settled schedule and tiers replace the ones just pruned above: the
+    // module has already dropped the dead, cancelled the ally buffs a
+    // vulnerable collision voids, and given back every lapsed level.
     gameState.activeEffects = resolution.effects
     gameState.playerInvulnerabilityLevel = resolution.tiers
     gameState.newInvulnerabilityPotions = resolution.potions
@@ -509,29 +509,13 @@ export class TeamSnekProcessor {
       playerInvulnerabilityLevel,
       activeEffects: (currentTurn.activeEffects ?? []).map(e => ({ ...e })),
       playerMoves: {},
-      deadPlayers: new Set(),
       clashes: [],
-      newScores: {},
       orientation: { ...currentTurn.orientation },
       unitTypes,
       traversed: {},
       deaths: {},
       severedCells: {},
-      subStepCount: 1,
     }
-  }
-
-  private removeDeadPlayers(gameState: SnakeGameState): void {
-    gameState.deadPlayers.forEach((playerID) => {
-      const index = gameState.newAlivePlayers.indexOf(playerID)
-        if (index !== -1) {
-        gameState.newAlivePlayers.splice(index, 1)
-      }
-      delete gameState.newSnakes[playerID]
-      delete gameState.newPlayerEnergy[playerID]
-      delete gameState.playerInvulnerabilityLevel[playerID]
-      gameState.activeEffects = gameState.activeEffects.filter(e => e.playerID !== playerID)
-    })
   }
 
   // The winner ROWS the wire wants, built from the outcome settlement already
@@ -590,20 +574,13 @@ export class TeamSnekProcessor {
   }
 
   protected createNewTurn(currentTurn: Turn, gameState: SnakeGameState, winners: Winner[]): Turn {
-    // Update scores based on current snake lengths
-    Object.keys(gameState.newSnakes).forEach((playerID) => {
-      // If player is dead, score should be 0
-      if (gameState.deadPlayers.has(playerID)) {
-        gameState.newScores[playerID] = 0;
-      } else {
-        gameState.newScores[playerID] = gameState.newSnakes[playerID].length;
-      }
+    // Per-player score: current occupancy weight, or 0 for a unit that has
+    // none — which reads the same whether it died this turn or three turns
+    // ago, since applySettlement has already pruned the dead from newSnakes.
+    const playerScores: { [playerID: string]: number } = {}
+    this.gameSetup.gamePlayers.forEach((player) => {
+      playerScores[player.id] = gameState.newSnakes[player.id]?.length ?? 0
     })
-
-    // Ensure alivePlayers only contains players who actually have snakes
-    const validAlivePlayers = gameState.newAlivePlayers.filter(playerID => {
-      return gameState.newSnakes[playerID] && gameState.newSnakes[playerID].length > 0;
-    });
 
     // No startTime/endTime here: the spread carries the previous turn's
     // window through, and the committing caller (processTurn) is the single
@@ -611,8 +588,8 @@ export class TeamSnekProcessor {
     const newTurn: Turn = {
       ...currentTurn,
       playerEnergy: gameState.newPlayerEnergy,
-      scores: gameState.newScores,
-      alivePlayers: validAlivePlayers,
+      scores: playerScores,
+      alivePlayers: gameState.newAlivePlayers,
       food: gameState.newFood,
       hazards: gameState.newHazards,
       playerPieces: gameState.newSnakes,
@@ -642,30 +619,13 @@ export class TeamSnekProcessor {
       delete newTurn.paths
     }
 
-    // Team-based scores
+    // Team score: a sum over playerScores, which is already per-player —
+    // not a second computation of the same expression.
     const teamScores: { [teamID: string]: number } = {}
-    const playerScores: { [playerID: string]: number } = {}
-
-    // First pass: calculate team totals
-    this.gameSetup.gamePlayers.forEach(player => {
-      if (player.teamID) {
-        if (!teamScores[player.teamID]) {
-          teamScores[player.teamID] = 0
-        }
-        // If player is dead, they contribute 0 to team score
-        const playerScore = gameState.deadPlayers.has(player.id) ? 0 : (gameState.newSnakes[player.id]?.length || 0)
-        teamScores[player.teamID] += playerScore
-      }
+    this.gameSetup.gamePlayers.forEach((player) => {
+      if (!player.teamID) return
+      teamScores[player.teamID] = (teamScores[player.teamID] ?? 0) + playerScores[player.id]
     })
-
-    // Second pass: assign individual scores to each player
-    this.gameSetup.gamePlayers.forEach(player => {
-      // Dead players get score 0, alive players get their snake length
-      playerScores[player.id] = gameState.deadPlayers.has(player.id) ? 0 : (gameState.newSnakes[player.id]?.length || 0)
-    })
-
-    // Update the turn with new scores
-    newTurn.scores = playerScores
     newTurn.teamScores = teamScores
 
     return newTurn
