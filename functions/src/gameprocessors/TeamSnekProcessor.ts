@@ -95,6 +95,10 @@ export class TeamSnekProcessor {
   // The board perimeter, fixed for the life of the game — built once here
   // rather than on every one of the calls that used to rebuild it.
   private readonly walls: number[]
+  // Unit id → team id, for every configured unit. The roster is fixed at game
+  // start, so the map is built once here rather than rescanned per unit per
+  // turn. This is the shape the engine asks for too, so it goes straight in.
+  private readonly teamOf: { [playerID: string]: string }
 
   constructor(gameState: GameState) {
     this.gameSetup = gameState.setup
@@ -102,6 +106,7 @@ export class TeamSnekProcessor {
     this.maxTurns = resolveMaxTurns(gameState.setup.maxTurns)
     this.foodSpawnRate = resolveFoodSpawnRate(gameState.setup.foodSpawnRate)
     this.walls = this.getWallPositions()
+    this.teamOf = Object.fromEntries(gameState.setup.gamePlayers.map((p) => [p.id, p.teamID]))
   }
 
   firstTurn(): Turn {
@@ -360,7 +365,7 @@ export class TeamSnekProcessor {
     )
     return {
       turn: this.gameState.turns.length,
-      teamOf: this.teamOf(),
+      teamOf: this.teamOf,
       maxTurns: this.maxTurns,
       previous: this.previousBoard(),
       effects: gameState.activeEffects,
@@ -373,7 +378,7 @@ export class TeamSnekProcessor {
       units: gameState.newAlivePlayers.map((playerID) => ({
         id: playerID,
         type: gameState.unitTypes[playerID],
-        teamID: this.gameSetup.gamePlayers.find((p) => p.id === playerID)?.teamID ?? "",
+        teamID: this.teamOf[playerID] ?? "",
         isKing: kings.has(playerID),
         tier: gameState.playerInvulnerabilityLevel[playerID] ?? 0,
         energy: gameState.newPlayerEnergy[playerID],
@@ -444,7 +449,7 @@ export class TeamSnekProcessor {
     })
 
     resolution.vulnerableCollided.forEach((playerID) => {
-      const teamID = this.gameSetup.gamePlayers.find((p) => p.id === playerID)?.teamID
+      const teamID = this.teamOf[playerID]
       if (!teamID) return
       logger.info(
         `Snek: Vulnerable snake ${playerID} collided; ally invulnerability buffs on team ${teamID} set to expire next turn.`,
@@ -551,28 +556,24 @@ export class TeamSnekProcessor {
   protected winnerRows(gameState: SnakeGameState, outcome: Outcome | null): Winner[] {
     if (!outcome) return []
 
-    const board =
-      outcome.decidedOn === "previous"
-        ? this.previousBoard()
-        : TeamSnekProcessor.liveBoard(gameState)
-    if (!board) return []
+    // Only occupancy is wanted here, and the in-flight state already holds
+    // the settled board applySettlement folded in — projecting it through a
+    // second BoardView would be that board written twice.
+    const pieces =
+      outcome.decidedOn === "previous" ? this.previousBoard()?.pieces : gameState.newSnakes
+    if (!pieces) return []
 
     return outcome.winners.flatMap((teamID) =>
       this.gameSetup.gamePlayers
         .filter((player) => player.teamID === teamID)
         .map((player) => ({
           playerID: player.id,
-          score: board.pieces[player.id]?.length || 0,
-          winningSquares: board.pieces[player.id] || [],
+          score: pieces[player.id]?.length || 0,
+          winningSquares: pieces[player.id] || [],
           teamID,
           teamScore: outcome.weightByTeam[teamID] ?? 0,
         })),
     )
-  }
-
-  /** The in-flight state of the turn being resolved. */
-  private static liveBoard(gameState: SnakeGameState): TeamBoardView {
-    return { alive: gameState.newAlivePlayers, pieces: gameState.newSnakes }
   }
 
   /** A committed turn, as stored on the game document. */
@@ -587,15 +588,6 @@ export class TeamSnekProcessor {
   private previousBoard(): TeamBoardView | undefined {
     const previousTurn = this.gameState.turns[this.gameState.turns.length - 1]
     return previousTurn ? TeamSnekProcessor.turnBoard(previousTurn) : undefined
-  }
-
-  /** Unit id → team id, for every configured unit. */
-  private teamOf(): { [playerID: string]: string } {
-    const teamOf: { [playerID: string]: string } = {}
-    this.gameSetup.gamePlayers.forEach((p) => {
-      teamOf[p.id] = p.teamID
-    })
-    return teamOf
   }
 
   protected createNewTurn(currentTurn: Turn, gameState: SnakeGameState, winners: Winner[]): Turn {
