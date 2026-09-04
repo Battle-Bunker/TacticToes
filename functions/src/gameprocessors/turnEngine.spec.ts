@@ -7,98 +7,16 @@
 // Each inversion is called out where it lives.
 
 import { Timestamp } from "firebase-admin/firestore"
-import {
-  GamePlayer,
-  GameState,
-  Move,
-  StartedGameSetup,
-  Team,
-  Turn,
-} from "@shared/types/Game"
-import { TeamSnekProcessor } from "./TeamSnekProcessor"
+import { StartedGameSetup, Turn } from "@shared/types/Game"
 import { REASON } from "./engine/turnEngine"
+import { at as curriedAt, gp, mv, play, Scenario } from "./playTurn"
 
 // 11x11 board: index = y * 11 + x, perimeter is wall (interior 1..9).
 const W = 11
-const at = (x: number, y: number): number => y * W + x
-
-const teams = (...ids: string[]): Team[] =>
-  ids.map((id) => ({ id, name: id, color: "#ff0000" }))
-
-const gp = (
-  id: string,
-  teamID: string,
-  letter: string,
-  unitType: GamePlayer["unitType"]
-): GamePlayer => ({ id, teamID, letter, unitType })
-
-const mv = (playerID: string, move: number): Move => ({
-  gameID: "game1",
-  moveNumber: 0,
-  playerID,
-  move,
-  timestamp: Timestamp.fromMillis(0),
-})
+const at = curriedAt(W)
 
 /** N copies of one cell: a piece's weight-stack. */
 const stack = (cell: number, weight: number): number[] => Array(weight).fill(cell)
-
-interface Scenario {
-  players: GamePlayer[]
-  pieces: { [playerID: string]: number[] }
-  moves: Move[]
-  turn?: Partial<Turn>
-  setup?: Partial<StartedGameSetup>
-  turnsBefore?: number
-}
-
-const play = (scenario: Scenario): Turn => {
-  const ids = Object.keys(scenario.pieces)
-  const teamIDs = Array.from(new Set(scenario.players.map((p) => p.teamID)))
-  const turn: Turn = {
-    playerEnergy: Object.fromEntries(ids.map((id) => [id, 100])),
-    startTime: Timestamp.fromMillis(0),
-    endTime: Timestamp.fromMillis(5000),
-    scores: Object.fromEntries(ids.map((id) => [id, scenario.pieces[id].length])),
-    alivePlayers: ids,
-    food: [],
-    hazards: [],
-    playerPieces: scenario.pieces,
-    clashes: [],
-    deaths: {},
-    moves: {},
-    winners: [],
-    unitTypes: Object.fromEntries(
-      scenario.players.map((p) => [p.id, p.unitType ?? "snake"])
-    ),
-    ...scenario.turn,
-    orientation: {
-      ...Object.fromEntries(ids.map((id) => [id, { dx: 1, dy: 0 }])),
-      ...scenario.turn?.orientation,
-    },
-  }
-  const setup: StartedGameSetup = {
-    teams: teams(...teamIDs),
-    snakesPerTeam: 1,
-    gamePlayers: scenario.players,
-    boardWidth: W,
-    boardHeight: W,
-    maxTurnTime: 5,
-    startRequested: false,
-    started: true,
-    timeCreated: Timestamp.fromMillis(0),
-    foodSpawnRate: 0,
-    ...scenario.setup,
-  }
-  const gameState: GameState = {
-    setup,
-    turns: Array(scenario.turnsBefore ?? 1).fill(turn),
-    walls: [],
-    timeCreated: Timestamp.fromMillis(0),
-    timeFinished: null,
-  }
-  return new TeamSnekProcessor(gameState).applyMoves(turn, scenario.moves)
-}
 
 /** Turn state with every keyed map sorted, so key order cannot mask a diff. */
 const normalize = (turn: Turn): string => {

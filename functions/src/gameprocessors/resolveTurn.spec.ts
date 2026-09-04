@@ -5,23 +5,12 @@
 // writes to the wire.
 
 import { ResolveUnit, resolveTurn } from "./engine/resolveTurn"
+import { at as curriedAt, perimeter } from "./playTurn"
 
 // 11x11 board: index = y * 11 + x, perimeter is wall (interior 1..9).
 const W = 11
-const at = (x: number, y: number): number => y * W + x
-
-const walls = (): number[] => {
-  const cells = new Set<number>()
-  for (let x = 0; x < W; x++) {
-    cells.add(at(x, 0))
-    cells.add(at(x, W - 1))
-  }
-  for (let y = 0; y < W; y++) {
-    cells.add(at(0, y))
-    cells.add(at(W - 1, y))
-  }
-  return Array.from(cells)
-}
+const at = curriedAt(W)
+const walls = (): number[] => perimeter(W, W)
 
 const unit = (over: Partial<ResolveUnit> & Pick<ResolveUnit, "id" | "occupancy">): ResolveUnit => ({
   type: "rook",

@@ -7,17 +7,10 @@
 // mocked to hand out path-carrying refs so writes can be asserted by path.
 
 import { Timestamp, Transaction } from "firebase-admin/firestore"
-import {
-  GameState,
-  Move,
-  Ranking,
-  StartedGameSetup,
-  Team,
-  Turn,
-} from "@shared/types/Game"
-import { expandTeams } from "../utils/expandTeams"
+import { GameState, Move, Ranking, Turn } from "@shared/types/Game"
 import { createNewGame } from "../utils/createNewGame"
 import { processTurn, selectLatestMoves } from "./processTurn"
+import { mkGameState, mkSetup, mkTurn, mv } from "./playTurn"
 
 jest.mock("../utils/createNewGame")
 
@@ -119,67 +112,6 @@ const GAME_ID = "game1"
 const GAME_PATH = `sessions/${SESSION_ID}/games/${GAME_ID}`
 const NOW = 100_000
 
-const teams: Team[] = [
-  { id: "t1", name: "Team One", color: "#ff0000" },
-  { id: "t2", name: "Team Two", color: "#00ff00" },
-]
-
-const mkSetup = (
-  overrides: Partial<StartedGameSetup> = {}
-): StartedGameSetup => ({
-  teams,
-  snakesPerTeam: 1,
-  gamePlayers: expandTeams(teams, overrides.snakesPerTeam ?? 1),
-  boardWidth: 7,
-  boardHeight: 7,
-  maxTurnTime: 5,
-  startRequested: false,
-  started: true,
-  timeCreated: Timestamp.fromMillis(0),
-  foodSpawnRate: 0,
-  ...overrides,
-})
-
-const mkTurn = (
-  playerPieces: { [playerID: string]: number[] },
-  overrides: Partial<Turn> = {}
-): Turn => {
-  const ids = Object.keys(playerPieces)
-  return {
-    playerEnergy: Object.fromEntries(ids.map((id) => [id, 100])),
-    startTime: Timestamp.fromMillis(0),
-    endTime: Timestamp.fromMillis(5000),
-    scores: Object.fromEntries(ids.map((id) => [id, playerPieces[id].length])),
-    alivePlayers: ids,
-    food: [],
-    hazards: [],
-    playerPieces,
-    clashes: [],
-    deaths: {},
-    moves: {},
-    winners: [],
-    // Every unit carries an orientation; irrelevant here (every test stages all
-    // moves) beyond satisfying the Turn shape.
-    orientation: Object.fromEntries(ids.map((id) => [id, { dx: 1, dy: 0 }])),
-    ...overrides,
-  }
-}
-
-const mkGameState = (setup: StartedGameSetup, turns: Turn[]): GameState => ({
-  setup,
-  turns,
-  walls: [],
-  timeCreated: Timestamp.fromMillis(0),
-  timeFinished: null,
-})
-
-const mv = (playerID: string, move: number, atMillis: number): Move => ({
-  gameID: GAME_ID,
-  moveNumber: 0,
-  playerID,
-  move,
-  timestamp: Timestamp.fromMillis(atMillis),
-})
 
 /**
  * The same move staged at a sub-millisecond offset. Firestore commit

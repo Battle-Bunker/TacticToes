@@ -1,14 +1,7 @@
-import { Timestamp } from "firebase-admin/firestore"
-import {
-  GameState,
-  Move,
-  StartedGameSetup,
-  Team,
-  Turn,
-} from "@shared/types/Game"
-import { expandTeams } from "../utils/expandTeams"
+import { StartedGameSetup, Team, Turn } from "@shared/types/Game"
 import { TeamSnekProcessor } from "./TeamSnekProcessor"
 import { REASON } from "./engine/turnEngine"
+import { mkGameState, mkSetup as sharedMkSetup, mkTurn, mv } from "./playTurn"
 
 // 7x7 board: index = y * 7 + x, perimeter is wall. Collision cell is 24.
 
@@ -26,60 +19,7 @@ const threeTeams: Team[] = [
 const mkSetup = (
   teams: Team[],
   overrides: Partial<StartedGameSetup> = {}
-): StartedGameSetup => ({
-  teams,
-  snakesPerTeam: 1,
-  gamePlayers: expandTeams(teams, overrides.snakesPerTeam ?? 1),
-  boardWidth: 7,
-  boardHeight: 7,
-  maxTurnTime: 5,
-  startRequested: false,
-  started: true,
-  timeCreated: Timestamp.fromMillis(0),
-  foodSpawnRate: 0,
-  ...overrides,
-})
-
-const mkTurn = (
-  playerPieces: { [playerID: string]: number[] },
-  overrides: Partial<Turn> = {}
-): Turn => {
-  const ids = Object.keys(playerPieces)
-  return {
-    playerEnergy: Object.fromEntries(ids.map((id) => [id, 100])),
-    startTime: Timestamp.fromMillis(0),
-    endTime: Timestamp.fromMillis(5000),
-    scores: Object.fromEntries(ids.map((id) => [id, playerPieces[id].length])),
-    alivePlayers: ids,
-    food: [],
-    hazards: [],
-    playerPieces,
-    clashes: [],
-    deaths: {},
-    moves: {},
-    winners: [],
-    // Every unit carries an orientation; irrelevant here (every test stages all
-    // moves) beyond satisfying the Turn shape.
-    orientation: Object.fromEntries(ids.map((id) => [id, { dx: 1, dy: 0 }])),
-    ...overrides,
-  }
-}
-
-const mkGameState = (setup: StartedGameSetup, turn: Turn): GameState => ({
-  setup,
-  turns: [turn],
-  walls: [],
-  timeCreated: Timestamp.fromMillis(0),
-  timeFinished: null,
-})
-
-const mv = (playerID: string, move: number): Move => ({
-  gameID: "game1",
-  moveNumber: 0,
-  playerID,
-  move,
-  timestamp: Timestamp.fromMillis(0),
-})
+): StartedGameSetup => sharedMkSetup({ teams, ...overrides })
 
 const occupantsOf = (turn: Turn, cell: number): string[] =>
   Object.entries(turn.playerPieces)

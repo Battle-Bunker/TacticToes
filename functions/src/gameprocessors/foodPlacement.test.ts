@@ -1,6 +1,6 @@
 import { GamePlayer, GameState } from "@shared/types/Game"
-import { Timestamp } from "firebase/firestore"
 import { TeamSnekProcessor } from "./TeamSnekProcessor"
+import { mkGameState, mkSetup } from "./playTurn"
 
 jest.mock("firebase/firestore", () => ({
   Timestamp: {
@@ -41,26 +41,19 @@ describe("turn 0 food placement", () => {
       teamID: id,
       letter: "A",
     }))
-    return {
-      turns: [],
-      walls: [],
-      setup: {
+    return mkGameState(
+      mkSetup({
         teams: ids.map((id) => ({ id, name: id, color: "#ff0000" })),
-        snakesPerTeam: 1,
         gamePlayers,
         boardWidth: WIDTH,
         boardHeight: HEIGHT,
         maxTurnTime: 10,
-        startRequested: false,
-        started: true,
-        timeCreated: Timestamp.now(),
         usePreviewBoard: true,
         presetPlayerPositions: positions,
         ...(hazards.length > 0 ? { presetHazards: hazards } : {}),
-      },
-      timeCreated: Timestamp.fromMillis(0),
-      timeFinished: Timestamp.fromMillis(0),
-    }
+      }),
+      [],
+    )
   }
 
   const foodFor = (

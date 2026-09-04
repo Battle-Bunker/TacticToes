@@ -19,10 +19,8 @@
 // and the two answers must agree row for row — which is the first time the
 // rule has ever been checkable against a second caller.
 
-import { Timestamp } from "firebase-admin/firestore"
 import {
   GamePlayer,
-  GameState,
   Move,
   StartedGameSetup,
   Team,
@@ -31,88 +29,37 @@ import {
 } from "@shared/types/Game"
 import { DEFAULT_MAX_TURNS, TeamSnekProcessor } from "./TeamSnekProcessor"
 import { EndKind, adjudicate, resolveMaxTurns, sharePar } from "./engine/adjudicate"
+import {
+  at as curriedAt,
+  gp,
+  mkGameState,
+  mkSetup as sharedMkSetup,
+  mkTurn,
+  mv as sharedMv,
+} from "./playTurn"
 
 // 9x9 board: index = y * 9 + x, perimeter is wall (interior 1..7).
 const W = 9
-const at = (x: number, y: number): number => y * W + x
+const at = curriedAt(W)
 
 const teamsOf = (ids: string[]): Team[] =>
   ids.map((id, i) => ({ id, name: `Team ${id}`, color: `#00000${i}` }))
 
-const gp = (
-  id: string,
-  teamID: string,
-  letter: string,
-  unitType?: GamePlayer["unitType"],
-): GamePlayer => ({ id, teamID, letter, ...(unitType ? { unitType } : {}) })
-
 const mkSetup = (
   players: GamePlayer[],
   overrides: Partial<StartedGameSetup> = {},
-): StartedGameSetup => ({
-  teams: teamsOf(Array.from(new Set(players.map((p) => p.teamID)))),
-  snakesPerTeam: 1,
-  gamePlayers: players,
-  boardWidth: W,
-  boardHeight: W,
-  maxTurnTime: 5,
-  startRequested: false,
-  started: true,
-  timeCreated: Timestamp.fromMillis(0),
-  foodSpawnRate: 0,
-  ...overrides,
-})
-
-const mkTurn = (
-  playerPieces: { [playerID: string]: number[] },
-  overrides: Partial<Turn> = {},
-): Turn => {
-  const ids = Object.keys(playerPieces)
-  return {
-    playerEnergy: Object.fromEntries(ids.map((id) => [id, 100])),
-    startTime: Timestamp.fromMillis(0),
-    endTime: Timestamp.fromMillis(5000),
-    scores: Object.fromEntries(ids.map((id) => [id, playerPieces[id].length])),
-    alivePlayers: ids,
-    food: [],
-    hazards: [],
-    playerPieces,
-    clashes: [],
-    deaths: {},
-    moves: {},
-    winners: [],
+): StartedGameSetup =>
+  sharedMkSetup({
+    teams: teamsOf(Array.from(new Set(players.map((p) => p.teamID)))),
+    gamePlayers: players,
+    boardWidth: W,
+    boardHeight: W,
     ...overrides,
-    orientation: {
-      ...Object.fromEntries(ids.map((id) => [id, { dx: 1, dy: 0 }])),
-      ...overrides.orientation,
-    },
-  }
-}
-
-/**
- * `turnsPlayed` is how many turns the game has already committed — the number
- * the turn limit is measured against, and the length of the history the
- * mutual-wipe branch reaches back into. Only the last turn is ever read, so
- * the rest of the history is padded with it.
- */
-const mkGameState = (
-  setup: StartedGameSetup,
-  turn: Turn,
-  turnsPlayed: number,
-): GameState => ({
-  setup,
-  turns: [...Array(turnsPlayed - 1).fill(turn), turn],
-  walls: [],
-  timeCreated: Timestamp.fromMillis(0),
-  timeFinished: null,
-})
+  })
 
 const mv = (playerID: string, move: number): Move => ({
+  ...sharedMv(playerID, move),
   gameID: "adjudication",
-  moveNumber: 0,
-  playerID,
-  move,
-  timestamp: Timestamp.fromMillis(0),
 })
 
 // ── the corpus ─────────────────────────────────────────────────────────────

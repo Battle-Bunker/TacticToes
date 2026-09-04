@@ -1,7 +1,6 @@
-import { GamePlayer, GameState } from "@shared/types/Game"
-import { Timestamp } from "firebase/firestore"
+import { GameState } from "@shared/types/Game"
 import { TeamSnekProcessor } from "./gameprocessors/TeamSnekProcessor"
-import { expandTeams } from "./utils/expandTeams"
+import { mkGameState, mkSetup } from "./gameprocessors/playTurn"
 import { assignCellsToSlices } from "./utils/radialSlices"
 
 // Mock Timestamp.now() to return a consistent value
@@ -27,28 +26,10 @@ describe("snake start locations", () => {
       name: `Team ${i + 1}`,
       color: "#ff0000",
     }))
-    const gamePlayers: GamePlayer[] = teams.map((team) => ({
-      id: team.id,
-      teamID: team.id,
-      letter: "A",
-    }))
-    return {
-      turns: [],
-      walls: [],
-      setup: {
-        teams,
-        snakesPerTeam: 1,
-        gamePlayers,
-        boardWidth: width,
-        boardHeight: height,
-        maxTurnTime: 10,
-        startRequested: false,
-        started: true,
-        timeCreated: Timestamp.now(),
-      },
-      timeCreated: Timestamp.fromMillis(0),
-      timeFinished: Timestamp.fromMillis(0),
-    }
+    return mkGameState(
+      mkSetup({ teams, boardWidth: width, boardHeight: height, maxTurnTime: 10 }),
+      [],
+    )
   }
 
   function createTeamGameState(
@@ -62,26 +43,17 @@ describe("snake start locations", () => {
       name: `Team ${i + 1}`,
       color: `#00${i + 1}0${i + 1}0`,
     }))
-    const gamePlayers: GamePlayer[] = expandTeams(teams, snakesPerTeam)
-
-    return {
-      turns: [],
-      walls: [],
-      setup: {
+    return mkGameState(
+      mkSetup({
         teams,
         snakesPerTeam,
-        gamePlayers,
         boardWidth: width,
         boardHeight: height,
         maxTurnTime: 10,
-        startRequested: false,
-        started: true,
-        timeCreated: Timestamp.now(),
         teamClustersEnabled: true,
-      },
-      timeCreated: Timestamp.fromMillis(0),
-      timeFinished: Timestamp.fromMillis(0),
-    }
+      }),
+      [],
+    )
   }
 
   function getManhattanDistance(

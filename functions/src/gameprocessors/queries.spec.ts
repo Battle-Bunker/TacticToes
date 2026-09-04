@@ -20,28 +20,16 @@ import {
   rotationTargets,
   stagedAction,
 } from "./engine/queries"
+import { at as curriedAt, perimeter as sharedPerimeter } from "./playTurn"
 
 // 9x9 board: index = y * 9 + x, perimeter is wall (interior 1..7).
 const W = 9
-const at = (x: number, y: number): number => y * W + x
-
-const perimeter = (): number[] => {
-  const walls = new Set<number>()
-  for (let x = 0; x < W; x++) {
-    walls.add(at(x, 0))
-    walls.add(at(x, W - 1))
-  }
-  for (let y = 0; y < W; y++) {
-    walls.add(at(0, y))
-    walls.add(at(W - 1, y))
-  }
-  return Array.from(walls).sort((a, b) => a - b)
-}
+const at = curriedAt(W)
 
 const board = (overrides: Partial<BoardShape> = {}): BoardShape => ({
   boardWidth: W,
   boardHeight: W,
-  walls: perimeter(),
+  walls: sharedPerimeter(W, W),
   hazards: [],
   occupancy: [],
   food: [],

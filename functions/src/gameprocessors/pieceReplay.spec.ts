@@ -61,6 +61,7 @@ import { StartedGameSetup, Team, Turn, UnitCounts, UnitType } from "@shared/type
 import { expandTeams } from "../utils/expandTeams"
 import { Orientation } from "./engine/moveGrammar"
 import { check, mv, runReplay as runReplayScript, serialise } from "./goldenReplay"
+import { mkSetup as sharedMkSetup } from "./playTurn"
 
 // ── the board ──────────────────────────────────────────────────────────────
 
@@ -162,24 +163,20 @@ const SCRIPT: ReadonlyArray<{ [playerID: string]: number }> = [
 
 // ── the fixtures the replay starts from ────────────────────────────────────
 
-const mkSetup = (overrides: Partial<StartedGameSetup> = {}): StartedGameSetup => ({
-  teams,
-  snakesPerTeam: 0,
-  unitsPerTeam: UNITS_PER_TEAM,
-  gamePlayers: expandTeams(teams, 0, UNITS_PER_TEAM),
-  boardWidth: W,
-  boardHeight: W,
-  maxTurnTime: 5,
-  startRequested: false,
-  started: true,
-  timeCreated: Timestamp.fromMillis(0),
-  pawnPromotionWeight: PROMOTION_WEIGHT,
-  maxEnergyPerUnit: { pawn: PAWN_MAX_ENERGY, queen: QUEEN_MAX_ENERGY },
-  // The food on the board is the food on the wire; potions are off entirely.
-  foodSpawnRate: 0,
-  invulnerabilityPotionEnabled: false,
-  ...overrides,
-})
+const mkSetup = (overrides: Partial<StartedGameSetup> = {}): StartedGameSetup =>
+  sharedMkSetup({
+    teams,
+    snakesPerTeam: 0,
+    unitsPerTeam: UNITS_PER_TEAM,
+    gamePlayers: expandTeams(teams, 0, UNITS_PER_TEAM),
+    boardWidth: W,
+    boardHeight: W,
+    pawnPromotionWeight: PROMOTION_WEIGHT,
+    maxEnergyPerUnit: { pawn: PAWN_MAX_ENERGY, queen: QUEEN_MAX_ENERGY },
+    // The food on the board is the food on the wire; potions are off entirely.
+    invulnerabilityPotionEnabled: false,
+    ...overrides,
+  })
 
 const startingTurn = (): Turn => {
   const ids = Object.keys(START)
