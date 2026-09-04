@@ -99,12 +99,16 @@ export class TeamSnekProcessor {
   /** Turns this game is adjudicated at, or null when it runs unlimited. */
   protected maxTurns: number | null
   private fertileTiles: number[] = []
+  // The board perimeter, fixed for the life of the game — built once here
+  // rather than on every one of the calls that used to rebuild it.
+  private readonly walls: number[]
 
   constructor(gameState: GameState) {
     this.gameSetup = gameState.setup
     this.gameState = gameState
     this.maxTurns = resolveMaxTurns(gameState.setup.maxTurns)
     this.foodSpawnRate = resolveFoodSpawnRate(gameState.setup.foodSpawnRate)
+    this.walls = this.getWallPositions()
   }
 
   firstTurn(): Turn {
@@ -121,8 +125,7 @@ export class TeamSnekProcessor {
   // Walls never change after game start (they are the board perimeter), so
   // they are stored once on the game document rather than on every turn.
   getWalls(): number[] {
-    const { boardWidth, boardHeight } = this.gameSetup
-    return this.getWallPositions(boardWidth, boardHeight)
+    return this.walls
   }
 
   generatePreviewBoard(): {
@@ -131,14 +134,14 @@ export class TeamSnekProcessor {
     playerPositions: { [playerID: string]: number }
     food: number[]
   } {
-    const { boardWidth, boardHeight, gamePlayers } = this.gameSetup
+    const { gamePlayers } = this.gameSetup
 
     const { playerPieces } = this.initializeSnakes()
 
-    const walls = this.getWallPositions(boardWidth, boardHeight)
-    const hazards = this.generateHazardPositions(boardWidth, boardHeight, playerPieces)
-    const fertileTiles = this.generateFertileTiles(boardWidth, boardHeight, walls, hazards, playerPieces)
-    const food = this.initializeFood(boardWidth, boardHeight, playerPieces, hazards)
+    const walls = this.walls
+    const hazards = this.generateHazardPositions(playerPieces)
+    const fertileTiles = this.generateFertileTiles(walls, hazards, playerPieces)
+    const food = this.initializeFood(playerPieces, hazards)
 
     const playerPositions: { [playerID: string]: number } = {}
     gamePlayers.forEach((player) => {
@@ -179,19 +182,19 @@ export class TeamSnekProcessor {
       teamClusterFallback = result.teamClusterFallback
     }
 
-    const walls = this.getWallPositions(boardWidth, boardHeight)
+    const walls = this.walls
 
     const hazards = usePreview && this.gameSetup.presetHazards && this.gameSetup.presetHazards.length > 0
       ? this.gameSetup.presetHazards
-      : this.generateHazardPositions(boardWidth, boardHeight, playerPieces)
+      : this.generateHazardPositions(playerPieces)
 
     this.fertileTiles = usePreview && this.gameSetup.presetFertileTiles && this.gameSetup.presetFertileTiles.length > 0
       ? this.gameSetup.presetFertileTiles
-      : this.generateFertileTiles(boardWidth, boardHeight, walls, hazards, playerPieces)
+      : this.generateFertileTiles(walls, hazards, playerPieces)
 
     const food = usePreview && this.gameSetup.presetFood && this.gameSetup.presetFood.length > 0
       ? this.gameSetup.presetFood
-      : this.initializeFood(boardWidth, boardHeight, playerPieces, hazards)
+      : this.initializeFood(playerPieces, hazards)
 
     // Initialize player energy (per-type configurable max, default 100)
     const initialEnergy: { [playerID: string]: number } = {}
@@ -359,7 +362,7 @@ export class TeamSnekProcessor {
       })),
       boardWidth: gameState.boardWidth,
       boardHeight: gameState.boardHeight,
-      walls: this.getWallPositions(gameState.boardWidth, gameState.boardHeight),
+      walls: this.walls,
       hazards: gameState.newHazards,
       hazardDamage: this.hazardDamage(),
       food: gameState.newFood,
@@ -703,12 +706,11 @@ export class TeamSnekProcessor {
   }
 
   private generateFertileTiles(
-    boardWidth: number,
-    boardHeight: number,
     walls: number[],
     hazards: number[],
     _playerPieces: { [playerID: string]: number[] },
   ): number[] {
+    const { boardWidth, boardHeight } = this.gameSetup
     if (!this.gameSetup.fertileGroundEnabled) return []
     const density = Math.max(0, Math.min(100, this.gameSetup.fertileGroundDensity ?? 30))
     if (density === 0) return []
@@ -793,11 +795,10 @@ export class TeamSnekProcessor {
   }
 
   private initializeFood(
-    boardWidth: number,
-    boardHeight: number,
     playerPieces: { [playerID: string]: number[] },
     hazards: number[],
   ): number[] {
+    const { boardWidth, boardHeight } = this.gameSetup
     const occupiedPositions = new Set<number>()
 
     // Add snake positions to occupied positions
@@ -809,8 +810,7 @@ export class TeamSnekProcessor {
     hazards.forEach((position) => occupiedPositions.add(position))
 
     // Add wall positions to the occupied set
-    const wallPositions = this.getWallPositions(boardWidth, boardHeight)
-    wallPositions.forEach((position) => occupiedPositions.add(position))
+    this.walls.forEach((position) => occupiedPositions.add(position))
 
     const foodPositions: number[] = []
 
@@ -824,8 +824,6 @@ export class TeamSnekProcessor {
     } else {
       // Fallback: choose any free space that is not hazard/wall/snake
       const fallbackPositions = this.getFreePositions(
-        boardWidth,
-        boardHeight,
         playerPieces,
         foodPositions,
         hazards,
@@ -872,7 +870,8 @@ export class TeamSnekProcessor {
     return foodPositions
   }
 
-  private getWallPositions(boardWidth: number, boardHeight: number): number[] {
+  private getWallPositions(): number[] {
+    const { boardWidth, boardHeight } = this.gameSetup
     const wallPositions: Set<number> = new Set()
 
     // Top and bottom walls
@@ -890,11 +889,8 @@ export class TeamSnekProcessor {
     return Array.from(wallPositions)
   }
 
-  private getAdjacentIndices(
-    index: number,
-    boardWidth: number,
-    boardHeight: number,
-  ): number[] {
+  private getAdjacentIndices(index: number): number[] {
+    const { boardWidth, boardHeight } = this.gameSetup
     const x = index % boardWidth
     const y = Math.floor(index / boardWidth)
     const indices: number[] = []
@@ -914,16 +910,15 @@ export class TeamSnekProcessor {
   // — asked here for the placement pass that builds the board, since the
   // per-turn spawners now ask it from inside settlement.
   private getFreePositions(
-    boardWidth: number,
-    boardHeight: number,
     playerPieces: { [playerID: string]: number[] },
     food: number[],
     hazards: number[],
   ): number[] {
+    const { boardWidth, boardHeight } = this.gameSetup
     return freeCells({
       boardWidth,
       boardHeight,
-      walls: this.getWallPositions(boardWidth, boardHeight),
+      walls: this.walls,
       hazards,
       occupancy: Object.values(playerPieces),
       food,
@@ -932,8 +927,6 @@ export class TeamSnekProcessor {
   }
 
   private generateHazardPositions(
-    boardWidth: number,
-    boardHeight: number,
     playerPieces: { [playerID: string]: number[] },
   ): number[] {
     const hazardPercentage = Math.max(
@@ -943,8 +936,6 @@ export class TeamSnekProcessor {
     if (hazardPercentage <= 0) return []
 
     const candidatePositions = this.getFreePositions(
-      boardWidth,
-      boardHeight,
       playerPieces,
       [],
       [],
@@ -970,14 +961,10 @@ export class TeamSnekProcessor {
     const safeHazards = this.ensureInitialSafeMoves(
       initialHazards,
       playerPieces,
-      boardWidth,
-      boardHeight,
     )
     return this.ensureConnectedBoard(
       safeHazards,
       playerPieces,
-      boardWidth,
-      boardHeight,
     )
   }
 
@@ -985,11 +972,9 @@ export class TeamSnekProcessor {
   private ensureInitialSafeMoves(
     hazards: number[],
     playerPieces: { [playerID: string]: number[] },
-    boardWidth: number,
-    boardHeight: number,
   ): number[] {
     const hazardSet = new Set(hazards)
-    const walls = new Set(this.getWallPositions(boardWidth, boardHeight))
+    const walls = new Set(this.walls)
 
     const occupied = new Set<number>()
     Object.values(playerPieces).forEach((snake) => {
@@ -998,7 +983,7 @@ export class TeamSnekProcessor {
 
     Object.values(playerPieces).forEach((snake) => {
       const head = snake[0]
-      const neighbors = this.getAdjacentIndices(head, boardWidth, boardHeight)
+      const neighbors = this.getAdjacentIndices(head)
       const safeNeighbors = neighbors.filter(
         (n) => !walls.has(n) && !hazardSet.has(n) && !occupied.has(n),
       )
@@ -1011,8 +996,6 @@ export class TeamSnekProcessor {
             hazardsWithoutCurrent.delete(n)
 
             const relocationCandidates = this.getFreePositions(
-              boardWidth,
-              boardHeight,
               playerPieces,
               [],
               Array.from(hazardsWithoutCurrent),
@@ -1056,11 +1039,10 @@ export class TeamSnekProcessor {
   private ensureConnectedBoard(
     hazards: number[],
     playerPieces: { [playerID: string]: number[] },
-    boardWidth: number,
-    boardHeight: number,
   ): number[] {
+    const { boardWidth, boardHeight } = this.gameSetup
     const hazardSet = new Set(hazards)
-    const walls = new Set(this.getWallPositions(boardWidth, boardHeight))
+    const walls = new Set(this.walls)
     const occupied = new Set<number>()
     Object.values(playerPieces).forEach((snake) => {
       snake.forEach((pos) => occupied.add(pos))
@@ -1084,11 +1066,7 @@ export class TeamSnekProcessor {
 
       while (queue.length > 0) {
         const current = queue.shift() as number
-        const neighbors = this.getAdjacentIndices(
-          current,
-          boardWidth,
-          boardHeight,
-        )
+        const neighbors = this.getAdjacentIndices(current)
         neighbors.forEach((n) => {
           if (
             !visited.has(n) &&
@@ -1120,8 +1098,6 @@ export class TeamSnekProcessor {
       hazardSet.delete(hazard)
       if (isConnected(hazardSet)) {
         const availablePositions = this.getFreePositions(
-          boardWidth,
-          boardHeight,
           playerPieces,
           [],
           Array.from(hazardSet),
@@ -1258,7 +1234,7 @@ export class TeamSnekProcessor {
     }
 
     // Board capacity guard: every unit needs a legal spawn cell of its own.
-    const spawnCells = this.getSpawnCells(boardWidth, boardHeight)
+    const spawnCells = this.getSpawnCells()
     if (spawnCells.length < gamePlayers.length) {
       return []
     }
@@ -1315,14 +1291,12 @@ export class TeamSnekProcessor {
 
   // Every cell a unit may spawn on: board interior only, and on the spawn
   // parity so any two spawns sit an even Manhattan distance apart.
-  private getSpawnCells(
-    boardWidth: number,
-    boardHeight: number,
-  ): { x: number; y: number }[] {
+  private getSpawnCells(): { x: number; y: number }[] {
+    const { boardWidth, boardHeight } = this.gameSetup
     const cells: { x: number; y: number }[] = []
     for (let y = 1; y < boardHeight - 1; y++) {
       for (let x = 1; x < boardWidth - 1; x++) {
-        if (this.isValidSpawnPosition({ x, y }, true, boardWidth, boardHeight)) {
+        if (this.isValidSpawnPosition({ x, y }, true)) {
           cells.push({ x, y })
         }
       }
@@ -1390,9 +1364,8 @@ export class TeamSnekProcessor {
   private isValidSpawnPosition(
     position: { x: number; y: number },
     requireParity: boolean,
-    boardWidth: number,
-    boardHeight: number,
   ): boolean {
+    const { boardWidth, boardHeight } = this.gameSetup
     if (
       position.x < 1 ||
       position.y < 1 ||
@@ -1492,7 +1465,7 @@ export class TeamSnekProcessor {
     const board: string[][] = Array(boardHeight).fill(null).map(() => Array(boardWidth).fill("."))
     
     // Add walls
-    const walls = this.getWallPositions(boardWidth, boardHeight)
+    const walls = this.walls
     walls.forEach(pos => {
       const x = pos % boardWidth
       const y = Math.floor(pos / boardWidth)
