@@ -122,41 +122,30 @@ export class TeamSnekProcessor {
     return this.walls
   }
 
-  generatePreviewBoard(): {
-    fertileTiles: number[]
+  // The board build, in the one order the lobby preview and turn 0 both use:
+  // positions, hazards, fertile tiles, food. A preset overrides its step, and
+  // only when it is non-empty. Assigning this.fertileTiles is the caller's
+  // business, not this method's — the preview must not.
+  private buildBoard(
+    presets: {
+      positions?: { [playerID: string]: number }
+      hazards?: number[]
+      fertileTiles?: number[]
+      food?: number[]
+    } = {},
+  ): {
+    playerPieces: { [playerID: string]: number[] }
     hazards: number[]
-    playerPositions: { [playerID: string]: number }
+    fertileTiles: number[]
     food: number[]
+    teamClusterFallback: boolean
   } {
     const { gamePlayers } = this.gameSetup
 
-    const { playerPieces } = this.initializeSnakes()
-
-    const walls = this.walls
-    const hazards = this.generateHazardPositions(playerPieces)
-    const fertileTiles = this.generateFertileTiles(walls, hazards, playerPieces)
-    const food = this.initializeFood(playerPieces, hazards)
-
-    const playerPositions: { [playerID: string]: number } = {}
-    gamePlayers.forEach((player) => {
-      const snake = playerPieces[player.id]
-      if (snake && snake.length > 0) {
-        playerPositions[player.id] = snake[0]
-      }
-    })
-
-    return { fertileTiles, hazards, playerPositions, food }
-  }
-
-  private initializeTurn(): Turn {
-    const { boardWidth, boardHeight, gamePlayers } = this.gameSetup
-
-    const usePreview = this.gameSetup.usePreviewBoard === true
-
     let playerPieces: { [playerID: string]: number[] }
     let teamClusterFallback: boolean
-    const presetPositions = this.gameSetup.presetPlayerPositions
-    if (usePreview && presetPositions && Object.keys(presetPositions).length === gamePlayers.length) {
+    const presetPositions = presets.positions
+    if (presetPositions && Object.keys(presetPositions).length === gamePlayers.length) {
       playerPieces = {}
       teamClusterFallback = false
       gamePlayers.forEach((player) => {
@@ -176,19 +165,58 @@ export class TeamSnekProcessor {
       teamClusterFallback = result.teamClusterFallback
     }
 
-    const walls = this.walls
-
-    const hazards = usePreview && this.gameSetup.presetHazards && this.gameSetup.presetHazards.length > 0
-      ? this.gameSetup.presetHazards
+    const hazards = presets.hazards && presets.hazards.length > 0
+      ? presets.hazards
       : this.generateHazardPositions(playerPieces)
 
-    this.fertileTiles = usePreview && this.gameSetup.presetFertileTiles && this.gameSetup.presetFertileTiles.length > 0
-      ? this.gameSetup.presetFertileTiles
-      : this.generateFertileTiles(walls, hazards, playerPieces)
+    const fertileTiles = presets.fertileTiles && presets.fertileTiles.length > 0
+      ? presets.fertileTiles
+      : this.generateFertileTiles(this.walls, hazards, playerPieces)
 
-    const food = usePreview && this.gameSetup.presetFood && this.gameSetup.presetFood.length > 0
-      ? this.gameSetup.presetFood
+    const food = presets.food && presets.food.length > 0
+      ? presets.food
       : this.initializeFood(playerPieces, hazards)
+
+    return { playerPieces, hazards, fertileTiles, food, teamClusterFallback }
+  }
+
+  generatePreviewBoard(): {
+    fertileTiles: number[]
+    hazards: number[]
+    playerPositions: { [playerID: string]: number }
+    food: number[]
+  } {
+    const { gamePlayers } = this.gameSetup
+
+    const { playerPieces, hazards, fertileTiles, food } = this.buildBoard()
+
+    const playerPositions: { [playerID: string]: number } = {}
+    gamePlayers.forEach((player) => {
+      const snake = playerPieces[player.id]
+      if (snake && snake.length > 0) {
+        playerPositions[player.id] = snake[0]
+      }
+    })
+
+    return { fertileTiles, hazards, playerPositions, food }
+  }
+
+  private initializeTurn(): Turn {
+    const { boardWidth, boardHeight, gamePlayers } = this.gameSetup
+
+    const usePreview = this.gameSetup.usePreviewBoard === true
+
+    const { playerPieces, hazards, fertileTiles, teamClusterFallback, food } = this.buildBoard(
+      usePreview
+        ? {
+          positions: this.gameSetup.presetPlayerPositions,
+          hazards: this.gameSetup.presetHazards,
+          fertileTiles: this.gameSetup.presetFertileTiles,
+          food: this.gameSetup.presetFood,
+        }
+        : {},
+    )
+    this.fertileTiles = fertileTiles
 
     // Initialize player energy (per-type configurable max, default 100)
     const initialEnergy: { [playerID: string]: number } = {}

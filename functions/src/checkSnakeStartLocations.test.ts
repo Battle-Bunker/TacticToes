@@ -383,6 +383,11 @@ describe("snake start locations", () => {
           engineTurn.playerPieces[player.id][0],
         )
       })
+      // The preview's purpose is to show the board the game is built on, so
+      // the whole build must agree, not just where the units stand.
+      expect(preview.hazards).toEqual(engineTurn.hazards)
+      expect(preview.fertileTiles).toEqual(engineTurn.fertileTiles ?? [])
+      expect(preview.food).toEqual(engineTurn.food)
     })
   })
 })
