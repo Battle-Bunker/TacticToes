@@ -45,10 +45,11 @@ const GameFinished: React.FC = () => {
       teamName: team.name,
       teamColor: team.color,
       // Scored off the final board, exactly as the engine scores
-      // (TeamSnekProcessor.getTeamScore) and exactly as the live scoreboard
+      // (engine/adjudicate.ts::weighTeams) and exactly as the live scoreboard
       // does: the summed weight of the team's surviving units. Reading it from
       // the board rather than from a stored summary is what makes an old log
-      // — written before teamScores existed — score correctly too.
+      // — written before teamScores existed — score correctly too. A DISPLAYED
+      // number only; the verdict below comes off the wire.
       teamScore: teamUnits.reduce(
         (total, gp) => total + (latestTurn.playerPieces[gp.id]?.length ?? 0),
         0,
