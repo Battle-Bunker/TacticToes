@@ -137,59 +137,48 @@ export const clashRings = (
  * The headline one event gets in the inspector, from its KIND — never from the
  * server's `reason` string, which is display text and free to change. The
  * reason is shown too, underneath, as the server's own words for it.
+ *
+ * A `Record<BoardClashKind, string>` rather than a switch with a default: the
+ * table is exhaustive by construction, so a kind added to the wire's
+ * `ClashKind` breaks this build instead of quietly rendering as "unknown".
  */
-export const clashHeadline = (kind: BoardClashKind): string => {
-  switch (kind) {
-    case "contest":
-      return "Contest for the square"
-    case "edge":
-      return "Edge exchange"
-    case "bodyBlock":
-      return "Ran into a body"
-    case "sever":
-      return "Body severed"
-    case "hazard":
-      return "Exhausted by hazard damage"
-    case "exhaustion":
-      return "Exhausted — out of energy"
-    case "wall":
-      return "Hit the wall"
-    case "self":
-      return "Hit its own body"
-    case "regicide":
-      return "Team eliminated — last king fell"
-    default:
-      return "Unrecorded event"
-  }
+export const CLASH_HEADLINE: Record<BoardClashKind, string> = {
+  contest: "Contest for the square",
+  edge: "Edge exchange",
+  bodyBlock: "Ran into a body",
+  sever: "Body severed",
+  hazard: "Exhausted by hazard damage",
+  exhaustion: "Exhausted — out of energy",
+  wall: "Hit the wall",
+  self: "Hit its own body",
+  regicide: "Team eliminated — last king fell",
+  unknown: "Unrecorded event",
 }
 
-/** How a death reads in the inspector, from the cause the registry recorded. */
-export const deathHeadline = (cause: BoardClashKind): string => {
-  switch (cause) {
-    case "contest":
-      return "Lost the contest for this square"
-    case "edge":
-      return "Lost an edge exchange"
-    case "bodyBlock":
-      return "Ran into a body"
-    case "hazard":
-      return "Hazard damage emptied its energy — collapsed here"
-    case "exhaustion":
-      return "Ran out of energy and collapsed here"
-    case "wall":
-      return "Hit the wall"
-    case "self":
-      return "Hit its own body"
-    case "regicide":
-      return "Removed with its team when the last king fell"
-    case "sever":
-      // A sever is non-fatal by definition; a death registry naming it as a
-      // cause is a record that contradicts itself, and is reported as such.
-      return "Recorded as a sever — a sever does not kill"
-    default:
-      return "Cause not recorded"
-  }
+export const clashHeadline = (kind: BoardClashKind): string =>
+  CLASH_HEADLINE[kind]
+
+/**
+ * How a death reads in the inspector, from the cause the registry recorded.
+ * Exhaustive over `BoardClashKind` for the same reason as CLASH_HEADLINE.
+ */
+export const DEATH_HEADLINE: Record<BoardClashKind, string> = {
+  contest: "Lost the contest for this square",
+  edge: "Lost an edge exchange",
+  bodyBlock: "Ran into a body",
+  hazard: "Hazard damage emptied its energy — collapsed here",
+  exhaustion: "Ran out of energy and collapsed here",
+  wall: "Hit the wall",
+  self: "Hit its own body",
+  regicide: "Removed with its team when the last king fell",
+  // A sever is non-fatal by definition; a death registry naming it as a cause
+  // is a record that contradicts itself, and is reported as such.
+  sever: "Recorded as a sever — a sever does not kill",
+  unknown: "Cause not recorded",
 }
+
+export const deathHeadline = (cause: BoardClashKind): string =>
+  DEATH_HEADLINE[cause]
 
 /**
  * The two kinds that empty a unit's energy where it stands. Neither is fatal on
