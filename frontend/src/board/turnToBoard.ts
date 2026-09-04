@@ -1,5 +1,6 @@
-import { ClashKind, GameState, Turn, UnitDeath, UnitType } from "@shared/types/Game"
+import { ClashKind, GameState, Turn, UnitDeath } from "@shared/types/Game"
 import { teamColorMap } from "../hooks/useTeamColors"
+import { isPieceType, unitTypeFor } from "../utils/unitTypes"
 import {
   BoardClash,
   BoardClashKind,
@@ -96,19 +97,6 @@ const mapIndices = (
   width: number,
   height: number,
 ): Cell[] => (indices ?? []).map((i) => indexToCell(i, width, height))
-
-/**
- * A unit's CURRENT type: the turn's live map (promotion changes it mid-game)
- * first, then the setup's initial type, then "snake".
- */
-const unitTypeFor = (
-  gameState: GameState,
-  turn: Turn,
-  playerID: string,
-): UnitType =>
-  turn.unitTypes?.[playerID] ??
-  gameState.setup.gamePlayers.find((gp) => gp.id === playerID)?.unitType ??
-  "snake"
 
 /**
  * The earliest turn on which any of a unit's invulnerability effects lapses —
@@ -225,7 +213,7 @@ export const turnToBoard = (
       return
     }
     aliveNow.add(playerID)
-    const isPiece = unitType !== "snake"
+    const isPiece = isPieceType(unitType)
     const body = (isPiece ? positions.slice(0, 1) : positions).map((i) =>
       indexToCell(i, width, height),
     )

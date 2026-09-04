@@ -3,6 +3,7 @@
 // resolution.
 
 import { UNCERTAIN_RING_COLOR, clashRings } from "./clashes"
+import { isPieceType } from "../utils/unitTypes"
 
 export interface Cell {
   x: number
@@ -443,9 +444,8 @@ function orientationUnitVector(
   return { ux: dx / len, uy: dy / len }
 }
 
-/** A unit is a chess PIECE when its type is anything other than "snake". */
 function isPieceUnit(unit: Pick<BoardUnit, "unitType">): boolean {
-  return !!(unit && unit.unitType && unit.unitType !== "snake")
+  return isPieceType(unit?.unitType)
 }
 
 // Does this unit's head cell carry the orientation eye? A snake's facing is

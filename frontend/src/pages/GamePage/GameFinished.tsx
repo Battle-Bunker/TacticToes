@@ -13,6 +13,7 @@ import React from "react"
 import { useNavigate } from "react-router-dom"
 import { useGameStateContext } from "../../context/GameStateContext"
 import { pieceGlyph } from "../../utils/unitGlyphs"
+import { unitTypeFor } from "../../utils/unitTypes"
 
 interface TeamResult {
   teamID: string
@@ -55,7 +56,7 @@ const GameFinished: React.FC = () => {
       // The row already names the team, so a unit is its LETTER, with its type
       // glyph — the same division of labour the scoreboard's team groups use.
       unitNames: teamUnits.map((gp) => {
-        const glyph = pieceGlyph(latestTurn.unitTypes?.[gp.id] ?? gp.unitType)
+        const glyph = pieceGlyph(unitTypeFor(gameState, latestTurn, gp.id))
         return `${glyph ? `${glyph} ` : ""}${gp.letter}`
       }),
       mmr: winner?.newMMR,
