@@ -775,39 +775,27 @@ export class TeamSnekProcessor {
     hazards: number[],
   ): number[] {
     const { boardWidth, boardHeight } = this.gameSetup
-    const occupiedPositions = new Set<number>()
-
-    // Add snake positions to occupied positions
-    Object.values(playerPieces).forEach((snake) => {
-      snake.forEach((position) => occupiedPositions.add(position))
-    })
-
-    // Add hazard positions
-    hazards.forEach((position) => occupiedPositions.add(position))
-
-    // Add wall positions to the occupied set
-    this.walls.forEach((position) => occupiedPositions.add(position))
+    // What a cell may hold is the module's rule, not this method's: `free` is
+    // every cell an item could land on, in board order, and a cell leaves it
+    // as food takes it. Writing the wall/hazard/unit set out again here was
+    // that rule stated a second time, in a method that already called
+    // `getFreePositions` for its own fallback branch.
+    const free = new Set(this.getFreePositions(playerPieces, [], hazards))
 
     const foodPositions: number[] = []
+    const take = (cell: number): void => {
+      foodPositions.push(cell)
+      free.delete(cell)
+    }
 
-    // Place food in the center of the board
+    // Centre of the board if it is open, else the first open cell.
     const centerX = Math.floor(boardWidth / 2)
     const centerY = Math.floor(boardHeight / 2)
     const centerPosition = centerY * boardWidth + centerX
-    if (!occupiedPositions.has(centerPosition)) {
-      foodPositions.push(centerPosition)
-      occupiedPositions.add(centerPosition)
-    } else {
-      // Fallback: choose any free space that is not hazard/wall/snake
-      const fallbackPositions = this.getFreePositions(
-        playerPieces,
-        foodPositions,
-        hazards,
-      )
-      if (fallbackPositions.length > 0) {
-        foodPositions.push(fallbackPositions[0])
-        occupiedPositions.add(fallbackPositions[0])
-      }
+    if (free.has(centerPosition)) take(centerPosition)
+    else {
+      const [fallback] = free
+      if (fallback !== undefined) take(fallback)
     }
 
     // Place additional food for each snake
@@ -834,9 +822,8 @@ export class TeamSnekProcessor {
           foodY < boardHeight - 1
         ) {
           const foodPosition = foodY * boardWidth + foodX
-          if (!occupiedPositions.has(foodPosition)) {
-            foodPositions.push(foodPosition)
-            occupiedPositions.add(foodPosition)
+          if (free.has(foodPosition)) {
+            take(foodPosition)
             break
           }
         }
