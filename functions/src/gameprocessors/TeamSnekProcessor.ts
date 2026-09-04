@@ -35,10 +35,6 @@ import {
 import { BoardPlacement } from "./placement"
 
 export interface SnakeGameState {
-  // Input data
-  boardWidth: number
-  boardHeight: number
-
   // Mutable game state
   newSnakes: { [playerID: string]: number[] }
   newFood: number[]
@@ -97,6 +93,15 @@ export class TeamSnekProcessor {
   // start, so the map is built once here rather than rescanned per unit per
   // turn. This is the shape the engine asks for too, so it goes straight in.
   private readonly teamOf: { [playerID: string]: string }
+  // Kings never change kind (promotion only creates queens), so the setup is
+  // authoritative for both of these — no need to rescan gamePlayers per turn.
+  private readonly kings: Set<string>
+  // Teams that play under regicide: those configured with at least one king,
+  // whether or not one is still standing.
+  private readonly regicideTeams: string[]
+  // Whether this game fields any chess piece at all — fixed at game start,
+  // like the roster it is read off.
+  private readonly pieceGame: boolean
 
   constructor(gameState: GameState) {
     this.gameSetup = gameState.setup
@@ -105,6 +110,13 @@ export class TeamSnekProcessor {
     this.foodSpawnRate = resolveFoodSpawnRate(gameState.setup.foodSpawnRate)
     this.placement = new BoardPlacement(gameState.setup)
     this.teamOf = Object.fromEntries(gameState.setup.gamePlayers.map((p) => [p.id, p.teamID]))
+    this.kings = new Set(
+      gameState.setup.gamePlayers.filter((p) => p.unitType === "king").map((p) => p.id),
+    )
+    this.regicideTeams = Array.from(
+      new Set(gameState.setup.gamePlayers.filter((p) => p.unitType === "king").map((p) => p.teamID)),
+    )
+    this.pieceGame = gameState.setup.gamePlayers.some((p) => isPieceType(p.unitType))
   }
 
   firstTurn(): Turn {
@@ -169,10 +181,12 @@ export class TeamSnekProcessor {
       initialEnergy[player.id] = this.maxEnergyFor(player.unitType)
     })
 
-    // Initialize scores (score = length/weight: snakes spawn at 3, pieces at 1)
+    // Initialize scores: spawn weight, exactly as every later turn computes
+    // it (createNewTurn) — a snake spawns as a stacked triple, a piece as a
+    // single square, which playerPieces already states.
     const initialScores: { [playerID: string]: number } = {}
     gamePlayers.forEach((player) => {
-      initialScores[player.id] = isPieceType(player.unitType) ? 1 : 3
+      initialScores[player.id] = playerPieces[player.id].length
     })
 
     const initialInvulnerabilityLevel: { [playerID: string]: number } = {}
@@ -185,11 +199,12 @@ export class TeamSnekProcessor {
     // random).
     const orientation: { [playerID: string]: Orientation } = {}
     gamePlayers.forEach((player) => {
-      orientation[player.id] = this.spawnOrientation(
+      orientation[player.id] = pickSpawnOrientation(
         player.unitType ?? "snake",
         playerPieces[player.id][0],
         boardWidth,
         boardHeight,
+        { next: () => Math.random() },
       )
     })
 
@@ -218,7 +233,7 @@ export class TeamSnekProcessor {
       orientation,
     }
 
-    if (this.hasPieceUnits()) {
+    if (this.pieceGame) {
       const unitTypes: { [playerID: string]: UnitType } = {}
       gamePlayers.forEach((player) => {
         unitTypes[player.id] = player.unitType ?? "snake"
@@ -265,19 +280,6 @@ export class TeamSnekProcessor {
     }
   }
 
-  // Teams that play under regicide: those configured with at least one king,
-  // whether or not one is still standing. Kings never change kind (promotion
-  // only creates queens), so the setup is authoritative.
-  private regicideTeamIDs(): string[] {
-    return Array.from(
-      new Set(
-        this.gameSetup.gamePlayers
-          .filter((p) => p.unitType === "king")
-          .map((p) => p.teamID),
-      ),
-    )
-  }
-
   // The turn's die. Item spawning is the game's only nondeterminism, and the
   // rules around it — the free-cell set, the rate arithmetic, the fertile
   // filter — are the module's; this hands it the randomness those rules
@@ -301,9 +303,6 @@ export class TeamSnekProcessor {
   // is passed in per unit AND read back out of the settlement: the module owns
   // effect expiry now, so it owns the tier changes expiry causes.
   private settleInput(gameState: SnakeGameState, hazards: number[]): SettleInput {
-    const kings = new Set(
-      this.gameSetup.gamePlayers.filter((p) => p.unitType === "king").map((p) => p.id),
-    )
     return {
       turn: this.gameState.turns.length,
       teamOf: this.teamOf,
@@ -320,22 +319,22 @@ export class TeamSnekProcessor {
         id: playerID,
         type: gameState.unitTypes[playerID],
         teamID: this.teamOf[playerID] ?? "",
-        isKing: kings.has(playerID),
+        isKing: this.kings.has(playerID),
         tier: gameState.playerInvulnerabilityLevel[playerID] ?? 0,
         energy: gameState.newPlayerEnergy[playerID],
         occupancy: gameState.newSnakes[playerID],
         orientation: gameState.orientation[playerID],
         stagedMove: gameState.playerMoves[playerID],
       })),
-      boardWidth: gameState.boardWidth,
-      boardHeight: gameState.boardHeight,
+      boardWidth: this.gameSetup.boardWidth,
+      boardHeight: this.gameSetup.boardHeight,
       walls: this.placement.walls,
       hazards,
       hazardDamage: this.hazardDamage(),
       food: gameState.newFood,
       maxEnergy: this.gameSetup.maxEnergyPerUnit,
       foodEnergy: this.foodEnergy(),
-      regicideTeamIDs: this.regicideTeamIDs(),
+      regicideTeamIDs: this.regicideTeams,
     }
   }
 
@@ -402,27 +401,6 @@ export class TeamSnekProcessor {
     })
   }
 
-  // Piece-only wire fields (Turn.unitTypes, Turn.paths) are written only for
-  // games that field pieces. The engine itself never asks.
-  protected hasPieceUnits(): boolean {
-    return this.gameSetup.gamePlayers.some((p) => isPieceType(p.unitType))
-  }
-
-  // Spawn orientation, assigned once at turn 0: toward the board centre, ties
-  // resolved uniformly at random among the tied candidates. Both halves are
-  // the module's (engine/moveGrammar.ts) — the candidate set because it is a
-  // rule, the draw because the module takes its randomness as an input.
-  private spawnOrientation(
-    type: UnitType,
-    index: number,
-    boardWidth: number,
-    boardHeight: number,
-  ): Orientation {
-    return pickSpawnOrientation(type, index, boardWidth, boardHeight, {
-      next: () => Math.random(),
-    })
-  }
-
   // Max energy for a unit type: per-type config with a universal default of
   // 100. An absent type means "snake".
   private maxEnergyFor(type: UnitType | undefined): number {
@@ -449,7 +427,6 @@ export class TeamSnekProcessor {
       alivePlayers,
       playerEnergy,
     } = currentTurn
-      const { boardWidth, boardHeight } = this.gameSetup
 
       // Deep copy playerPieces and other mutable objects
       const newSnakes: { [playerID: string]: number[] } = {}
@@ -470,8 +447,6 @@ export class TeamSnekProcessor {
     })
 
     return {
-      boardWidth,
-      boardHeight,
       newSnakes,
       newFood: [...food],
       newPlayerEnergy: { ...playerEnergy },
@@ -568,7 +543,7 @@ export class TeamSnekProcessor {
     } else {
       delete newTurn.severedCells
     }
-    if (this.hasPieceUnits()) {
+    if (this.pieceGame) {
       newTurn.unitTypes = gameState.unitTypes
       newTurn.paths = this.wirePaths(gameState)
     } else {
@@ -599,39 +574,5 @@ export class TeamSnekProcessor {
       paths[playerID] = cells
     })
     return paths
-  }
-
-
-  // Method for testing/visualization
-  visualizeBoard(turn: Turn): string {
-    const { boardWidth, boardHeight } = this.gameSetup
-    const board: string[][] = Array(boardHeight).fill(null).map(() => Array(boardWidth).fill("."))
-    
-    // Add walls
-    const walls = this.placement.walls
-    walls.forEach(pos => {
-      const x = pos % boardWidth
-      const y = Math.floor(pos / boardWidth)
-      board[y][x] = "#"
-    })
-    
-    // Add food
-    turn.food.forEach(pos => {
-      const x = pos % boardWidth
-      const y = Math.floor(pos / boardWidth)
-      board[y][x] = "F"
-    })
-    
-    // Add snakes
-    Object.entries(turn.playerPieces).forEach(([playerID, snake]) => {
-      const playerNumber = this.gameSetup.gamePlayers.findIndex(p => p.id === playerID) + 1
-      snake.forEach(pos => {
-        const x = pos % boardWidth
-        const y = Math.floor(pos / boardWidth)
-        board[y][x] = playerNumber.toString()
-      })
-    })
-    
-    return board.map(row => row.join(" ")).join("\n")
   }
 }

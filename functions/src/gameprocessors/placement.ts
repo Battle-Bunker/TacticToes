@@ -78,7 +78,7 @@ export class BoardPlacement {
 
     const fertileTiles = presets.fertileTiles && presets.fertileTiles.length > 0
       ? presets.fertileTiles
-      : this.generateFertileTiles(this.walls, hazards, playerPieces)
+      : this.generateFertileTiles(hazards)
 
     const food = presets.food && presets.food.length > 0
       ? presets.food
@@ -107,11 +107,7 @@ export class BoardPlacement {
     return { playerPieces, teamClusterFallback }
   }
 
-  private generateFertileTiles(
-    walls: number[],
-    hazards: number[],
-    _playerPieces: { [playerID: string]: number[] },
-  ): number[] {
+  private generateFertileTiles(hazards: number[]): number[] {
     const { boardWidth, boardHeight } = this.gameSetup
     if (!this.gameSetup.fertileGroundEnabled) return []
     const density = Math.max(0, Math.min(100, this.gameSetup.fertileGroundDensity ?? 30))
@@ -119,7 +115,7 @@ export class BoardPlacement {
 
     const clustering = Math.max(1, Math.min(20, this.gameSetup.fertileGroundClustering ?? 10))
 
-    const wallSet = new Set(walls)
+    const wallSet = new Set(this.walls)
     const hazardSet = new Set(hazards)
 
     const seedX = Math.random() * 1000
@@ -337,16 +333,7 @@ export class BoardPlacement {
     )
     if (targetCount <= 0) return []
 
-    // Shuffle candidate positions for randomness
-    for (let i = candidatePositions.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1))
-      ;[candidatePositions[i], candidatePositions[j]] = [
-        candidatePositions[j],
-        candidatePositions[i],
-      ]
-    }
-
-    const initialHazards = candidatePositions.slice(0, targetCount)
+    const initialHazards = this.shuffleArray(candidatePositions).slice(0, targetCount)
     const safeHazards = this.ensureInitialSafeMoves(
       initialHazards,
       playerPieces,
@@ -357,6 +344,15 @@ export class BoardPlacement {
     )
   }
 
+  // Every cell any placed unit occupies, folded from its whole body/stack.
+  private occupancyOf(playerPieces: { [playerID: string]: number[] }): Set<number> {
+    const occupied = new Set<number>()
+    Object.values(playerPieces).forEach((snake) => {
+      snake.forEach((pos) => occupied.add(pos))
+    })
+    return occupied
+  }
+
   // Ensure each player has at least one safe adjacent move on turn 0
   private ensureInitialSafeMoves(
     hazards: number[],
@@ -364,11 +360,7 @@ export class BoardPlacement {
   ): number[] {
     const hazardSet = new Set(hazards)
     const walls = new Set(this.walls)
-
-    const occupied = new Set<number>()
-    Object.values(playerPieces).forEach((snake) => {
-      snake.forEach((pos) => occupied.add(pos))
-    })
+    const occupied = this.occupancyOf(playerPieces)
 
     Object.values(playerPieces).forEach((snake) => {
       const head = snake[0]
@@ -432,10 +424,7 @@ export class BoardPlacement {
     const { boardWidth, boardHeight } = this.gameSetup
     const hazardSet = new Set(hazards)
     const walls = new Set(this.walls)
-    const occupied = new Set<number>()
-    Object.values(playerPieces).forEach((snake) => {
-      snake.forEach((pos) => occupied.add(pos))
-    })
+    const occupied = this.occupancyOf(playerPieces)
 
     const isConnected = (hazardsToCheck: Set<number>): boolean => {
       const visited = new Set<number>()

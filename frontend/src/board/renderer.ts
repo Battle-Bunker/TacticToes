@@ -2,6 +2,7 @@
 // board, drawn in CSS pixels onto a bitmap backed at the display's own
 // resolution.
 
+import { UnitType } from "@shared/types/Game"
 import { UNCERTAIN_RING_COLOR, clashRings } from "./clashes"
 import { isPieceType } from "../utils/unitTypes"
 
@@ -15,14 +16,7 @@ export interface Orientation {
   dy: number
 }
 
-export type UnitIconKey =
-  | "snake"
-  | "pawn"
-  | "knight"
-  | "bishop"
-  | "rook"
-  | "queen"
-  | "king"
+export type UnitIconKey = UnitType
 
 /** One unit on the board. A chess piece is a single-cell body carrying its weight. */
 export interface BoardUnit {

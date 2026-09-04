@@ -15,7 +15,6 @@ import {
   RosterUnit,
   SeverMark,
   UncertaintyMark,
-  UnitIconKey,
 } from "./renderer"
 
 const NEUTRAL_COLOR = "#888888"
@@ -192,7 +191,7 @@ export const turnToBoard = (
       teamID: gamePlayer.teamID,
       teamName: teamNames.get(gamePlayer.teamID) ?? gamePlayer.teamID,
       color: teamColors.get(gamePlayer.teamID) ?? NEUTRAL_COLOR,
-      unitType: unitType as UnitIconKey,
+      unitType,
     }
     // A unit the board has dropped is dead. It stays in the roster at its
     // last-known state so a scoreboard can keep listing it — struck through,

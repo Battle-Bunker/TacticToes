@@ -44,8 +44,8 @@
 import { join } from "path"
 import { Timestamp } from "firebase-admin/firestore"
 import { ActiveEffect, StartedGameSetup, Team, Turn } from "@shared/types/Game"
-import { expandTeams } from "../utils/expandTeams"
 import { check, mv, runReplay as runReplayScript, serialise } from "./goldenReplay"
+import { mkSetup as sharedMkSetup } from "./playTurn"
 
 // ── the board ──────────────────────────────────────────────────────────────
 
@@ -108,22 +108,17 @@ const teams: Team[] = [
   { id: "t2", name: "Team Two", color: "#00ff00" },
 ]
 
-const mkSetup = (overrides: Partial<StartedGameSetup> = {}): StartedGameSetup => ({
-  teams,
-  snakesPerTeam: 2,
-  gamePlayers: expandTeams(teams, 2),
-  boardWidth: W,
-  boardHeight: W,
-  maxTurnTime: 5,
-  startRequested: false,
-  started: true,
-  timeCreated: Timestamp.fromMillis(0),
-  // Both spawners off: the replay's food and potions are the ones on the wire.
-  foodSpawnRate: 0,
-  invulnerabilityPotionEnabled: true,
-  invulnerabilityPotionSpawnRate: 0,
-  ...overrides,
-})
+const mkSetup = (overrides: Partial<StartedGameSetup> = {}): StartedGameSetup =>
+  sharedMkSetup({
+    teams,
+    snakesPerTeam: 2,
+    boardWidth: W,
+    boardHeight: W,
+    // Both spawners off: the replay's food and potions are the ones on the wire.
+    invulnerabilityPotionEnabled: true,
+    invulnerabilityPotionSpawnRate: 0,
+    ...overrides,
+  })
 
 /**
  * The effect schedule the replay starts on. Between them these reach every

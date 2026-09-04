@@ -1,7 +1,6 @@
 import { Timestamp } from "firebase-admin/firestore"
 import {
   GamePlayer,
-  GameState,
   Move,
   StartedGameSetup,
   Team,
@@ -11,10 +10,18 @@ import {
 import { TeamSnekProcessor } from "./TeamSnekProcessor"
 import { spawnOrientationCandidates } from "./engine/moveGrammar"
 import { REASON } from "./engine/turnEngine"
+import {
+  at as curriedAt,
+  gp,
+  mkGameState,
+  mkSetup as sharedMkSetup,
+  mkTurn,
+  mv,
+} from "./playTurn"
 
 // 11x11 board: index = y * 11 + x, perimeter is wall (interior 1..9).
 const W = 11
-const at = (x: number, y: number): number => y * W + x
+const at = curriedAt(W)
 
 const twoTeams: Team[] = [
   { id: "t1", name: "Team One", color: "#ff0000" },
@@ -25,70 +32,8 @@ const mkSetup = (
   teams: Team[],
   gamePlayers: GamePlayer[],
   overrides: Partial<StartedGameSetup> = {}
-): StartedGameSetup => ({
-  teams,
-  snakesPerTeam: 1,
-  gamePlayers,
-  boardWidth: W,
-  boardHeight: W,
-  maxTurnTime: 5,
-  startRequested: false,
-  started: true,
-  timeCreated: Timestamp.fromMillis(0),
-  foodSpawnRate: 0,
-  ...overrides,
-})
-
-const mkTurn = (
-  playerPieces: { [playerID: string]: number[] },
-  overrides: Partial<Turn> = {}
-): Turn => {
-  const ids = Object.keys(playerPieces)
-  return {
-    playerEnergy: Object.fromEntries(ids.map((id) => [id, 100])),
-    startTime: Timestamp.fromMillis(0),
-    endTime: Timestamp.fromMillis(5000),
-    scores: Object.fromEntries(ids.map((id) => [id, playerPieces[id].length])),
-    alivePlayers: ids,
-    food: [],
-    hazards: [],
-    playerPieces,
-    clashes: [],
-    deaths: {},
-    moves: {},
-    winners: [],
-    ...overrides,
-    // Every unit carries an orientation; tests override the units whose orientation
-    // matters.
-    orientation: {
-      ...Object.fromEntries(ids.map((id) => [id, { dx: 1, dy: 0 }])),
-      ...overrides.orientation,
-    },
-  }
-}
-
-const mkGameState = (setup: StartedGameSetup, turn: Turn): GameState => ({
-  setup,
-  turns: [turn],
-  walls: [],
-  timeCreated: Timestamp.fromMillis(0),
-  timeFinished: null,
-})
-
-const mv = (playerID: string, move: number): Move => ({
-  gameID: "game1",
-  moveNumber: 0,
-  playerID,
-  move,
-  timestamp: Timestamp.fromMillis(0),
-})
-
-const gp = (
-  id: string,
-  teamID: string,
-  letter: string,
-  unitType: GamePlayer["unitType"]
-): GamePlayer => ({ id, teamID, letter, unitType })
+): StartedGameSetup =>
+  sharedMkSetup({ teams, gamePlayers, boardWidth: W, boardHeight: W, ...overrides })
 
 const run = (
   gamePlayers: GamePlayer[],
@@ -1023,6 +968,9 @@ describe("unit orientation (Turn.orientation) — every unit in every game", () 
     expect(turn0.orientation.n).toEqual({ dx: -2, dy: -1 })
     expect(turn0.orientation.k).toEqual({ dx: 1, dy: 0 })
     expect(turn0.orientation.s).toEqual({ dx: 0, dy: 1 })
+    // Turn 0's score is the spawn weight: a piece is a single square, a snake
+    // its stacked triple — on a mixed roster, in the same turn.
+    expect(turn0.scores).toEqual({ p: 1, r: 1, b: 1, n: 1, k: 1, s: 3 })
   })
 
   it("spawn: ties on a symmetry axis resolve to one of the tied candidates", () => {

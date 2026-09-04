@@ -34,6 +34,7 @@ import { BoardShape, legalTargets } from "./engine/queries"
 import { ResolveUnit } from "./engine/resolveTurn"
 import { PartialSettleInput, settlePartial } from "./engine/settlePartial"
 import { Settlement, settleTurn } from "./engine/settleTurn"
+import { perimeter } from "./playTurn"
 import { NO_SPAWN } from "./engine/spawn"
 
 const W = 9
@@ -55,16 +56,7 @@ const mulberry32 = (seed: number): (() => number) => {
   }
 }
 
-const perimeter = (): number[] => {
-  const walls: number[] = []
-  for (let y = 0; y < W; y++) {
-    for (let x = 0; x < W; x++) {
-      if (x === 0 || y === 0 || x === W - 1 || y === W - 1) walls.push(y * W + x)
-    }
-  }
-  return walls
-}
-const WALLS = perimeter()
+const WALLS = perimeter(W, W)
 const INTERIOR = (): number[] => {
   const cells: number[] = []
   for (let y = 1; y < W - 1; y++) for (let x = 1; x < W - 1; x++) cells.push(y * W + x)

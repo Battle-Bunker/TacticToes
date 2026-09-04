@@ -11,97 +11,12 @@
 //     rescheduled to expire at the current turn, i.e. at the end of this
 //     applyMoves.
 
-import { Timestamp } from "firebase-admin/firestore"
-import {
-  ActiveEffect,
-  GameState,
-  Move,
-  StartedGameSetup,
-  Team,
-  Turn,
-} from "@shared/types/Game"
-import { expandTeams } from "../utils/expandTeams"
+import { ActiveEffect } from "@shared/types/Game"
 import { TeamSnekProcessor } from "./TeamSnekProcessor"
 import { REASON } from "./engine/turnEngine"
+import { mkGameState, mkSetup, mkTurn, mv, perimeter } from "./playTurn"
 
 // 7x7 board (index = y * 7 + x) unless a test overrides; perimeter is wall.
-
-const teams: Team[] = [
-  { id: "t1", name: "Team One", color: "#ff0000" },
-  { id: "t2", name: "Team Two", color: "#00ff00" },
-]
-
-const mkSetup = (
-  overrides: Partial<StartedGameSetup> = {}
-): StartedGameSetup => ({
-  teams,
-  snakesPerTeam: 1,
-  gamePlayers: expandTeams(teams, overrides.snakesPerTeam ?? 1),
-  boardWidth: 7,
-  boardHeight: 7,
-  maxTurnTime: 5,
-  startRequested: false,
-  started: true,
-  timeCreated: Timestamp.fromMillis(0),
-  foodSpawnRate: 0,
-  ...overrides,
-})
-
-const mkTurn = (
-  playerPieces: { [playerID: string]: number[] },
-  overrides: Partial<Turn> = {}
-): Turn => {
-  const ids = Object.keys(playerPieces)
-  return {
-    playerEnergy: Object.fromEntries(ids.map((id) => [id, 100])),
-    startTime: Timestamp.fromMillis(0),
-    endTime: Timestamp.fromMillis(5000),
-    scores: Object.fromEntries(ids.map((id) => [id, playerPieces[id].length])),
-    alivePlayers: ids,
-    food: [],
-    hazards: [],
-    playerPieces,
-    clashes: [],
-    deaths: {},
-    moves: {},
-    winners: [],
-    // Every unit carries an orientation; irrelevant here (every test stages all
-    // moves) beyond satisfying the Turn shape.
-    orientation: Object.fromEntries(ids.map((id) => [id, { dx: 1, dy: 0 }])),
-    ...overrides,
-  }
-}
-
-// The processor keys effect expiry off gameState.turns.length (the number of
-// the turn being produced), so tests control it via the turns array length.
-const mkGameState = (setup: StartedGameSetup, turns: Turn[]): GameState => ({
-  setup,
-  turns,
-  walls: [],
-  timeCreated: Timestamp.fromMillis(0),
-  timeFinished: null,
-})
-
-const mv = (playerID: string, move: number): Move => ({
-  gameID: "game1",
-  moveNumber: 0,
-  playerID,
-  move,
-  timestamp: Timestamp.fromMillis(0),
-})
-
-const wallCells = (width: number, height: number): Set<number> => {
-  const walls = new Set<number>()
-  for (let x = 0; x < width; x++) {
-    walls.add(x)
-    walls.add((height - 1) * width + x)
-  }
-  for (let y = 0; y < height; y++) {
-    walls.add(y * width)
-    walls.add(y * width + (width - 1))
-  }
-  return walls
-}
 
 describe("invulnerability potion spawning", () => {
   it("spawns exactly one potion per turn at spawn rate 1 when enabled, on a free cell", () => {
@@ -116,7 +31,7 @@ describe("invulnerability potion spawning", () => {
 
     expect(next.invulnerabilityPotions).toHaveLength(1)
     const potion = (next.invulnerabilityPotions ?? [])[0]
-    const walls = wallCells(7, 7)
+    const walls = new Set(perimeter(7, 7))
     expect(walls.has(potion)).toBe(false)
     Object.values(next.playerPieces).forEach((snake) => {
       expect(snake).not.toContain(potion)
