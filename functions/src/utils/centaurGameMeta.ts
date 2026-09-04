@@ -44,6 +44,28 @@ export function writeCentaurMap(
   })
 }
 
+/** The invite doc a centaur discovers one of its games through. */
+const inviteRef = (centaurId: string, gameID: string) =>
+  admin.firestore().doc(`centaurs/${centaurId}/games/${gameID}`)
+
+/**
+ * An invite write that must never block the game — centaurs can also watch
+ * sessions directly, so a failure here is logged against the game it belongs
+ * to and swallowed. One writer, so the three log context keys cannot drift
+ * apart between the create, the delete and the game-start write.
+ */
+const bestEffort = async (
+  label: string,
+  context: { sessionID: string; gameID: string },
+  write: () => Promise<unknown>,
+): Promise<void> => {
+  try {
+    await write()
+  } catch (error) {
+    logger.error(label, { ...context, error })
+  }
+}
+
 /**
  * Which centaurs gained or lost a team between two lobby teams lists. Pure so
  * the invite-sync diff is testable; identity is team.id (== the centaur id).
@@ -74,35 +96,27 @@ export async function syncPendingInvites(
   const { added, removed } = diffInviteCentaurs(beforeTeams, afterTeams)
   if (added.length === 0 && removed.length === 0) return
 
-  const db = admin.firestore()
   await Promise.all([
-    ...added.map(async (centaurId) => {
-      try {
-        await db.doc(`centaurs/${centaurId}/games/${gameID}`).set({
-          sessionID,
-          gameID,
-          status: "pending",
-          createdAt: FieldValue.serverTimestamp(),
-        })
-      } catch (error) {
-        logger.error(`Failed to write pending invite for centaur ${centaurId}`, {
-          sessionID,
-          gameID,
-          error,
-        })
-      }
-    }),
-    ...removed.map(async (centaurId) => {
-      try {
-        await db.doc(`centaurs/${centaurId}/games/${gameID}`).delete()
-      } catch (error) {
-        logger.error(`Failed to delete pending invite for centaur ${centaurId}`, {
-          sessionID,
-          gameID,
-          error,
-        })
-      }
-    }),
+    ...added.map((centaurId) =>
+      bestEffort(
+        `Failed to write pending invite for centaur ${centaurId}`,
+        { sessionID, gameID },
+        () =>
+          inviteRef(centaurId, gameID).set({
+            sessionID,
+            gameID,
+            status: "pending",
+            createdAt: FieldValue.serverTimestamp(),
+          }),
+      ),
+    ),
+    ...removed.map((centaurId) =>
+      bestEffort(
+        `Failed to delete pending invite for centaur ${centaurId}`,
+        { sessionID, gameID },
+        () => inviteRef(centaurId, gameID).delete(),
+      ),
+    ),
   ])
 }
 
@@ -120,25 +134,22 @@ export async function writeCentaurGameInvites(
   const centaurIDs = [...new Set(Object.values(players))]
   if (centaurIDs.length === 0) return
 
-  const db = admin.firestore()
   await Promise.all(
-    centaurIDs.map(async (centaurId) => {
-      try {
-        const snakeIDs = Object.keys(players).filter((pid) => players[pid] === centaurId)
-        await db.doc(`centaurs/${centaurId}/games/${gameID}`).set({
-          sessionID,
-          gameID,
-          snakeIDs,
-          status: "started",
-          createdAt: FieldValue.serverTimestamp(),
-        })
-      } catch (error) {
-        logger.error(`Failed to write game invite for centaur ${centaurId}`, {
-          sessionID,
-          gameID,
-          error,
-        })
-      }
-    })
+    centaurIDs.map((centaurId) =>
+      bestEffort(
+        `Failed to write game invite for centaur ${centaurId}`,
+        { sessionID, gameID },
+        () =>
+          inviteRef(centaurId, gameID).set({
+            sessionID,
+            gameID,
+            snakeIDs: Object.keys(players).filter(
+              (pid) => players[pid] === centaurId,
+            ),
+            status: "started",
+            createdAt: FieldValue.serverTimestamp(),
+          }),
+      ),
+    )
   )
 }
