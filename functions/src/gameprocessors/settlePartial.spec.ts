@@ -1217,6 +1217,81 @@ describe("what an entry says", () => {
   })
 })
 
+// -------------------------------- the schedule a held unit keeps carrying
+//
+// `settlePartial` hands `settleTurn` the units whose moves are KNOWN, so a
+// held unit is absent from that roster and present on the board. The expiry
+// phase used to purge, on any turn where anything expired at all, every
+// effect whose owner was not on the roster — which is every effect a held
+// unit was carrying. The oracle is `settleTurn` over the same board with the
+// held unit's move filled in: whatever it chooses, its own window is still
+// open when the turn closes, and the schedule the next turn starts from has
+// to say so.
+
+describe("a held unit's invulnerability schedule survives the turn", () => {
+  const scheduled = (held: boolean): PartialSettleInput =>
+    bench(
+      [
+        {
+          id: "h",
+          type: "rook",
+          teamID: "A",
+          tier: 1,
+          energy: 50,
+          occupancy: [at(2, 2)],
+          orientation: { dx: 1, dy: 0 },
+          stagedMove: at(2, 2),
+        },
+        {
+          id: "m",
+          type: "rook",
+          teamID: "B",
+          tier: 1,
+          energy: 50,
+          occupancy: [at(6, 6)],
+          orientation: { dx: 0, dy: -1 },
+          stagedMove: at(6, 5),
+        },
+      ],
+      {
+        turn: 7,
+        effects: [
+          // h's window runs past this turn: no world closes it here.
+          { playerID: "h", type: "invulnerability_buff", level: 1, expiryTurn: 9, sourcePlayerID: "h" },
+          // m's lapses on this very turn, which is what makes the phase run.
+          { playerID: "m", type: "invulnerability_buff", level: 1, expiryTurn: 7, sourcePlayerID: "m" },
+        ],
+        held: held ? [{ id: "h", observedTurn: 6 }] : [],
+      },
+    )
+
+  it("keeps it when the unit is held, exactly as the oracle keeps it", () => {
+    const oracle = settleTurn(scheduled(false), NO_SPAWN)
+    const partial = settlePartial(scheduled(true), NO_SPAWN)
+
+    // The oracle: m's buff has lapsed and given its level back, h's stands.
+    expect(oracle.effects).toEqual([
+      { playerID: "h", type: "invulnerability_buff", level: 1, expiryTurn: 9, sourcePlayerID: "h" },
+    ])
+    expect(oracle.tiers).toEqual({ h: 1, m: 0 })
+
+    // And the partial settlement says the same about h, whose move it never saw.
+    expect(partial.effects).toEqual(oracle.effects)
+    expect(partial.tiers.h).toBe(1)
+  })
+
+  it("keeps it in every world the held unit could have chosen", () => {
+    const input = scheduled(true)
+    const partial = settlePartial(input, NO_SPAWN)
+    optionsFor(input, "h").forEach((option) => {
+      const truth = concrete(input, new Map([["h", option]]))
+      expect(partial.effects.filter((e) => e.playerID === "h")).toEqual(
+        truth.effects.filter((e) => e.playerID === "h"),
+      )
+    })
+  })
+})
+
 // ------------------------------------------- the sever that is not survivable
 //
 // The composition the trail branch of `entangle` used to miss, on the
