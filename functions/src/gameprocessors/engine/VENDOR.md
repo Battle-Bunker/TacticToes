@@ -208,8 +208,37 @@ const settled = settlePartial({
 settled.ledger   // every (cell, subStep, unitId, heldId, via, kind) a world could differ at
 settled.fates    // per unit: "alive" and "dead" are proofs, "contingent" is a work list
 settled.claims   // where each held unit could be, and how strong — hoistable, see below
-// ...and every field settleTurn returns, for the units that WERE modelled.
+settled.outcome  // the ENDING, BRACKETED — an OutcomeBracket, not an Outcome
+// ...and every other field settleTurn returns, for the units that WERE modelled.
 ```
+
+**`outcome` is a BRACKET here, and the type says so.** `settleTurn` returns one
+`Outcome | null` because it settles one board. Partial settlement has no one
+board: a held unit could be standing or gone, and standing at a range of
+weights, and adjudication reads exactly those two things. Standing each held
+unit on its observed square at its observed weight and adjudicating once
+answers for ONE world and hands the answer over as the turn's — null where
+every world ends the game, and a winner no world produces. So the field is an
+`OutcomeBracket`:
+
+```ts
+settled.outcome.certain        // Outcome | null — the adjudication when every world
+                               //   produces exactly this one, `kind: "continues"`
+                               //   included; null means the worlds could disagree
+settled.outcome.possibleKinds  // every EndKind some world could produce, never empty
+settled.outcome.possibleWinners// teams winning in at least one world — a superset
+settled.outcome.certainWinners // teams winning in EVERY world — a subset
+```
+
+`possibleKinds.length === 1` is a proof about the kind of ending even when the
+weights are open, and `["continues"]` is the one a search wants most: the line
+does not stop here whatever the held units chose. It is derived from the claims
+and the ledger — `couldBeat: false` is the ledger's survival proof, and
+`certainlyGone`/`deathPossible`/`weightMin`/`weightMax` are the claims' — and
+never by settling a second board. The relaxation is rectangular: standing and
+weight are bracketed per unit and summed per team, so a world the bracket
+admits may be one no assignment produces. Never optimistic, only imprecise.
+With nothing held, `certain` is always set and is `settleTurn`'s own verdict.
 
 **`heldId` is always a HELD unit, and `via` is how the difference got there.**
 Contingency spreads: a modelled unit whose own outcome is unknown is, from its
@@ -283,9 +312,11 @@ that walks nowhere at all.
 
 **An empty ledger is a proof; a non-empty one is a work list.** With no
 entries, every modelled unit's disposition — where it went, whether it lived,
-its energy, its weight, what it ate, and the game's `outcome` — is what it is
-in every world the held units could have chosen. With entries, the entries name
-every place a world could differ and nothing else does. That property is
+its energy, its weight, what it ate — is what it is in every world the held
+units could have chosen. With entries, the entries name every place a world
+could differ and nothing else does. The game's ENDING is the exception, and it
+is why `outcome` is a bracket: a held unit nobody ran into leaves no entry and
+is still on the board being weighed. That property is
 established by ENUMERATION in `../settlePartial.spec.ts`: random boards with
 one to three held units, every legal concrete assignment settled with the
 ordinary `settleTurn`, and the two compared coordinate for coordinate. With no

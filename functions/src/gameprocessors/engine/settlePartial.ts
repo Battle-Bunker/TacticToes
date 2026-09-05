@@ -1,5 +1,5 @@
 import { ActiveEffect, Clash, ClashKind } from "@shared/types/Game"
-import { BoardView, adjudicate } from "./adjudicate"
+import { BoardView, EndKind, Outcome, adjudicate } from "./adjudicate"
 import { Claim, PartialSettleInput, computeClaims } from "./claims"
 import { UnitAction, leavesTrail, traversesEdges } from "./moveGrammar"
 import { BoardShape, stagedAction } from "./queries"
@@ -44,9 +44,14 @@ import { outranks } from "./turnEngine"
  * **An empty ledger is a PROOF; a non-empty one is a work list.** With no
  * entries, every modelled unit's disposition — where it went, whether it
  * lived, its energy, its weight, what it ate — is what it is in every world
- * the held units could have chosen, and so is the game's `outcome`. With
- * entries, the entries name every place a world could differ and nothing
- * else does.
+ * the held units could have chosen. With entries, the entries name every place
+ * a world could differ and nothing else does.
+ *
+ * The one thing an empty ledger does NOT settle is the game's ending: a held
+ * unit nobody ran into is still on the board, still weighs what its claim says
+ * it could weigh, and adjudication reads exactly that. So `outcome` is an
+ * `OutcomeBracket` here rather than the single adjudication `settleTurn`
+ * returns — see the type.
  *
  * The held units' OWN positions are not in the ledger. They are inherently
  * unknown, and what is known about them is the `Claim`: its intervals bracket
@@ -164,7 +169,65 @@ export interface Divergence {
 /** `dead` and `alive` are proofs; `contingent` is a work list. */
 export type Fate = "alive" | "dead" | "contingent"
 
-export interface PartialSettlement extends Settlement {
+/**
+ * THE END OF THE GAME, BRACKETED — never one world's ending picked out.
+ *
+ * `settleTurn` returns one `Outcome | null`, because it settles one board.
+ * Partial settlement does not have one board: the held units could be
+ * standing, could be gone, and could be standing at a range of weights, and
+ * every one of those choices is read by the adjudication rule. Standing each
+ * held unit on its observed square at its observed weight and adjudicating
+ * once answers the question for ONE world and calls the answer the turn's —
+ * which is null where every world ends the game and a winner no world
+ * produces, and neither error is visible to a caller holding the answer.
+ *
+ * So the ending is a bracket, in the same shape as everything else this mode
+ * publishes: what is proved, and what is admitted. It is derived from the
+ * `Claim` intervals and the ledger — `couldBeat` is the survival proof, the
+ * claim's `deathPossible`/`certainlyGone` and `weightMin`/`weightMax` are the
+ * held units' — and never by settling a second board.
+ *
+ * The relaxation is rectangular: each unit's standing and weight are bracketed
+ * independently and the team totals summed, so a world the bracket admits may
+ * be one no assignment can actually produce. Never optimistic, only imprecise
+ * — the same trade the ledger makes.
+ */
+export interface OutcomeBracket {
+  /**
+   * The adjudication itself, when every world produces exactly this one —
+   * `kind: "continues"` included, so a proof that the game GOES ON is a proof
+   * here and not a null. Null means the worlds could disagree about something
+   * the outcome carries, `weightByTeam` included: two worlds that both
+   * continue with different weight left on the board are a null here and a
+   * lone `"continues"` in `possibleKinds`.
+   *
+   * With nothing held this is always set, and it is `settleTurn`'s own verdict
+   * — the reduction, kept.
+   */
+  readonly certain: Outcome | null
+  /**
+   * Every ending some world could produce, in the order `adjudicate` tests its
+   * branches: `all-eliminated`, `last-team`, then `turn-limit` or `continues`.
+   * Never empty. A single entry is a proof about the KIND of ending even when
+   * `certain` is null, and `["continues"]` is the proof a search wants most:
+   * the line does not stop here whatever the held units chose.
+   */
+  readonly possibleKinds: ReadonlyArray<EndKind>
+  /** Teams that win in at least one world — a superset. Empty when no world
+   *  ends the game. Team order, as `adjudicate` reports winners in. */
+  readonly possibleWinners: ReadonlyArray<string>
+  /** Teams that win in EVERY world — a subset, and empty as soon as one world
+   *  leaves the game running. Team order. */
+  readonly certainWinners: ReadonlyArray<string>
+}
+
+export interface PartialSettlement extends Omit<Settlement, "outcome"> {
+  /**
+   * The ending, bracketed over the worlds. NOT `Settlement["outcome"]`: a
+   * single adjudication would be a guess here, and the type says so rather
+   * than leaving a caller to find out.
+   */
+  readonly outcome: OutcomeBracket
   /** Every point at which a concrete world could differ from this timeline. */
   readonly ledger: ReadonlyArray<Divergence>
   /** Per unit, held ones included. The ledger names why anything is contingent. */
@@ -466,7 +529,7 @@ export const settlePartial = (
   return {
     ...settlement,
     tiers,
-    outcome: outcomeOf(input, settlement, settledClaims, byId),
+    outcome: bracketOutcome(input, settlement, settledClaims, fates, ledger),
     ledger,
     fates,
     claims: settledClaims,
@@ -1383,44 +1446,260 @@ const derivedDivergences = (
   })
 }
 
+/** The board nobody is left standing on. */
+const NOBODY: BoardView = { alive: [], pieces: {} }
+
 /**
- * Whether the game ended, on the board as it now stands — held units
- * included. `settleTurn` adjudicated a board they were absent from, and a
- * team whose only unit nobody modelled is not an eliminated team. The rule is
- * `adjudicate`'s and is asked again rather than restated; a held unit stands
- * at the weight it was observed with, which its claim's interval brackets.
+ * What one unit could still be worth to its team when the turn has closed —
+ * the only two things adjudication reads off a unit, bracketed.
  */
-const outcomeOf = (
+interface Stake {
+  /** It is standing in EVERY world. */
+  readonly standsAlways: boolean
+  /** It is standing in at least one. */
+  readonly standsEver: boolean
+  /** The least weight it carries in a world in which it stands. */
+  readonly weightMin: number
+  /** The most it could carry in any world; 0 when it never stands. */
+  readonly weightMax: number
+}
+
+/**
+ * The most meals one unit can take in one turn.
+ *
+ * Food is eaten at the cell a unit ENDS on and the spawner never stacks two
+ * items on one cell, so the answer is one — but a PRESET board may double a
+ * cell up, and the food phase settles each of those meals in turn. Reading it
+ * off the board rather than asserting the one keeps the ceiling sound on the
+ * boards where it is not one, at the cost of a pass over the food.
+ */
+const mealCeiling = (food: ReadonlyArray<number>): number => {
+  const count = new Map<number, number>()
+  let most = 0
+  food.forEach((cell) => {
+    const n = (count.get(cell) ?? 0) + 1
+    count.set(cell, n)
+    if (n > most) most = n
+  })
+  return most
+}
+
+/**
+ * Standing and weight per unit, over every world.
+ *
+ * Three sources, and not one of them settles a second board:
+ *
+ *   · A HELD unit answers with its claim. `certainlyGone` is gone in every
+ *     world, `!deathPossible` is standing in every world, and
+ *     `weightMin`/`weightMax` is the interval its end-of-turn weight is in —
+ *     the same interval the enumeration already checks the truth against.
+ *   · A modelled unit with a `fate` answers with it: "alive" and "dead" are
+ *     proofs, and an unnamed unit's whole disposition — its weight included —
+ *     is what it is in every world, so its weight is a scalar.
+ *   · A CONTINGENT modelled unit is the only one that needs an argument.
+ *     `couldBeat: false` is the ledger's survival proof — the contact is real
+ *     but this unit wins it in every world — so a unit the timeline leaves
+ *     standing that no entry admits could lose is standing in every world.
+ *     Its weight is not proved by that: a sever it survives is a weight loss,
+ *     and a promotion collapses the stack. So the floor is 1, the weight of
+ *     anything on the board at all, and the ceiling is what it started the
+ *     turn with plus the meals a turn can hold.
+ */
+const stakesOf = (
   input: PartialSettleInput,
   settlement: Settlement,
   claims: ReadonlyArray<Claim>,
-  byId: Map<string, ResolveUnit>,
-): Settlement["outcome"] => {
-  const held = new Map<string, boolean>()
-  claims.forEach((claim) => held.set(claim.id, claim.certainlyGone))
-  const alive: string[] = []
-  const pieces: { [unitID: string]: ReadonlyArray<number> } = {}
+  fates: Readonly<Record<string, Fate>>,
+  ledger: ReadonlyArray<Divergence>,
+): Map<string, Stake> => {
+  const beatable = new Set<string>()
+  ledger.forEach((entry) => {
+    if (entry.couldBeat) beatable.add(entry.unitId)
+  })
+  const meals = mealCeiling(input.food)
+  const claimById = new Map(claims.map((claim) => [claim.id, claim]))
+  const gone: Stake = { standsAlways: false, standsEver: false, weightMin: 0, weightMax: 0 }
+
+  const stakes = new Map<string, Stake>()
   input.units.forEach((unit) => {
-    const gone = held.get(unit.id)
-    if (gone !== undefined) {
-      if (gone) return
-      alive.push(unit.id)
-      pieces[unit.id] = (byId.get(unit.id) as ResolveUnit).occupancy
+    const claim = claimById.get(unit.id)
+    if (claim) {
+      stakes.set(
+        unit.id,
+        claim.certainlyGone
+          ? gone
+          : {
+              standsAlways: !claim.deathPossible,
+              standsEver: true,
+              weightMin: claim.weightMin,
+              weightMax: claim.weightMax,
+            },
+      )
       return
     }
     const settled = settlement.board[unit.id]
-    if (!settled) return
+    const fate = fates[unit.id]
+    if (fate === "alive" && settled) {
+      const weight = settled.occupancy.length
+      stakes.set(unit.id, {
+        standsAlways: true,
+        standsEver: true,
+        weightMin: weight,
+        weightMax: weight,
+      })
+      return
+    }
+    if (fate === "dead") {
+      stakes.set(unit.id, gone)
+      return
+    }
+    stakes.set(unit.id, {
+      standsAlways: settled !== undefined && !beatable.has(unit.id),
+      standsEver: true,
+      weightMin: 1,
+      weightMax: unit.occupancy.length + meals,
+    })
+  })
+  return stakes
+}
+
+/**
+ * The one adjudication every world produces, or null when they could differ.
+ *
+ * Sufficient, and deliberately not more: when every unit's standing and weight
+ * are scalars, every world hands `adjudicate` the same board view — it reads
+ * `alive` and `pieces[id].length` and nothing else — so the verdict is the
+ * board's own rather than a bracket's summary of it. A held unit's CELLS stay
+ * unknown, and stay unread.
+ */
+const certainOutcome = (
+  input: PartialSettleInput,
+  settlement: Settlement,
+  claims: ReadonlyArray<Claim>,
+  stakes: Map<string, Stake>,
+): Outcome | null => {
+  const heldIds = new Set(claims.map((claim) => claim.id))
+  const alive: string[] = []
+  const pieces: { [unitID: string]: ReadonlyArray<number> } = {}
+  for (const unit of input.units) {
+    const stake = stakes.get(unit.id) as Stake
+    if (stake.standsEver !== stake.standsAlways) return null
+    if (!stake.standsEver) continue
+    if (stake.weightMin !== stake.weightMax) return null
+    const cells = heldIds.has(unit.id) ? unit.occupancy : settlement.board[unit.id]?.occupancy
+    if (!cells || cells.length !== stake.weightMin) return null
     alive.push(unit.id)
-    pieces[unit.id] = settled.occupancy
+    pieces[unit.id] = cells
+  }
+  return adjudicate({ alive, pieces }, input.previous, input.teamOf, input.turn, input.maxTurns)
+}
+
+/**
+ * The ending, bracketed over the worlds the held units could have chosen.
+ *
+ * `adjudicate` branches on ONE number that a world can move — how many teams
+ * are left standing — and, in one branch, on the weights. So the bracket is
+ * built by asking the rule's own question of each reachable count:
+ *
+ *   · nobody standing → the PREVIOUS committed board decides, and that board
+ *     is the same in every world, so the whole outcome is exact;
+ *   · one team standing → it wins whatever the count says, and the teams that
+ *     could be that one are the teams that could be standing while no OTHER
+ *     team is standing in every world;
+ *   · two or more → the turn limit decides it, on weights that are themselves
+ *     intervals, or nothing decides it and the game continues.
+ *
+ * The counts are bracketed by the teams: one with a unit standing in every
+ * world is standing in every world, one with no unit that could stand is
+ * standing in none, and every count between the two totals is admitted. The
+ * winners of each reachable branch are unioned for `possibleWinners` and
+ * intersected for `certainWinners` — a team wins in every world only if it
+ * wins in every branch a world could take.
+ */
+const bracketOutcome = (
+  input: PartialSettleInput,
+  settlement: Settlement,
+  claims: ReadonlyArray<Claim>,
+  fates: Readonly<Record<string, Fate>>,
+  ledger: ReadonlyArray<Divergence>,
+): OutcomeBracket => {
+  const stakes = stakesOf(input, settlement, claims, fates, ledger)
+
+  // Teams in `weighTeams`' own order — the order their first unit appears in
+  // `teamOf`, which is the order `adjudicate` reports tied winners in. Every
+  // CONFIGURED team, so a team with nothing left is a zero rather than a gap.
+  const order: string[] = []
+  const low = new Map<string, number>()
+  const high = new Map<string, number>()
+  const always = new Set<string>()
+  const ever = new Set<string>()
+  Object.keys(input.teamOf).forEach((unitID) => {
+    const teamID = input.teamOf[unitID]
+    if (!teamID) return
+    if (!low.has(teamID)) {
+      order.push(teamID)
+      low.set(teamID, 0)
+      high.set(teamID, 0)
+    }
+    const stake = stakes.get(unitID)
+    if (!stake) return
+    if (stake.standsAlways) {
+      low.set(teamID, (low.get(teamID) as number) + stake.weightMin)
+      always.add(teamID)
+    }
+    high.set(teamID, (high.get(teamID) as number) + stake.weightMax)
+    if (stake.standsEver) ever.add(teamID)
   })
 
-  const board: BoardView = { alive, pieces }
-  const adjudicated = adjudicate(
-    board,
-    input.previous,
-    input.teamOf,
-    input.turn,
-    input.maxTurns,
-  )
-  return adjudicated.kind === "continues" ? null : adjudicated
+  const certainTeams = order.filter((teamID) => always.has(teamID))
+  const possibleTeams = order.filter((teamID) => ever.has(teamID))
+  const kinds: EndKind[] = []
+  const winners = new Set<string>()
+  // One entry per branch a world could take; a team wins in every world only
+  // if every one of them names it.
+  const perBranch: ReadonlyArray<string>[] = []
+
+  if (certainTeams.length === 0) {
+    const wipe = adjudicate(NOBODY, input.previous, input.teamOf, input.turn, input.maxTurns)
+    kinds.push(wipe.kind)
+    wipe.winners.forEach((teamID) => winners.add(teamID))
+    perBranch.push(wipe.winners)
+  }
+
+  const sole =
+    certainTeams.length === 0
+      ? possibleTeams
+      : certainTeams.length === 1
+        ? [certainTeams[0]]
+        : []
+  if (sole.length > 0) {
+    kinds.push("last-team")
+    sole.forEach((teamID) => winners.add(teamID))
+    perBranch.push(sole.length === 1 ? sole : [])
+  }
+
+  if (possibleTeams.length >= 2) {
+    if (input.maxTurns !== null && input.turn >= input.maxTurns) {
+      kinds.push("turn-limit")
+      const rival = (side: Map<string, number>, teamID: string): number =>
+        order.reduce(
+          (most, other) => (other === teamID ? most : Math.max(most, side.get(other) as number)),
+          0,
+        )
+      order.forEach((teamID) => {
+        if ((high.get(teamID) as number) >= rival(low, teamID)) winners.add(teamID)
+      })
+      perBranch.push(order.filter((teamID) => (low.get(teamID) as number) >= rival(high, teamID)))
+    } else {
+      kinds.push("continues")
+      perBranch.push([])
+    }
+  }
+
+  return {
+    certain: certainOutcome(input, settlement, claims, stakes),
+    possibleKinds: kinds,
+    possibleWinners: order.filter((teamID) => winners.has(teamID)),
+    certainWinners: order.filter((teamID) => perBranch.every((won) => won.includes(teamID))),
+  }
 }
