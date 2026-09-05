@@ -293,6 +293,24 @@ run. The verdict is written under the finding, with the test that carries it.
    enforces distinctness. **Pre-existing** and byte-identical to `develop`;
    noted because the comment claims a spacing guarantee it does not provide.
 
+   **NOT A DEFECT.** The vacuity is real and it is provable rather than
+   merely measured: on two cells with `(x + y)` even, `dx + dy` is even, so
+   `|dx| + |dy|` is even; distinct makes it non-zero; an even non-zero number
+   is at least 2. Checked exhaustively as well — every pair of even-parity
+   interior cells on the square boards 5..21, 70,046 pairs, minimum Manhattan
+   distance 2.
+
+   But the comments do not claim otherwise, which is the half of the finding
+   that does not survive reading them. `getSpawnCells` says the parity is
+   there "so any two spawns sit an even Manhattan distance apart" — which is
+   exactly what parity gives and all it gives — and the call site says "the
+   minimum distance ALSO keeps spawns distinct, since a cell is zero away
+   from itself", which names distinctness as the work it does. Nothing in
+   `placement.ts` promises spacing beyond that. The constraint is a
+   `minDistance` parameter written to be raised, and raising it is the only
+   change that would make it do anything; that is a game-design knob, not a
+   defect. Left alone.
+
 7. **My `settleTurn` fix must be vendored.** `Chris-Centaur` carries a copy of
    the engine at `src/engine-vendor/`. Fix #1 above is inside the vendored
    directory, so the bot's copy needs re-vendoring or it keeps the defect.
