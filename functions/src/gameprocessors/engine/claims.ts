@@ -264,6 +264,21 @@ interface Step {
   readonly target: number
 }
 
+/**
+ * The flag arrays a dilation runs on, allocated once for the whole call.
+ *
+ * Every set the dilation keeps is a set of board cells or of dilation states,
+ * both of which are small dense integers, so each is a flag per index rather
+ * than a hash — and each is cleared and reused by the next held unit instead
+ * of allocated again. `seen` is the reach under construction, `front` the head
+ * front of one horizon, `mark` the frontier's membership.
+ */
+interface Scratch {
+  readonly seen: Uint8Array
+  readonly front: Uint8Array
+  readonly mark: Uint8Array
+}
+
 /** A step that walks nowhere — a hold, or a pawn's turn — shares one path. */
 const EMPTY_PATH: ReadonlyArray<number> = []
 
@@ -271,17 +286,17 @@ const EMPTY_PATH: ReadonlyArray<number> = []
 const allStepsFrom = (type: UnitType, cell: number, ori: number, ground: Ground): Step[] => {
   const unit: GrammarUnit = { type, occupancy: [cell], orientation: ORTHOGONALS[ori] }
   const steps: Step[] = []
-  legalActions(unit, ground.shape, ground.pawnTargets).forEach(({ target, action }) => {
+  const legal = legalActions(unit, ground.shape, ground.pawnTargets)
+  for (let i = 0; i < legal.length; i++) {
+    const { target, action } = legal[i]
     if (action.kind === "move") {
       steps.push({ to: action.path[action.path.length - 1], path: action.path, ori, target })
-      return
-    }
-    if (action.kind === "rotate") {
+    } else if (action.kind === "rotate") {
       steps.push({ to: cell, path: EMPTY_PATH, ori: oriIndex(action.orientation), target })
-      return
+    } else {
+      steps.push({ to: cell, path: EMPTY_PATH, ori, target })
     }
-    steps.push({ to: cell, path: EMPTY_PATH, ori, target })
-  })
+  }
   return steps
 }
 
@@ -376,12 +391,18 @@ export const computeClaims = (input: PartialSettleInput): ReadonlyArray<Claim> =
   const subSteps = subStepsOf(input, heldIds, real)
   const wallSet = new Set(input.walls)
   const byId = new Map(input.units.map((u) => [u.id, u]))
+  const cells = input.boardWidth * input.boardHeight
+  const scratch: Scratch = {
+    seen: new Uint8Array(cells),
+    front: new Uint8Array(cells),
+    mark: new Uint8Array(cells * 4),
+  }
 
   const reaches: Reach[] = []
   input.held.forEach((held) => {
     const record = byId.get(held.id)
     if (!record) return
-    reaches.push(reachOf(held, record, input, real, permissive, subSteps, wallSet))
+    reaches.push(reachOf(held, record, input, real, permissive, subSteps, wallSet, scratch))
   })
 
   // The danger pass. A claim can be killed by terrain it chose, by a modelled
@@ -457,6 +478,7 @@ const reachOf = (
   permissive: Ground,
   subSteps: number,
   wallSet: Set<number>,
+  scratch: Scratch,
 ): Reach => {
   const span = Math.max(1, input.turn - held.observedTurn)
   const kinds: UnitType[] = [record.type]
@@ -487,39 +509,47 @@ const reachOf = (
     }
   }
 
-  // Every cell set below is a set of BOARD CELLS, so it is a flag per cell
-  // rather than a hash: `seen` is `everHead` under construction, and `scratch`
-  // is the head front of one turn. Read out in ascending cell order, a flag
-  // array yields the sorted, de-duplicated array these sets are wanted as —
-  // the `sorted` call that used to build each of them was a Set, an Array.from
-  // and a comparison sort per horizon per held unit.
+  // Every set below is a set of BOARD CELLS or of dilation states, so it is a
+  // flag per index rather than a hash. Read out in ascending cell order, a
+  // flag array yields the sorted, de-duplicated array these sets are wanted as
+  // — the `sorted` call that used to build each of them was a Set, an
+  // Array.from and a comparison sort per horizon per held unit. The arrays
+  // belong to the CALL, not to this unit: each is cleared as it is drained.
   const cellCount = real.shape.boardWidth * real.shape.boardHeight
-  const seen = new Uint8Array(cellCount)
-  const scratch = new Uint8Array(cellCount)
+  const { seen, front, mark } = scratch
+  seen.fill(0)
 
   // Dilation. Each kind it could be runs its own track and the reach is the
   // union: promotion is a rule, and a queen's grammar is not a pawn's.
-  let states = new Set<number>([keyOf(startCell, startOri)])
+  let states: number[] = [keyOf(startCell, startOri)]
   const turnHeads: number[][] = [[startCell]]
   seen[startCell] = 1
 
   for (let turn = 1; turn < span; turn++) {
-    const next = new Set<number>()
+    const next: number[] = []
     const board = turn === 1 ? real : permissive
     const options = turn === 1 ? held.options : undefined
-    for (const key of states) {
+    for (let s = 0; s < states.length; s++) {
+      const key = states[s]
       const cell = key >> 2
       const ori = key & 3
-      for (const type of kinds) {
-        for (const step of stepsFrom(type, cell, ori, board, options)) {
-          next.add(keyOf(step.to, step.ori))
+      for (let t = 0; t < kinds.length; t++) {
+        const steps = stepsFrom(kinds[t], cell, ori, board, options)
+        for (let i = 0; i < steps.length; i++) {
+          const step = steps[i]
+          const to = keyOf(step.to, step.ori)
+          if (mark[to] === 0) {
+            mark[to] = 1
+            next.push(to)
+          }
           const path = step.path
-          for (let i = 0; i < path.length; i++) seen[path[i]] = 1
+          for (let j = 0; j < path.length; j++) seen[path[j]] = 1
         }
       }
     }
-    if (next.size > 0) states = next
-    const heads = headsOf(states, scratch)
+    for (let i = 0; i < next.length; i++) mark[next[i]] = 0
+    if (next.length > 0) states = next
+    const heads = headsOf(states, front)
     turnHeads.push(heads)
     for (let i = 0; i < heads.length; i++) seen[heads[i]] = 1
   }
@@ -533,18 +563,20 @@ const reachOf = (
   // and is no longer derived a second time by the claim.
   const board = span === 1 ? real : permissive
   const options = span === 1 ? held.options : undefined
-  const heads = headsOf(states, scratch)
+  const heads = headsOf(states, front)
   const earliestSubStep = new Int32Array(cellCount).fill(NEVER)
   for (let i = 0; i < heads.length; i++) earliestSubStep[heads[i]] = 0
-  for (const key of states) {
+  for (let s = 0; s < states.length; s++) {
+    const key = states[s]
     const cell = key >> 2
     const ori = key & 3
-    for (const type of kinds) {
-      for (const step of stepsFrom(type, cell, ori, board, options)) {
-        const path = step.path
+    for (let t = 0; t < kinds.length; t++) {
+      const steps = stepsFrom(kinds[t], cell, ori, board, options)
+      for (let i = 0; i < steps.length; i++) {
+        const path = steps[i].path
         const walked = path.length < subSteps ? path.length : subSteps
-        for (let i = 0; i < walked; i++) {
-          if (earliestSubStep[path[i]] > i + 1) earliestSubStep[path[i]] = i + 1
+        for (let j = 0; j < walked; j++) {
+          if (earliestSubStep[path[j]] > j + 1) earliestSubStep[path[j]] = j + 1
         }
       }
     }
@@ -576,13 +608,13 @@ const reachOf = (
 }
 
 /** The head front of a state set, as the ascending cell array everything wants. */
-const headsOf = (states: Set<number>, scratch: Uint8Array): number[] => {
-  for (const key of states) scratch[key >> 2] = 1
+const headsOf = (states: ReadonlyArray<number>, front: Uint8Array): number[] => {
+  for (let i = 0; i < states.length; i++) front[states[i] >> 2] = 1
   const heads: number[] = []
-  for (let cell = 0; cell < scratch.length; cell++) {
-    if (scratch[cell]) {
+  for (let cell = 0; cell < front.length; cell++) {
+    if (front[cell]) {
       heads.push(cell)
-      scratch[cell] = 0
+      front[cell] = 0
     }
   }
   return heads
