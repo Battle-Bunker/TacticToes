@@ -1,4 +1,4 @@
-import { Clash, ClashKind } from "@shared/types/Game"
+import { ActiveEffect, Clash, ClashKind } from "@shared/types/Game"
 import { BoardView, adjudicate } from "./adjudicate"
 import { Claim, PartialSettleInput, computeClaims } from "./claims"
 import { UnitAction, leavesTrail, traversesEdges } from "./moveGrammar"
@@ -240,6 +240,15 @@ const setOf = (cells: Iterable<number>): Set<number> => new Set(cells)
 const NO_VIA: ReadonlyArray<string> = []
 
 /**
+ * One schedule entry, as a value. Settlement CLONES the schedule it is handed,
+ * so an entry that came back out cannot be recognised by identity — and the
+ * one field the ally-buff cancel rewrites is the expiry, which is exactly the
+ * difference between an entry that survived and one that was closed early.
+ */
+const effectKey = (effect: ActiveEffect): string =>
+  `${effect.playerID}|${effect.type}|${effect.level}|${effect.expiryTurn}|${effect.sourcePlayerID}`
+
+/**
  * One modelled unit's contingency, as one held unit caused it. Keyed by the
  * PAIR, because a unit two held units could each have changed must be
  * partitionable by either of them, and a single slot would keep only one.
@@ -420,12 +429,38 @@ export const settlePartial = (
         : "alive"
   })
 
-  // The tiers a held unit carries into the next turn are the ones it carries
-  // into this one: settlement never saw it, so nothing charged it. The claim's
-  // interval is what brackets the truth.
+  // The tier a held unit carries into the next turn. Settlement never saw it
+  // move, so nothing charged it a pickup — and the claim's interval is what
+  // brackets that. But its WINDOWS closed anyway: an effect lapses on the
+  // clock, and on the ally-buff cancel a modelled team-mate triggers, and
+  // neither reads anything the held unit chose. `settleTurn` carried both out
+  // on the schedule it was handed, and could not credit the level back,
+  // because it keeps tiers only for units on its roster — so a held unit's
+  // debuff wore off the board and never wore off the unit.
+  //
+  // The level comes off what settlement DROPPED rather than off a second
+  // reading of the expiry rule: every entry of this unit's schedule that did
+  // not come back out of settlement closed, whichever rule closed it, and
+  // closing is what gives a level back. Entries that had already lapsed before
+  // this turn are `tierAtArrival`'s to give back and are left to it.
+  const standing = new Map<string, number>()
+  settlement.effects.forEach((effect) => {
+    const key = effectKey(effect)
+    standing.set(key, (standing.get(key) ?? 0) + 1)
+  })
   const tiers = { ...settlement.tiers }
   settledClaims.forEach((claim) => {
-    tiers[claim.id] = claim.tierAtArrival
+    let tier = claim.tierAtArrival
+    input.effects.forEach((effect) => {
+      if (effect.playerID !== claim.id || effect.expiryTurn < input.turn) return
+      const left = standing.get(effectKey(effect)) ?? 0
+      if (left > 0) {
+        standing.set(effectKey(effect), left - 1)
+        return
+      }
+      tier -= effect.level
+    })
+    tiers[claim.id] = tier
   })
 
   return {

@@ -1290,6 +1290,36 @@ describe("a held unit's invulnerability schedule survives the turn", () => {
       )
     })
   })
+
+  it("gives the level back when the held unit's own window closes", () => {
+    // The other half. A window lapses on the CLOCK — nothing the held unit
+    // chose is in it — so the tier it carries into the next turn is one lower
+    // in every world, and a settlement that left it where it was would have
+    // the unit invulnerable for the rest of the game.
+    const closing = (held: boolean): PartialSettleInput => {
+      const input = scheduled(held)
+      return {
+        ...input,
+        effects: input.effects.map((effect) =>
+          effect.playerID === "h" ? { ...effect, expiryTurn: input.turn } : effect,
+        ),
+      }
+    }
+
+    const oracle = settleTurn(closing(false), NO_SPAWN)
+    expect(oracle.effects).toEqual([])
+    expect(oracle.tiers.h).toBe(0)
+
+    const input = closing(true)
+    const partial = settlePartial(input, NO_SPAWN)
+    expect(partial.effects.filter((e) => e.playerID === "h")).toEqual([])
+    expect(partial.tiers.h).toBe(0)
+
+    // And it is the same answer in every world, because no world has a say.
+    optionsFor(input, "h").forEach((option) => {
+      expect(concrete(input, new Map([["h", option]])).tiers.h).toBe(0)
+    })
+  })
 })
 
 // ------------------------------------------- the sever that is not survivable
