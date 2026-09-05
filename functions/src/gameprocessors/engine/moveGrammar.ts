@@ -166,10 +166,47 @@ export const planUnitAction = (
   // every query in the module — a board sweep per unit per turn — and the two
   // coordinate objects it used to allocate here were the module's largest
   // source of garbage, for arithmetic that fits in four numbers.
-  const ox = origin % boardWidth
-  const oy = Math.floor(origin / boardWidth)
-  const dxCell = dest % boardWidth
-  const dyCell = Math.floor(dest / boardWidth)
+  return planFromCoords(
+    type,
+    origin,
+    origin % boardWidth,
+    Math.floor(origin / boardWidth),
+    dest,
+    dest % boardWidth,
+    Math.floor(dest / boardWidth),
+    boardWidth,
+    boardHeight,
+    orientation,
+    pawnTargets,
+  )
+}
+
+/**
+ * The grammar with both squares' coordinates ALREADY IN HAND — the same rule
+ * as `planUnitAction`, which is now this function plus the four divisions that
+ * derive them from two indices.
+ *
+ * Internal to the module, and it exists for one caller: the board sweep in
+ * `queries.ts::legalActions`, which asks the grammar about every cell of the
+ * board from a FIXED origin. Two of those four divisions are constant across
+ * such a sweep and the other two are the loop counters, so the sweep pays none
+ * of them; over the corpus the sweep costs a third less. The caller is
+ * responsible for what the wrapper checks — an integer destination on the
+ * board, and coordinates that agree with it.
+ */
+export const planFromCoords = (
+  type: UnitType,
+  origin: number,
+  ox: number,
+  oy: number,
+  dest: number,
+  dxCell: number,
+  dyCell: number,
+  boardWidth: number,
+  boardHeight: number,
+  orientation: Orientation,
+  pawnTargets?: ReadonlySet<number>,
+): UnitAction | null => {
   const dx = dxCell - ox
   const dy = dyCell - oy
   const adx = Math.abs(dx)
