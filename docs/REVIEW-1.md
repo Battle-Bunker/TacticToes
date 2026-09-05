@@ -227,6 +227,33 @@ run. The verdict is written under the finding, with the test that carries it.
    byte-identical to `develop`'s (verified by comparing normalised method
    bodies), so this PR neither causes nor worsens it.
 
+   **NOT A DEFECT — parity is a property of the CLUSTER path, and of nothing
+   else.** Re-measured over the same sweep (5..20 by 5..20, 2..12 units, the
+   non-cluster path, three combinations excluded as the crash of finding 5):
+   2,557 of 2,816 board/count combinations place at least one unit on an odd
+   square — far more than the original sweep found, and systematic rather than
+   incidental. Any board with an even dimension breaks it at the CORNERS, which
+   are the first four positions the edge algorithm emits: `startX = 1` and
+   `endX = boardWidth - 2`, so on a 12x12 the corners are (1,1), (10,1), (1,10),
+   (10,10) and two of the four are odd. A 5x5 with three units breaks it on the
+   third position.
+
+   That is not a rule being violated, because there is no rule: `(x + y) % 2`
+   appears exactly once outside a test in the whole repo — in
+   `isValidSpawnPosition`'s `requireParity` branch — and `requireParity` is
+   passed `true` from exactly one caller, `getSpawnCells`, which is the team
+   cluster path. Nothing in the engine, the wire or the frontend reads a
+   spawn's parity (the renderer's other `% 2` is a hex-row stagger). So the
+   even-square rule is a constraint the cluster spawner is written to satisfy,
+   asserted where it is meant to hold (`expectSpawnConstraints`), and the
+   edge/midpoint spawner has never claimed it in either repo.
+
+   What overstates its reach is the NAME of the old test: *places players on
+   even squares* is a fact about 11x11 with 8 units, not a property of the
+   placer. Left as it is rather than renamed — this is a pre-existing test on
+   a pre-existing path, and the finding to record is that a reader should not
+   take it for a guarantee.
+
 5. **A crowded small board throws rather than placing.**
    `placement.ts:99`, `const { x, y } = positions[index]`. A 5x5 board with 20
    units raises `Cannot destructure property 'x' of 'positions[index]' as it is
