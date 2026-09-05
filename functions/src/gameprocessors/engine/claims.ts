@@ -1,6 +1,13 @@
 import { UnitType } from "@shared/types/Game"
 import { ORTHOGONALS, Orientation, leavesTrail, traversesEdges } from "./moveGrammar"
-import { BoardShape, GrammarUnit, actionOf, coverOf, legalActions } from "./queries"
+import {
+  BoardShape,
+  GrammarUnit,
+  actionOf,
+  coverOf,
+  legalActions,
+  pawnTargetsOf,
+} from "./queries"
 import { DEFAULT_FOOD_ENERGY, ResolveUnit } from "./resolveTurn"
 import { SettleInput } from "./settleTurn"
 
@@ -206,6 +213,27 @@ const permissiveShapeOf = (shape: BoardShape): BoardShape => {
   return { ...shape, food }
 }
 
+/**
+ * A board the grammar is asked about, WITH the one set the asking costs.
+ *
+ * `queries.ts::pawnTargetsOf` is a sweep of the board's food and every body on
+ * it, and the dilation below asks the grammar once per reachable state per
+ * kind per unknown turn — tens of thousands of times against two boards that
+ * never change. Rebuilding the set inside each of those calls was 22% of this
+ * module's profile, and against the permissive shape, whose `food` is every
+ * cell, each rebuild is a set the size of the board.
+ *
+ * The two travel together because a set built from one board and handed down
+ * beside another is a lie about where the bodies are: the only way to hold
+ * one is to hold the board it came from.
+ */
+interface Ground {
+  readonly shape: BoardShape
+  readonly pawnTargets: ReadonlySet<number>
+}
+
+const groundOf = (shape: BoardShape): Ground => ({ shape, pawnTargets: pawnTargetsOf(shape) })
+
 /** One legal continuation from a state: where it ends, what it walks, how it faces. */
 interface Step {
   readonly to: number
@@ -216,7 +244,7 @@ interface Step {
 const stepsFrom = (
   type: UnitType,
   state: State,
-  shape: BoardShape,
+  ground: Ground,
   options: ReadonlyArray<number> | undefined,
 ): Step[] => {
   const unit: GrammarUnit = {
@@ -225,7 +253,7 @@ const stepsFrom = (
     orientation: ORTHOGONALS[state.ori],
   }
   const steps: Step[] = []
-  legalActions(unit, shape).forEach(({ target, action }) => {
+  legalActions(unit, ground.shape, ground.pawnTargets).forEach(({ target, action }) => {
     if (options && !options.includes(target)) return
     if (action.kind === "move") {
       steps.push({ to: action.path[action.path.length - 1], path: action.path, ori: state.ori })
@@ -263,12 +291,12 @@ interface Reach {
  * claim's slider can still be crossing the board after every modelled unit
  * has stopped, and a contest at that sub-step is as real as any other.
  */
-const subStepsOf = (input: PartialSettleInput, held: Set<string>, shape: BoardShape): number => {
+const subStepsOf = (input: PartialSettleInput, held: Set<string>, ground: Ground): number => {
   // The longest ray the interior admits: a slider crossing it corner to corner
   // walks one cell per sub-step. A held slider is priced at that rather than
   // at the ray it happens to have from where it was observed, because over a
   // span longer than a turn it is somewhere else by the time it walks one.
-  const longestRay = Math.max(shape.boardWidth, shape.boardHeight) - 3
+  const longestRay = Math.max(ground.shape.boardWidth, ground.shape.boardHeight) - 3
   let steps = 1
   input.units.forEach((u) => {
     if (held.has(u.id)) {
@@ -282,7 +310,7 @@ const subStepsOf = (input: PartialSettleInput, held: Set<string>, shape: BoardSh
     steps = Math.max(steps, u.path?.length ?? 0)
     const unit: GrammarUnit = { type: u.type, occupancy: u.occupancy, orientation: u.orientation }
     if (u.stagedMove !== undefined) {
-      const action = actionOf(unit, u.stagedMove, shape)
+      const action = actionOf(unit, u.stagedMove, ground.shape, ground.pawnTargets)
       if (action?.kind === "move") steps = Math.max(steps, action.path.length)
     }
   })
@@ -299,9 +327,11 @@ const subStepsOf = (input: PartialSettleInput, held: Set<string>, shape: BoardSh
  */
 export const computeClaims = (input: PartialSettleInput): ReadonlyArray<Claim> => {
   const heldIds = new Set(input.held.map((h) => h.id))
-  const shape = shapeOf(input)
-  const permissive = permissiveShapeOf(shape)
-  const subSteps = subStepsOf(input, heldIds, shape)
+  // Both boards, and both pawn-target sets, built ONCE for the whole call:
+  // everything below asks the grammar about one of these two and nothing else.
+  const real = groundOf(shapeOf(input))
+  const permissive = groundOf(permissiveShapeOf(real.shape))
+  const subSteps = subStepsOf(input, heldIds, real)
   const cells = input.boardWidth * input.boardHeight
   const wallSet = new Set(input.walls)
   const byId = new Map(input.units.map((u) => [u.id, u]))
@@ -310,7 +340,7 @@ export const computeClaims = (input: PartialSettleInput): ReadonlyArray<Claim> =
   input.held.forEach((held) => {
     const record = byId.get(held.id)
     if (!record) return
-    reaches.push(reachOf(held, record, input, shape, permissive, subSteps, wallSet))
+    reaches.push(reachOf(held, record, input, real, permissive, subSteps, wallSet))
   })
 
   // The danger pass. A claim can be killed by terrain it chose, by a modelled
@@ -319,8 +349,11 @@ export const computeClaims = (input: PartialSettleInput): ReadonlyArray<Claim> =
   const liveCover = new Set<number>()
   input.units.forEach((u) => {
     if (heldIds.has(u.id)) return
-    coverOf({ type: u.type, occupancy: u.occupancy, orientation: u.orientation }, shape)
-      .forEach((cell) => liveCover.add(cell))
+    coverOf(
+      { type: u.type, occupancy: u.occupancy, orientation: u.orientation },
+      real.shape,
+      real.pawnTargets,
+    ).forEach((cell) => liveCover.add(cell))
     u.occupancy.forEach((cell) => liveCover.add(cell))
   })
 
@@ -379,8 +412,8 @@ const reachOf = (
   held: HeldUnit,
   record: ResolveUnit,
   input: PartialSettleInput,
-  shape: BoardShape,
-  permissive: BoardShape,
+  real: Ground,
+  permissive: Ground,
   subSteps: number,
   wallSet: Set<number>,
 ): Reach => {
@@ -404,7 +437,7 @@ const reachOf = (
   let totalFirst = 0
   let longestPath = 1
   kinds.forEach((type) => {
-    stepsFrom(type, start, shape, held.options).forEach((step) => {
+    stepsFrom(type, start, real, held.options).forEach((step) => {
       totalFirst++
       longestPath = Math.max(longestPath, step.path.length)
       if (wallSet.has(step.to) || (leavesTrail(type) && selfFatal.has(step.to))) fatalFirst++
@@ -419,7 +452,7 @@ const reachOf = (
 
   for (let turn = 1; turn < span; turn++) {
     const next = new Map<number, State>()
-    const board = turn === 1 ? shape : permissive
+    const board = turn === 1 ? real : permissive
     const options = turn === 1 ? held.options : undefined
     states.forEach((state) => {
       kinds.forEach((type) => {
@@ -439,7 +472,7 @@ const reachOf = (
   // The settled turn, sub-step by sub-step. A unit stopped short of its ray
   // stays where it was stopped, so the sets are cumulative — which is also
   // exactly what "it may simply have held" means.
-  const board = span === 1 ? shape : permissive
+  const board = span === 1 ? real : permissive
   const options = span === 1 ? held.options : undefined
   const headPossible: number[][] = [sorted(Array.from(states.values()).map((s) => s.cell))]
   const perStep: Set<number>[] = []

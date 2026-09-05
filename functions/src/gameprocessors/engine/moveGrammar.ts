@@ -159,7 +159,7 @@ export const planUnitAction = (
   boardWidth: number,
   boardHeight: number,
   orientation: Orientation,
-  pawnTargets?: Set<number>,
+  pawnTargets?: ReadonlySet<number>,
 ): UnitAction | null => {
   if (!Number.isInteger(dest) || dest < 0 || dest >= boardWidth * boardHeight) return null
   // Read as scalars rather than through `toXY`. This is the innermost call of
