@@ -215,15 +215,22 @@ export const settleTurn = (input: SettleInput, spawn: Spawner): Settlement => {
 
   // 3. Expiry, at the END of the turn: an effect due at turn E still decided
   // every collision resolved during turn E, and only then gives its level
-  // back. Effects belonging to units that are no longer standing go with them
-  // — but, as it always has, only on a turn where something expired at all.
+  // back. Effects belonging to units that died this turn went with them at the
+  // top of this function, where `dead` is the whole death registry.
+  //
+  // Nothing else is purged here. A second pass that kept only the effects of
+  // units on the ROSTER used to run, and it read the same as the death filter
+  // for as long as the roster was the whole board — but `settlePartial` hands
+  // this function the units whose moves are known, and a held unit is off that
+  // roster and very much on the board. The pass erased its entire
+  // invulnerability schedule on any turn where anything expired at all, so
+  // every window it was carrying stayed open for the rest of the game.
   const expiring = effects.filter((e) => e.expiryTurn <= input.turn)
   if (expiring.length > 0) {
     expiring.forEach((effect) => {
       if (tiers[effect.playerID] !== undefined) tiers[effect.playerID] -= effect.level
     })
     effects = effects.filter((e) => e.expiryTurn > input.turn)
-    effects = effects.filter((e) => alive.has(e.playerID))
   }
 
   // 4. Orientation, rewritten from the units still standing — which is why it
