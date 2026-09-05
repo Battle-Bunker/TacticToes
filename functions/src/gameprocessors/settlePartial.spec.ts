@@ -17,7 +17,10 @@
 //   T2  `fates` "dead" and "alive" hold in every world; "contingent" claims
 //       nothing and must be backed by a ledger entry;
 //   T3  every coordinate a rule reads — survival, weight, energy, tier — is
-//       inside the bracket the ledger and the claims imply.
+//       inside the bracket the ledger and the claims imply;
+//   T6  the END of the game is one of those coordinates. `outcome` is a
+//       bracket rather than an adjudication, every world's ending is inside
+//       it, and the `certain` field, when it is set, IS that ending.
 //
 // and separately, that the CLAIMS themselves contain the truth: where a held
 // unit actually went, in every world, is inside what `computeClaims` said it
@@ -32,7 +35,8 @@ import { Claim, computeClaims } from "./engine/claims"
 import { Orientation } from "./engine/moveGrammar"
 import { BoardShape, legalTargets } from "./engine/queries"
 import { ResolveUnit } from "./engine/resolveTurn"
-import { PartialSettleInput, settlePartial } from "./engine/settlePartial"
+import { Outcome } from "./engine/adjudicate"
+import { OutcomeBracket, PartialSettleInput, settlePartial } from "./engine/settlePartial"
 import { Settlement, settleTurn } from "./engine/settleTurn"
 import { perimeter } from "./playTurn"
 import { NO_SPAWN } from "./engine/spawn"
@@ -216,8 +220,16 @@ const worldsOf = (
   return out
 }
 
+/**
+ * A settlement read for its BOARD alone. Partial settlement's `outcome` is a
+ * bracket rather than an adjudication, so the two are not the same type any
+ * more — and every helper below reads occupancy, energy, tiers and traversals,
+ * none of which the ending touches.
+ */
+type SettledBoard = Omit<Settlement, "outcome">
+
 /** Head cell per sub-step, as a settlement left it. */
-export const headsOf = (settlement: Settlement, unit: ResolveUnit, subSteps: number): number[] => {
+export const headsOf = (settlement: SettledBoard, unit: ResolveUnit, subSteps: number): number[] => {
   const traversed = settlement.traversed[unit.id] ?? []
   const heads = [unit.occupancy[0]]
   for (let k = 1; k <= subSteps; k++) heads.push(k <= traversed.length ? traversed[k - 1] : heads[k - 1])
@@ -229,8 +241,8 @@ export const headsOf = (settlement: Settlement, unit: ResolveUnit, subSteps: num
  * null when they agree about everything a rule reads.
  */
 const divergedAtFor = (
-  a: Settlement,
-  b: Settlement,
+  a: SettledBoard,
+  b: SettledBoard,
   unit: ResolveUnit,
   subSteps: number,
 ): number | null => {
@@ -254,6 +266,52 @@ export const held = (input: PartialSettleInput, ids: string[]): PartialSettleInp
   held: ids.map((id) => ({ id, observedTurn: input.turn - 1 })),
 })
 
+/**
+ * One ending, canonically. `settleTurn` writes a game that CONTINUES as null
+ * and the bracket writes it as an outcome of kind "continues", because a
+ * bracket's null already means "the worlds disagree" and one field cannot
+ * carry both. This is the two spellings reconciled, and the weights sorted so
+ * the comparison is about the verdict and not about key order.
+ */
+const outcomeKey = (outcome: Outcome | null | undefined): string => {
+  if (!outcome || outcome.kind === "continues") return "continues"
+  const weights = Object.keys(outcome.weightByTeam)
+    .sort()
+    .map((teamID) => `${teamID}=${outcome.weightByTeam[teamID]}`)
+  return `${outcome.kind}|${outcome.decidedOn}|${outcome.winners.join(",")}|${weights.join(",")}`
+}
+
+/**
+ * T6, in one place: every world's ending is inside the bracket, and a
+ * `certain` bracket IS that ending. Three admissions and one proof — the
+ * kinds and the possible winners are supersets, `certainWinners` is a subset,
+ * and `certain` is equality.
+ */
+const outcomeFailures = (
+  bracket: OutcomeBracket,
+  ending: Outcome | null,
+  tag: string,
+): string[] => {
+  const out: string[] = []
+  const kind = ending?.kind ?? "continues"
+  const won = ending?.winners ?? []
+  if (!bracket.possibleKinds.includes(kind)) {
+    out.push(`T6 ${tag} ending ${kind} outside [${bracket.possibleKinds}]`)
+  }
+  won.forEach((teamID) => {
+    if (!bracket.possibleWinners.includes(teamID)) {
+      out.push(`T6 ${tag} winner ${teamID} not admitted`)
+    }
+  })
+  bracket.certainWinners.forEach((teamID) => {
+    if (!won.includes(teamID)) out.push(`T6 ${tag} certain winner ${teamID} does not win`)
+  })
+  if (bracket.certain && outcomeKey(bracket.certain) !== outcomeKey(ending)) {
+    out.push(`T6 ${tag} certain ${outcomeKey(bracket.certain)} vs ${outcomeKey(ending)}`)
+  }
+  return out
+}
+
 // --------------------------------------------------------------- T5
 
 describe("T5 — with nothing held, partial settlement IS settlement", () => {
@@ -263,8 +321,16 @@ describe("T5 — with nothing held, partial settlement IS settlement", () => {
       const total = settleTurn(input, NO_SPAWN)
       const partial = settlePartial(input, NO_SPAWN)
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { ledger, fates, claims, ...rest } = partial
-      expect(JSON.parse(JSON.stringify(rest))).toEqual(JSON.parse(JSON.stringify(total)))
+      const { ledger, fates, claims, outcome, ...rest } = partial
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { outcome: ended, ...board } = total
+      expect(JSON.parse(JSON.stringify(rest))).toEqual(JSON.parse(JSON.stringify(board)))
+      // The ending is a bracket even here, and with nothing held it is a
+      // bracket of ONE world: the verdict `settleTurn` reached on this board.
+      expect(outcomeKey(outcome.certain)).toBe(outcomeKey(ended))
+      expect(outcome.possibleKinds).toEqual([ended?.kind ?? "continues"])
+      expect(outcome.possibleWinners).toEqual(ended?.winners ?? [])
+      expect(outcome.certainWinners).toEqual(ended?.winners ?? [])
       expect(ledger).toEqual([])
       expect(claims).toEqual([])
       input.units.forEach((u) => {
@@ -282,20 +348,42 @@ interface Coverage {
   worlds: number
   entries: number
   emptyLedgers: number
+  /** Worlds in which the game actually ENDED — what T6 is sized by. */
+  endings: number
+  /** Boards whose bracket named exactly one kind of ending. */
+  provedKind: number
+  /** Boards whose bracket named a team that wins in every world. */
+  provedWinner: number
+  /** Boards whose bracket proved the whole adjudication, weights and all. */
+  certainEndings: number
 }
+
+const zero = (): Coverage => ({
+  boards: 0,
+  skipped: 0,
+  worlds: 0,
+  entries: 0,
+  emptyLedgers: 0,
+  endings: 0,
+  provedKind: 0,
+  provedWinner: 0,
+  certainEndings: 0,
+})
 
 const sweep = (
   seeds: readonly number[],
   heldCount: number,
   budget: number,
   coverage: Coverage,
+  /** The board, adjusted before anything is held — a rule variant to sweep. */
+  variant: (input: PartialSettleInput) => PartialSettleInput = (input) => input,
 ): string[] => {
   const failures: string[] = []
   const fail = (what: string): void => {
     if (failures.length < 4) failures.push(what)
   }
   seeds.forEach((seed) => {
-    const base = makeBoard(seed)
+    const base = variant(makeBoard(seed))
     const ids = base.units.slice(0, heldCount).map((u) => u.id)
     if (ids.length < heldCount) return
     const input = held(base, ids)
@@ -310,6 +398,9 @@ const sweep = (
     const partial = settlePartial(input, NO_SPAWN)
     coverage.entries += partial.ledger.length
     if (partial.ledger.length === 0) coverage.emptyLedgers++
+    if (partial.outcome.possibleKinds.length === 1) coverage.provedKind++
+    if (partial.outcome.certainWinners.length > 0) coverage.provedWinner++
+    if (partial.outcome.certain !== null) coverage.certainEndings++
 
     const heldIds = new Set(ids)
     const live = input.units.filter((u) => !heldIds.has(u.id))
@@ -416,6 +507,12 @@ const sweep = (
         const record = input.units.find((u) => u.id === claim.id) as ResolveUnit
         claimFailures(claim, record, truth, subSteps, seed, world).forEach(fail)
       })
+
+      // T6 — the END of the game, bracketed. Standing every held unit on its
+      // observed square and adjudicating ONCE answers for one world and calls
+      // the answer the turn's; a bracket answers for all of them.
+      if (truth.outcome) coverage.endings++
+      outcomeFailures(partial.outcome, truth.outcome, `seed=${seed} world=${world}`).forEach(fail)
     })
   })
   return failures
@@ -424,7 +521,7 @@ const sweep = (
 const claimFailures = (
   claim: Claim,
   record: ResolveUnit,
-  truth: Settlement,
+  truth: SettledBoard,
   subSteps: number,
   seed: number,
   world: string,
@@ -464,13 +561,17 @@ const report = (label: string, coverage: Coverage): void => {
   process.stdout.write(
     `  ${label}: ${coverage.boards} boards, ${coverage.worlds} worlds, ` +
       `${coverage.skipped} skipped over budget, ${coverage.entries} ledger entries, ` +
-      `${coverage.emptyLedgers} boards proved by an empty ledger\n`,
+      `${coverage.emptyLedgers} boards proved by an empty ledger, ` +
+      `${coverage.endings} worlds ended the game, ` +
+      `${coverage.provedKind} boards whose KIND of ending the bracket proved, ` +
+      `${coverage.provedWinner} whose winner it proved, ` +
+      `${coverage.certainEndings} whose whole adjudication it proved\n`,
   )
 }
 
 describe("T1–T3 by enumeration — one held unit", () => {
   it("holds in every world of 400 boards", () => {
-    const coverage: Coverage = { boards: 0, skipped: 0, worlds: 0, entries: 0, emptyLedgers: 0 }
+    const coverage: Coverage = zero()
     expect(sweep(range(1, 400), 1, 200, coverage)).toEqual([])
     report("1 held", coverage)
     expect(coverage.boards).toBeGreaterThan(350)
@@ -480,7 +581,7 @@ describe("T1–T3 by enumeration — one held unit", () => {
 
 describe("T1–T3 by enumeration — two held units", () => {
   it("holds in every world of 250 boards", () => {
-    const coverage: Coverage = { boards: 0, skipped: 0, worlds: 0, entries: 0, emptyLedgers: 0 }
+    const coverage: Coverage = zero()
     expect(sweep(range(1001, 1250), 2, 1200, coverage)).toEqual([])
     report("2 held", coverage)
     expect(coverage.boards).toBeGreaterThan(120)
@@ -490,11 +591,47 @@ describe("T1–T3 by enumeration — two held units", () => {
 
 describe("T1–T3 by enumeration — three held units", () => {
   it("holds in every world it can afford of 200 boards", () => {
-    const coverage: Coverage = { boards: 0, skipped: 0, worlds: 0, entries: 0, emptyLedgers: 0 }
+    const coverage: Coverage = zero()
     expect(sweep(range(2001, 2200), 3, 4000, coverage)).toEqual([])
     report("3 held", coverage)
     expect(coverage.boards + coverage.skipped).toBe(200)
     expect(coverage.worlds).toBeGreaterThan(20000)
+  })
+})
+
+// ------------------------------------------------------------- T6
+
+/**
+ * THE ENDING, WHERE IT IS HARDEST: a board played to its own last turn.
+ *
+ * The sweeps above run with `maxTurns: null`, where the only way to end a game
+ * is to take a whole team off the board — so the ending they exercise is the
+ * one branch a held unit rarely moves. Set the limit to the turn being played
+ * and `adjudicate` reads the WEIGHTS instead: every world ends the game, the
+ * winner is whoever is heaviest, and a held unit's weight interval and a
+ * severable ally are both in the answer. That is the branch the single
+ * adjudication got wrong most often, and it is the branch that says whether
+ * bracketing team weights by summing per-unit intervals is honest.
+ *
+ * Same board generator, same held sets, same T1/T2/T3 — only the limit moves.
+ */
+describe("T6 — the ending is a bracket, on a board at its turn limit", () => {
+  it("contains every world's verdict over 250 boards with two units held", () => {
+    const coverage: Coverage = zero()
+    const atTheLimit = (input: PartialSettleInput): PartialSettleInput => ({
+      ...input,
+      maxTurns: input.turn,
+    })
+    expect(sweep(range(1001, 1250), 2, 1200, coverage, atTheLimit)).toEqual([])
+    report("turn limit", coverage)
+    // Every world of every board ends here — the limit is this very turn — so
+    // the property is exercised on all of them and not on a lucky few.
+    expect(coverage.endings).toBe(coverage.worlds)
+    expect(coverage.worlds).toBeGreaterThan(20000)
+    // A bracket that admits everything passes the property and says nothing.
+    // These are the boards on which it is a claim rather than a shrug.
+    expect(coverage.provedKind).toBeGreaterThan(20)
+    expect(coverage.provedWinner).toBeGreaterThan(10)
   })
 })
 
@@ -550,7 +687,7 @@ const advanceAlone = (
 
 describe("T1–T3 by enumeration — a unit observed a turn ago", () => {
   it("holds over every two-move history on 400 boards", () => {
-    const coverage: Coverage = { boards: 0, skipped: 0, worlds: 0, entries: 0, emptyLedgers: 0 }
+    const coverage: Coverage = zero()
     const failures: string[] = []
     for (let seed = 3001; seed <= 3400; seed++) {
       const base: PartialSettleInput = { ...makeBoard(seed), potions: [], potionsEnabled: false }
@@ -568,6 +705,9 @@ describe("T1–T3 by enumeration — a unit observed a turn ago", () => {
       const partial = settlePartial(input, NO_SPAWN)
       coverage.entries += partial.ledger.length
       if (partial.ledger.length === 0) coverage.emptyLedgers++
+      if (partial.outcome.possibleKinds.length === 1) coverage.provedKind++
+      if (partial.outcome.certainWinners.length > 0) coverage.provedWinner++
+      if (partial.outcome.certain !== null) coverage.certainEndings++
       const live = input.units.filter((u) => u.id !== id)
       const named = new Set(partial.ledger.map((e) => e.unitId))
       const subSteps = Math.max(
@@ -592,6 +732,12 @@ describe("T1–T3 by enumeration — a unit observed a turn ago", () => {
             NO_SPAWN,
           )
           const world = `${a1}/${a2}`
+          if (truth.outcome) coverage.endings++
+          outcomeFailures(partial.outcome, truth.outcome, `SPAN2 seed=${seed} ${world}`).forEach(
+            (f) => {
+              if (failures.length < 4) failures.push(f)
+            },
+          )
           live.forEach((unit) => {
             const at = divergedAtFor(partial, truth, unit, subSteps)
             if (at === null) return
@@ -643,16 +789,7 @@ interface ChainCoverage extends Coverage {
 
 describe("the causal chain — two modelled allies and one held enemy", () => {
   it("attributes every divergence to the enemy, and keeps the rest certain", () => {
-    const coverage: ChainCoverage = {
-      boards: 0,
-      skipped: 0,
-      worlds: 0,
-      entries: 0,
-      emptyLedgers: 0,
-      chained: 0,
-      certainCells: 0,
-      contingent: 0,
-    }
+    const coverage: ChainCoverage = { ...zero(), chained: 0, certainCells: 0, contingent: 0 }
     const failures: string[] = []
     const fail = (what: string): void => {
       if (failures.length < 6) failures.push(what)
