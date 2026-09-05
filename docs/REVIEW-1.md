@@ -315,6 +315,20 @@ run. The verdict is written under the finding, with the test that carries it.
    the engine at `src/engine-vendor/`. Fix #1 above is inside the vendored
    directory, so the bot's copy needs re-vendoring or it keeps the defect.
 
+   **TRUE, and already discharged for `settleTurn`; now outstanding for
+   `claims.ts` alone.** Diffed file by file against `src/engine-vendor/engine/`
+   as it stands: every one of the nine files differs from this branch by
+   exactly the nine-line `VENDORED from Battle-Bunker/TacticToes` header and
+   nothing else — `settleTurn.ts` included, so the bot has re-vendored since
+   this review was written and carries the expiry fix. The one exception is
+   `claims.ts`, which differs by the header AND by the tier-width change of
+   finding 2 above. So the re-vendor this branch requires is `npm run
+   sync-engine` in the bot repo after merge, and `claims.ts` is the file it
+   moves. Nothing else in the module changed: no import was added, no file was
+   added or removed, and `engineVendor.spec.ts` — real imports parsed, no
+   `require`/`Math.random`/`Date.now`, the directory compiled standing alone —
+   passes.
+
 ---
 
 ## 4. Read and found clean
