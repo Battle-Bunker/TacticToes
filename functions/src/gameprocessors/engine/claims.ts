@@ -230,23 +230,43 @@ const permissiveShapeOf = (shape: BoardShape): BoardShape => {
 interface Ground {
   readonly shape: BoardShape
   readonly pawnTargets: ReadonlySet<number>
+  /**
+   * The grammar's answer for a state, remembered for the length of the call.
+   *
+   * A step out of `(cell, facing)` for a kind is a pure function of the kind,
+   * the state and this board — the dilation asks it once per state per kind
+   * per unknown turn, per HELD UNIT, and the state sets of several held units
+   * over the same board overlap almost completely by the second turn. So the
+   * answer is memoised per board rather than recomputed: `legalActions` is a
+   * full board sweep through `planUnitAction`, and it was 23% of the profile.
+   *
+   * Keyed the way the dilation keys a state (`keyOf`), under the kind. The
+   * memo belongs to the Ground because the answer does: a board and the steps
+   * it admits travel together, exactly as its pawn targets do.
+   */
+  readonly steps: Map<UnitType, Map<number, ReadonlyArray<Step>>>
 }
 
-const groundOf = (shape: BoardShape): Ground => ({ shape, pawnTargets: pawnTargetsOf(shape) })
+const groundOf = (shape: BoardShape): Ground => ({
+  shape,
+  pawnTargets: pawnTargetsOf(shape),
+  steps: new Map(),
+})
 
 /** One legal continuation from a state: where it ends, what it walks, how it faces. */
 interface Step {
   readonly to: number
   readonly path: ReadonlyArray<number>
   readonly ori: number
+  /** The cell staged to reach it — what a caller's `options` narrowing names. */
+  readonly target: number
 }
 
-const stepsFrom = (
-  type: UnitType,
-  state: State,
-  ground: Ground,
-  options: ReadonlyArray<number> | undefined,
-): Step[] => {
+/** A step that walks nowhere — a hold, or a pawn's turn — shares one path. */
+const EMPTY_PATH: ReadonlyArray<number> = []
+
+/** Every step the grammar admits out of this state, narrowing not yet applied. */
+const allStepsFrom = (type: UnitType, state: State, ground: Ground): Step[] => {
   const unit: GrammarUnit = {
     type,
     occupancy: [state.cell],
@@ -254,18 +274,44 @@ const stepsFrom = (
   }
   const steps: Step[] = []
   legalActions(unit, ground.shape, ground.pawnTargets).forEach(({ target, action }) => {
-    if (options && !options.includes(target)) return
     if (action.kind === "move") {
-      steps.push({ to: action.path[action.path.length - 1], path: action.path, ori: state.ori })
+      steps.push({
+        to: action.path[action.path.length - 1],
+        path: action.path,
+        ori: state.ori,
+        target,
+      })
       return
     }
     if (action.kind === "rotate") {
-      steps.push({ to: state.cell, path: [], ori: oriIndex(action.orientation) })
+      steps.push({ to: state.cell, path: EMPTY_PATH, ori: oriIndex(action.orientation), target })
       return
     }
-    steps.push({ to: state.cell, path: [], ori: state.ori })
+    steps.push({ to: state.cell, path: EMPTY_PATH, ori: state.ori, target })
   })
   return steps
+}
+
+const stepsFrom = (
+  type: UnitType,
+  state: State,
+  ground: Ground,
+  options: ReadonlyArray<number> | undefined,
+): ReadonlyArray<Step> => {
+  let byState = ground.steps.get(type)
+  if (byState === undefined) {
+    byState = new Map()
+    ground.steps.set(type, byState)
+  }
+  const key = keyOf(state)
+  let steps = byState.get(key)
+  if (steps === undefined) {
+    steps = allStepsFrom(type, state, ground)
+    byState.set(key, steps)
+  }
+  // The narrowing is a caller's, not the board's, so it is applied to the
+  // remembered answer rather than baked into it.
+  return options === undefined ? steps : steps.filter((step) => options.includes(step.target))
 }
 
 /** Everything one claim's reach is built out of, before the danger pass. */
