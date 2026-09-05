@@ -1,5 +1,11 @@
 import { UnitType } from "@shared/types/Game"
-import { ORTHOGONALS, Orientation, leavesTrail, traversesEdges } from "./moveGrammar"
+import {
+  ORTHOGONALS,
+  Orientation,
+  leavesTrail,
+  readsFacingAndContents,
+  traversesEdges,
+} from "./moveGrammar"
 import {
   BoardShape,
   GrammarUnit,
@@ -168,14 +174,16 @@ export interface Claim {
   readonly narrowed: boolean
 }
 
-/** A dilation state: where the head is, and which way a pawn is facing. */
-interface State {
-  readonly cell: number
-  /** Index into `ORTHOGONALS`. Only a pawn's grammar reads it. */
-  readonly ori: number
-}
+/**
+ * A dilation state — where the head is, and which way a pawn is facing —
+ * carried as ONE NUMBER: `cell * 4 + ori`, `ori` an index into `ORTHOGONALS`
+ * (only a pawn's grammar reads it). The frontier is tens of thousands of
+ * these per call and a pair of them per transition was an object each, which
+ * is the module's largest remaining source of garbage; the cell is `key >> 2`
+ * and the facing `key & 3`, and neither allocates.
+ */
+const keyOf = (cell: number, ori: number): number => cell * 4 + ori
 
-const keyOf = (s: State): number => s.cell * 4 + s.ori
 const sorted = (cells: Iterable<number>): number[] =>
   Array.from(new Set(cells)).sort((a, b) => a - b)
 
@@ -230,42 +238,124 @@ const permissiveShapeOf = (shape: BoardShape): BoardShape => {
 interface Ground {
   readonly shape: BoardShape
   readonly pawnTargets: ReadonlySet<number>
+  /**
+   * The grammar's answer for a state, remembered for the length of the call —
+   * for the ONE KIND whose answer depends on this board and on the facing.
+   *
+   * A step out of `(cell, facing)` is a pure function of the kind, the state
+   * and the board, and `legalActions` answers it with a full board sweep. The
+   * dilation asks it once per state per kind per unknown turn, per HELD UNIT,
+   * and the state sets of several held units over the same board overlap
+   * almost completely by the second turn — so the answer is remembered rather
+   * than recomputed. Keyed the way the dilation keys a state (`keyOf`), under
+   * the kind. It belongs to the Ground because the answer does: a board and
+   * the steps it admits travel together, exactly as its pawn targets do.
+   */
+  readonly facing: Map<UnitType, (ReadonlyArray<Step> | undefined)[]>
+  /**
+   * The same, for every kind whose answer depends on NEITHER the facing nor
+   * the board's contents (`moveGrammar.ts::readsFacingAndContents`) — keyed by
+   * the cell alone, and shared with the call's other board, because a rook's
+   * moves off a square are a rook's moves off that square whichever way it is
+   * turned and whichever of the two boards is asking.
+   */
+  readonly blind: Map<UnitType, (ReadonlyArray<Step> | undefined)[]>
 }
 
-const groundOf = (shape: BoardShape): Ground => ({ shape, pawnTargets: pawnTargetsOf(shape) })
+const groundOf = (
+  shape: BoardShape,
+  blind: Map<UnitType, (ReadonlyArray<Step> | undefined)[]>,
+): Ground => ({
+  shape,
+  pawnTargets: pawnTargetsOf(shape),
+  facing: new Map(),
+  blind,
+})
 
 /** One legal continuation from a state: where it ends, what it walks, how it faces. */
 interface Step {
   readonly to: number
   readonly path: ReadonlyArray<number>
+  /**
+   * The facing it ends in, or -1 when the step leaves the facing alone — which
+   * every step but a pawn's turn does. Held as "unchanged" rather than as the
+   * facing it came from so that an answer can be remembered for a kind that
+   * never reads a facing at all.
+   */
   readonly ori: number
+  /** The cell staged to reach it — what a caller's `options` narrowing names. */
+  readonly target: number
+}
+
+/** `Step.ori` for a step that leaves the unit facing the way it already was. */
+const ORI_UNCHANGED = -1
+
+/**
+ * The flag arrays a dilation runs on, allocated once for the whole call.
+ *
+ * Every set the dilation keeps is a set of board cells or of dilation states,
+ * both of which are small dense integers, so each is a flag per index rather
+ * than a hash — and each is cleared and reused by the next held unit instead
+ * of allocated again. `seen` is the reach under construction, `front` the head
+ * front of one horizon, `mark` the frontier's membership.
+ */
+interface Scratch {
+  readonly seen: Uint8Array
+  readonly front: Uint8Array
+  readonly mark: Uint8Array
+}
+
+/** A step that walks nowhere — a hold, or a pawn's turn — shares one path. */
+const EMPTY_PATH: ReadonlyArray<number> = []
+
+/** Every step the grammar admits out of this state, narrowing not yet applied. */
+const allStepsFrom = (type: UnitType, cell: number, ori: number, ground: Ground): Step[] => {
+  const unit: GrammarUnit = { type, occupancy: [cell], orientation: ORTHOGONALS[ori] }
+  const steps: Step[] = []
+  const legal = legalActions(unit, ground.shape, ground.pawnTargets)
+  for (let i = 0; i < legal.length; i++) {
+    const { target, action } = legal[i]
+    if (action.kind === "move") {
+      const path = action.path
+      steps.push({ to: path[path.length - 1], path, ori: ORI_UNCHANGED, target })
+    } else if (action.kind === "rotate") {
+      steps.push({ to: cell, path: EMPTY_PATH, ori: oriIndex(action.orientation), target })
+    } else {
+      steps.push({ to: cell, path: EMPTY_PATH, ori: ORI_UNCHANGED, target })
+    }
+  }
+  return steps
 }
 
 const stepsFrom = (
   type: UnitType,
-  state: State,
+  cell: number,
+  ori: number,
   ground: Ground,
   options: ReadonlyArray<number> | undefined,
-): Step[] => {
-  const unit: GrammarUnit = {
-    type,
-    occupancy: [state.cell],
-    orientation: ORTHOGONALS[state.ori],
+): ReadonlyArray<Step> => {
+  // What the answer depends on is what it is remembered by: the pawn's is keyed
+  // by the facing and held per board, every other kind's by the cell alone.
+  const reads = readsFacingAndContents(type)
+  const memo = reads ? ground.facing : ground.blind
+  const cells = ground.shape.boardWidth * ground.shape.boardHeight
+  let byState = memo.get(type)
+  if (byState === undefined) {
+    // A dense array, not a second hash: the key is a cell or a state, and both
+    // are small dense integers. The lookup is the innermost thing the dilation
+    // does that is not the grammar itself.
+    byState = new Array(reads ? cells * 4 : cells).fill(undefined)
+    memo.set(type, byState)
   }
-  const steps: Step[] = []
-  legalActions(unit, ground.shape, ground.pawnTargets).forEach(({ target, action }) => {
-    if (options && !options.includes(target)) return
-    if (action.kind === "move") {
-      steps.push({ to: action.path[action.path.length - 1], path: action.path, ori: state.ori })
-      return
-    }
-    if (action.kind === "rotate") {
-      steps.push({ to: state.cell, path: [], ori: oriIndex(action.orientation) })
-      return
-    }
-    steps.push({ to: state.cell, path: [], ori: state.ori })
-  })
-  return steps
+  const key = reads ? keyOf(cell, ori) : cell
+  let steps = byState[key]
+  if (steps === undefined) {
+    steps = allStepsFrom(type, cell, ori, ground)
+    byState[key] = steps
+  }
+  // The narrowing is a caller's, not the board's, so it is applied to the
+  // remembered answer rather than baked into it.
+  return options === undefined ? steps : steps.filter((step) => options.includes(step.target))
 }
 
 /** Everything one claim's reach is built out of, before the danger pass. */
@@ -277,6 +367,8 @@ interface Reach {
   /** Head sets at the end of each unknown turn BEFORE the settled one. */
   readonly turnHeads: number[][]
   readonly headPossible: number[][]
+  /** Earliest sub-step each cell is reachable at — the horizons, inverted. */
+  readonly earliestSubStep: Int32Array
   readonly everHead: Set<number>
   /** First-turn destinations that kill on terrain alone, and how many there were. */
   readonly fatalFirst: number
@@ -329,18 +421,24 @@ export const computeClaims = (input: PartialSettleInput): ReadonlyArray<Claim> =
   const heldIds = new Set(input.held.map((h) => h.id))
   // Both boards, and both pawn-target sets, built ONCE for the whole call:
   // everything below asks the grammar about one of these two and nothing else.
-  const real = groundOf(shapeOf(input))
-  const permissive = groundOf(permissiveShapeOf(real.shape))
+  const blind: Map<UnitType, (ReadonlyArray<Step> | undefined)[]> = new Map()
+  const real = groundOf(shapeOf(input), blind)
+  const permissive = groundOf(permissiveShapeOf(real.shape), blind)
   const subSteps = subStepsOf(input, heldIds, real)
-  const cells = input.boardWidth * input.boardHeight
   const wallSet = new Set(input.walls)
   const byId = new Map(input.units.map((u) => [u.id, u]))
+  const cells = input.boardWidth * input.boardHeight
+  const scratch: Scratch = {
+    seen: new Uint8Array(cells),
+    front: new Uint8Array(cells),
+    mark: new Uint8Array(cells * 4),
+  }
 
   const reaches: Reach[] = []
   input.held.forEach((held) => {
     const record = byId.get(held.id)
     if (!record) return
-    reaches.push(reachOf(held, record, input, real, permissive, subSteps, wallSet))
+    reaches.push(reachOf(held, record, input, real, permissive, subSteps, wallSet, scratch))
   })
 
   // The danger pass. A claim can be killed by terrain it chose, by a modelled
@@ -363,7 +461,7 @@ export const computeClaims = (input: PartialSettleInput): ReadonlyArray<Claim> =
       if (other === reach) return
       other.everHead.forEach((cell) => others.add(cell))
     })
-    return claimOf(reach, input, cells, liveCover, others, subSteps)
+    return claimOf(reach, input, liveCover, others, subSteps)
   })
   return foldRegicide(input, claims, byId)
 }
@@ -416,13 +514,15 @@ const reachOf = (
   permissive: Ground,
   subSteps: number,
   wallSet: Set<number>,
+  scratch: Scratch,
 ): Reach => {
   const span = Math.max(1, input.turn - held.observedTurn)
   const kinds: UnitType[] = [record.type]
   const weightCeiling = record.occupancy.length + span
   if (record.type === "pawn" && weightCeiling >= input.pawnPromotionWeight) kinds.push("queen")
 
-  const start: State = { cell: record.occupancy[0], ori: oriIndex(record.orientation) }
+  const startCell = record.occupancy[0]
+  const startOri = oriIndex(record.orientation)
   // The cells a trail unit's own step would land it inside itself. The TAIL is
   // not one of them: it departs deterministically as the head arrives, so
   // stepping onto it is a legal, survivable move — unless the unit grew this
@@ -436,63 +536,97 @@ const reachOf = (
   let fatalFirst = 0
   let totalFirst = 0
   let longestPath = 1
-  kinds.forEach((type) => {
-    stepsFrom(type, start, real, held.options).forEach((step) => {
+  for (const type of kinds) {
+    const trail = leavesTrail(type)
+    for (const step of stepsFrom(type, startCell, startOri, real, held.options)) {
       totalFirst++
-      longestPath = Math.max(longestPath, step.path.length)
-      if (wallSet.has(step.to) || (leavesTrail(type) && selfFatal.has(step.to))) fatalFirst++
-    })
-  })
+      if (step.path.length > longestPath) longestPath = step.path.length
+      if (wallSet.has(step.to) || (trail && selfFatal.has(step.to))) fatalFirst++
+    }
+  }
+
+  // Every set below is a set of BOARD CELLS or of dilation states, so it is a
+  // flag per index rather than a hash. Read out in ascending cell order, a
+  // flag array yields the sorted, de-duplicated array these sets are wanted as
+  // — the `sorted` call that used to build each of them was a Set, an
+  // Array.from and a comparison sort per horizon per held unit. The arrays
+  // belong to the CALL, not to this unit: each is cleared as it is drained.
+  const cellCount = real.shape.boardWidth * real.shape.boardHeight
+  const { seen, front, mark } = scratch
+  seen.fill(0)
 
   // Dilation. Each kind it could be runs its own track and the reach is the
   // union: promotion is a rule, and a queen's grammar is not a pawn's.
-  let states = new Map<number, State>([[keyOf(start), start]])
-  const turnHeads: number[][] = [[start.cell]]
-  const everHead = new Set<number>([start.cell])
+  let states: number[] = [keyOf(startCell, startOri)]
+  const turnHeads: number[][] = [[startCell]]
+  seen[startCell] = 1
 
   for (let turn = 1; turn < span; turn++) {
-    const next = new Map<number, State>()
+    const next: number[] = []
     const board = turn === 1 ? real : permissive
     const options = turn === 1 ? held.options : undefined
-    states.forEach((state) => {
-      kinds.forEach((type) => {
-        stepsFrom(type, state, board, options).forEach((step) => {
-          const to: State = { cell: step.to, ori: step.ori }
-          next.set(keyOf(to), to)
-          step.path.forEach((cell) => everHead.add(cell))
-        })
-      })
-    })
-    states = next.size > 0 ? next : states
-    const heads = sorted(Array.from(states.values()).map((s) => s.cell))
+    for (let s = 0; s < states.length; s++) {
+      const key = states[s]
+      const cell = key >> 2
+      const ori = key & 3
+      for (let t = 0; t < kinds.length; t++) {
+        const steps = stepsFrom(kinds[t], cell, ori, board, options)
+        for (let i = 0; i < steps.length; i++) {
+          const step = steps[i]
+          const to = keyOf(step.to, step.ori === ORI_UNCHANGED ? ori : step.ori)
+          if (mark[to] === 0) {
+            mark[to] = 1
+            next.push(to)
+          }
+          const path = step.path
+          for (let j = 0; j < path.length; j++) seen[path[j]] = 1
+        }
+      }
+    }
+    for (let i = 0; i < next.length; i++) mark[next[i]] = 0
+    if (next.length > 0) states = next
+    const heads = headsOf(states, front)
     turnHeads.push(heads)
-    heads.forEach((cell) => everHead.add(cell))
+    for (let i = 0; i < heads.length; i++) seen[heads[i]] = 1
   }
 
   // The settled turn, sub-step by sub-step. A unit stopped short of its ray
   // stays where it was stopped, so the sets are cumulative — which is also
-  // exactly what "it may simply have held" means.
+  // exactly what "it may simply have held" means. Cumulative is the whole of
+  // what they say, so what is recorded is the EARLIEST sub-step each cell is
+  // reachable at, and the horizons are read off that: `headPossible[k]` is the
+  // cells whose earliest is at most k, which is also `earliestSubStep` itself
+  // and is no longer derived a second time by the claim.
   const board = span === 1 ? real : permissive
   const options = span === 1 ? held.options : undefined
-  const headPossible: number[][] = [sorted(Array.from(states.values()).map((s) => s.cell))]
-  const perStep: Set<number>[] = []
-  for (let k = 0; k < subSteps; k++) perStep.push(new Set<number>())
-  states.forEach((state) => {
-    kinds.forEach((type) => {
-      stepsFrom(type, state, board, options).forEach((step) => {
-        step.path.forEach((cell, i) => {
-          if (i < subSteps) perStep[i].add(cell)
-        })
-      })
-    })
-  })
-  for (let k = 1; k <= subSteps; k++) {
-    const union = new Set(headPossible[k - 1])
-    perStep[k - 1].forEach((cell) => union.add(cell))
-    headPossible.push(sorted(union))
+  const heads = headsOf(states, front)
+  const earliestSubStep = new Int32Array(cellCount).fill(NEVER)
+  for (let i = 0; i < heads.length; i++) earliestSubStep[heads[i]] = 0
+  for (let s = 0; s < states.length; s++) {
+    const key = states[s]
+    const cell = key >> 2
+    const ori = key & 3
+    for (let t = 0; t < kinds.length; t++) {
+      const steps = stepsFrom(kinds[t], cell, ori, board, options)
+      for (let i = 0; i < steps.length; i++) {
+        const path = steps[i].path
+        const walked = path.length < subSteps ? path.length : subSteps
+        for (let j = 0; j < walked; j++) {
+          if (earliestSubStep[path[j]] > j + 1) earliestSubStep[path[j]] = j + 1
+        }
+      }
+    }
   }
-  headPossible[headPossible.length - 1].forEach((cell) => everHead.add(cell))
-  headPossible.forEach((set) => set.forEach((cell) => everHead.add(cell)))
+  const headPossible: number[][] = [heads]
+  for (let k = 1; k <= subSteps; k++) {
+    const front: number[] = []
+    for (let cell = 0; cell < cellCount; cell++) if (earliestSubStep[cell] <= k) front.push(cell)
+    headPossible.push(front)
+  }
+  for (let cell = 0; cell < cellCount; cell++) if (earliestSubStep[cell] !== NEVER) seen[cell] = 1
+
+  const everHead = new Set<number>()
+  for (let cell = 0; cell < cellCount; cell++) if (seen[cell]) everHead.add(cell)
 
   return {
     held,
@@ -501,6 +635,7 @@ const reachOf = (
     kinds,
     turnHeads,
     headPossible,
+    earliestSubStep,
     everHead,
     fatalFirst,
     totalFirst,
@@ -508,11 +643,23 @@ const reachOf = (
   }
 }
 
+/** The head front of a state set, as the ascending cell array everything wants. */
+const headsOf = (states: ReadonlyArray<number>, front: Uint8Array): number[] => {
+  for (let i = 0; i < states.length; i++) front[states[i] >> 2] = 1
+  const heads: number[] = []
+  for (let cell = 0; cell < front.length; cell++) {
+    if (front[cell]) {
+      heads.push(cell)
+      front[cell] = 0
+    }
+  }
+  return heads
+}
+
 /** The claim itself: the reach, plus the intervals and the two survival flags. */
 const claimOf = (
   reach: Reach,
   input: PartialSettleInput,
-  cells: number,
   liveCover: Set<number>,
   otherClaims: Set<number>,
   subSteps: number,
@@ -642,13 +789,6 @@ const claimOf = (
   // and a claim cannot read a claim that is still being built.
   const selfDeathPossible = certainlyGone || reach.fatalFirst > 0 || reachable || couldExhaust
 
-  const earliestSubStep = new Int32Array(cells).fill(NEVER)
-  headPossible.forEach((set, k) => {
-    set.forEach((cell) => {
-      if (cell >= 0 && cell < cells && earliestSubStep[cell] === NEVER) earliestSubStep[cell] = k
-    })
-  })
-
   return {
     id: record.id,
     teamID: record.teamID,
@@ -659,7 +799,7 @@ const claimOf = (
     bodyPossible,
     everPossible,
     certainIfAlive,
-    earliestSubStep,
+    earliestSubStep: reach.earliestSubStep,
     weightMin: severPossible || promotionPossible ? 1 : length,
     weightMax,
     tierMin,

@@ -1,5 +1,11 @@
 import { UnitType } from "@shared/types/Game"
-import { Orientation, UnitAction, defaultAction, planUnitAction } from "./moveGrammar"
+import {
+  Orientation,
+  UnitAction,
+  defaultAction,
+  planFromCoords,
+  planUnitAction,
+} from "./moveGrammar"
 
 /**
  * The grammar itself, re-exported so a consumer has ONE place to import the
@@ -189,19 +195,35 @@ export const legalActions = (
   pawnTargets: ReadonlySet<number> = pawnTargetsOf(board),
 ): { target: number; action: UnitAction }[] => {
   const origin = unit.occupancy[0]
-  const cells = board.boardWidth * board.boardHeight
+  const width = board.boardWidth
+  const height = board.boardHeight
+  // The sweep walks the board in rows, so the destination's coordinates ARE
+  // the loop counters and the origin's are constant: the grammar is asked
+  // through `planFromCoords`, which is `planUnitAction` with those four
+  // divisions already done. This is the innermost loop of everything that
+  // reads a claim, and it is the same rule either way — one encoding, asked
+  // with its arithmetic in hand.
+  const ox = origin % width
+  const oy = Math.floor(origin / width)
   const out: { target: number; action: UnitAction }[] = []
-  for (let cell = 0; cell < cells; cell++) {
-    const action = planUnitAction(
-      unit.type,
-      origin,
-      cell,
-      board.boardWidth,
-      board.boardHeight,
-      unit.orientation,
-      pawnTargets,
-    )
-    if (action) out.push({ target: cell, action })
+  let cell = 0
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++, cell++) {
+      const action = planFromCoords(
+        unit.type,
+        origin,
+        ox,
+        oy,
+        cell,
+        x,
+        y,
+        width,
+        height,
+        unit.orientation,
+        pawnTargets,
+      )
+      if (action) out.push({ target: cell, action })
+    }
   }
   return out
 }
