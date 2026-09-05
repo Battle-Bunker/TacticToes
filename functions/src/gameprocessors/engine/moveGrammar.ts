@@ -28,6 +28,21 @@ export const leavesTrail = (type: UnitType): boolean => type === "snake"
 /** A jump crosses no edge, so a knight can never contest one. */
 export const traversesEdges = (type: UnitType): boolean => type !== "knight"
 
+/**
+ * Whether a kind's grammar reads anything but the two squares and the board's
+ * dimensions. Only a pawn's does, and it reads BOTH of the things there are to
+ * read: its facing (its step is the way it points, its side squares are turns)
+ * and the board's contents (its diagonal is legal only onto food or a body).
+ *
+ * Every other kind's answer is a pure function of origin, destination and the
+ * board's shape — the same answer whichever way the unit is turned and whoever
+ * is standing where. A caller REMEMBERING the grammar's answers reads this to
+ * find out what it must key them by: `claims.ts`'s dilation asks the same
+ * question of the same square from four facings and against two boards, and
+ * for six kinds in seven those are one question, not eight.
+ */
+export const readsFacingAndContents = (type: UnitType): boolean => type === "pawn"
+
 export const toXY = (index: number, boardWidth: number): { x: number; y: number } => ({
   x: index % boardWidth,
   y: Math.floor(index / boardWidth),

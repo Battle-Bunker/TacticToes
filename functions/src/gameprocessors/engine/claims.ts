@@ -1,5 +1,11 @@
 import { UnitType } from "@shared/types/Game"
-import { ORTHOGONALS, Orientation, leavesTrail, traversesEdges } from "./moveGrammar"
+import {
+  ORTHOGONALS,
+  Orientation,
+  leavesTrail,
+  readsFacingAndContents,
+  traversesEdges,
+} from "./moveGrammar"
 import {
   BoardShape,
   GrammarUnit,
@@ -233,36 +239,56 @@ interface Ground {
   readonly shape: BoardShape
   readonly pawnTargets: ReadonlySet<number>
   /**
-   * The grammar's answer for a state, remembered for the length of the call.
+   * The grammar's answer for a state, remembered for the length of the call —
+   * for the ONE KIND whose answer depends on this board and on the facing.
    *
-   * A step out of `(cell, facing)` for a kind is a pure function of the kind,
-   * the state and this board — the dilation asks it once per state per kind
-   * per unknown turn, per HELD UNIT, and the state sets of several held units
-   * over the same board overlap almost completely by the second turn. So the
-   * answer is memoised per board rather than recomputed: `legalActions` is a
-   * full board sweep through `planUnitAction`, and it was 23% of the profile.
-   *
-   * Keyed the way the dilation keys a state (`keyOf`), under the kind. The
-   * memo belongs to the Ground because the answer does: a board and the steps
-   * it admits travel together, exactly as its pawn targets do.
+   * A step out of `(cell, facing)` is a pure function of the kind, the state
+   * and the board, and `legalActions` answers it with a full board sweep. The
+   * dilation asks it once per state per kind per unknown turn, per HELD UNIT,
+   * and the state sets of several held units over the same board overlap
+   * almost completely by the second turn — so the answer is remembered rather
+   * than recomputed. Keyed the way the dilation keys a state (`keyOf`), under
+   * the kind. It belongs to the Ground because the answer does: a board and
+   * the steps it admits travel together, exactly as its pawn targets do.
    */
-  readonly steps: Map<UnitType, Map<number, ReadonlyArray<Step>>>
+  readonly facing: Map<UnitType, Map<number, ReadonlyArray<Step>>>
+  /**
+   * The same, for every kind whose answer depends on NEITHER the facing nor
+   * the board's contents (`moveGrammar.ts::readsFacingAndContents`) — keyed by
+   * the cell alone, and shared with the call's other board, because a rook's
+   * moves off a square are a rook's moves off that square whichever way it is
+   * turned and whichever of the two boards is asking.
+   */
+  readonly blind: Map<UnitType, Map<number, ReadonlyArray<Step>>>
 }
 
-const groundOf = (shape: BoardShape): Ground => ({
+const groundOf = (
+  shape: BoardShape,
+  blind: Map<UnitType, Map<number, ReadonlyArray<Step>>>,
+): Ground => ({
   shape,
   pawnTargets: pawnTargetsOf(shape),
-  steps: new Map(),
+  facing: new Map(),
+  blind,
 })
 
 /** One legal continuation from a state: where it ends, what it walks, how it faces. */
 interface Step {
   readonly to: number
   readonly path: ReadonlyArray<number>
+  /**
+   * The facing it ends in, or -1 when the step leaves the facing alone — which
+   * every step but a pawn's turn does. Held as "unchanged" rather than as the
+   * facing it came from so that an answer can be remembered for a kind that
+   * never reads a facing at all.
+   */
   readonly ori: number
   /** The cell staged to reach it — what a caller's `options` narrowing names. */
   readonly target: number
 }
+
+/** `Step.ori` for a step that leaves the unit facing the way it already was. */
+const ORI_UNCHANGED = -1
 
 /**
  * The flag arrays a dilation runs on, allocated once for the whole call.
@@ -290,11 +316,12 @@ const allStepsFrom = (type: UnitType, cell: number, ori: number, ground: Ground)
   for (let i = 0; i < legal.length; i++) {
     const { target, action } = legal[i]
     if (action.kind === "move") {
-      steps.push({ to: action.path[action.path.length - 1], path: action.path, ori, target })
+      const path = action.path
+      steps.push({ to: path[path.length - 1], path, ori: ORI_UNCHANGED, target })
     } else if (action.kind === "rotate") {
       steps.push({ to: cell, path: EMPTY_PATH, ori: oriIndex(action.orientation), target })
     } else {
-      steps.push({ to: cell, path: EMPTY_PATH, ori, target })
+      steps.push({ to: cell, path: EMPTY_PATH, ori: ORI_UNCHANGED, target })
     }
   }
   return steps
@@ -307,12 +334,16 @@ const stepsFrom = (
   ground: Ground,
   options: ReadonlyArray<number> | undefined,
 ): ReadonlyArray<Step> => {
-  let byState = ground.steps.get(type)
+  // What the answer depends on is what it is remembered by: the pawn's is keyed
+  // by the facing and held per board, every other kind's by the cell alone.
+  const reads = readsFacingAndContents(type)
+  const memo = reads ? ground.facing : ground.blind
+  let byState = memo.get(type)
   if (byState === undefined) {
     byState = new Map()
-    ground.steps.set(type, byState)
+    memo.set(type, byState)
   }
-  const key = keyOf(cell, ori)
+  const key = reads ? keyOf(cell, ori) : cell
   let steps = byState.get(key)
   if (steps === undefined) {
     steps = allStepsFrom(type, cell, ori, ground)
@@ -386,8 +417,9 @@ export const computeClaims = (input: PartialSettleInput): ReadonlyArray<Claim> =
   const heldIds = new Set(input.held.map((h) => h.id))
   // Both boards, and both pawn-target sets, built ONCE for the whole call:
   // everything below asks the grammar about one of these two and nothing else.
-  const real = groundOf(shapeOf(input))
-  const permissive = groundOf(permissiveShapeOf(real.shape))
+  const blind: Map<UnitType, Map<number, ReadonlyArray<Step>>> = new Map()
+  const real = groundOf(shapeOf(input), blind)
+  const permissive = groundOf(permissiveShapeOf(real.shape), blind)
   const subSteps = subStepsOf(input, heldIds, real)
   const wallSet = new Set(input.walls)
   const byId = new Map(input.units.map((u) => [u.id, u]))
@@ -537,7 +569,7 @@ const reachOf = (
         const steps = stepsFrom(kinds[t], cell, ori, board, options)
         for (let i = 0; i < steps.length; i++) {
           const step = steps[i]
-          const to = keyOf(step.to, step.ori)
+          const to = keyOf(step.to, step.ori === ORI_UNCHANGED ? ori : step.ori)
           if (mark[to] === 0) {
             mark[to] = 1
             next.push(to)
