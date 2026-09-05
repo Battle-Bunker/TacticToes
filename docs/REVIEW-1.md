@@ -189,6 +189,32 @@ run. The verdict is written under the finding, with the test that carries it.
    was always a full tank. Flagged only so it is a decision rather than a
    side effect.
 
+   **NOT A DEFECT — a rule decision, and one the PR did not introduce the
+   shape of.** Three things settle it. (a) It is the documented rule and it is
+   pinned to the cell: `resolveTurn.spec.ts`, *lets an exhausted unit eat and
+   die anyway when the meal cannot lift it*, asserts `settled.food` is `[]`
+   over the eater's corpse. (b) The order is not an accident of phasing that
+   could be swapped: the food phase runs on the survivors of the collision
+   phase and BEFORE exhaustion stops being provisional, because the meal is
+   what decides whether the unit is doomed at all — a unit killed by a
+   collision never reaches the phase and never eats, and putting the food back
+   afterwards would make a meal conditional on its own outcome. (c) A doomed
+   unit consuming the food it ends on is already `develop`'s behaviour by
+   another route, on byte-identical phase ordering (`4. Food`, `5. Exhaustion`,
+   `6. Regicide` in both): a unit whose king falls this turn eats first and is
+   eliminated after. Measured on this branch —
+
+   ```
+   REGICIDE deaths={"k":{...,"cause":"contest"},"p":{"cell":58,"cause":"regicide"}}
+            food=[] board=["e"]
+   ```
+
+   — the pawn ate the meal at 58 and left the board on the same turn. What is
+   new is only that the EXHAUSTION instance is reachable at all, and it is
+   reachable because `foodEnergy` can now be worth less than a tank (§2.3),
+   where `develop`'s meal restored to max and always rescued. So the decision
+   in front of the owner is the food rule already taken, not a new one.
+
 4. **Spawn parity is not a property of the non-cluster spawn path.**
    `placement.ts:99` / `generateStartingPositions`. `getSpawnCells` enforces
    `(x + y) % 2 === 0` for the team-cluster path only; the edge/midpoint
