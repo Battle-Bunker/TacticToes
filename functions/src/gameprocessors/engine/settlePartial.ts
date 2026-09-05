@@ -2,7 +2,7 @@ import { ActiveEffect, Clash, ClashKind } from "@shared/types/Game"
 import { BoardView, EndKind, Outcome, adjudicate } from "./adjudicate"
 import { Claim, PartialSettleInput, computeClaims } from "./claims"
 import { UnitAction, leavesTrail, traversesEdges } from "./moveGrammar"
-import { BoardShape, stagedAction } from "./queries"
+import { BoardShape, pawnTargetsOf, stagedAction } from "./queries"
 import { ResolveUnit } from "./resolveTurn"
 import { Settlement, settleTurn } from "./settleTurn"
 import { SpawnState, Spawner } from "./spawn"
@@ -1238,9 +1238,13 @@ const grammarDivergences = (
       ...absent.occupancy,
       { id: claim.id, cells: [...claim.headPossible[0], ...claim.bodyPossible[0]] },
     ])
+    // Two boards per claim, asked of every staged unit: the pawn-target set is
+    // the same for all of them and is built once per board, not once per ask.
+    const absentTargets = pawnTargetsOf(absent)
+    const presentTargets = pawnTargetsOf(present)
     staged.forEach((unit) => {
-      const most = stagedAction(unit, unit.stagedMove, present)
-      const least = stagedAction(unit, unit.stagedMove, absent)
+      const most = stagedAction(unit, unit.stagedMove, present, presentTargets)
+      const least = stagedAction(unit, unit.stagedMove, absent, absentTargets)
       if (sameAction(most, least)) return
       add({
         // The staged destination: the cell whose reading is what turned over.

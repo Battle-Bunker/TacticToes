@@ -1,6 +1,6 @@
 import { Clash, UnitDeath, UnitMaxEnergy, UnitType } from "@shared/types/Game"
 import { Orientation, leavesTrail, traversesEdges } from "./moveGrammar"
-import { BoardShape, stagedAction } from "./queries"
+import { BoardShape, pawnTargetsOf, stagedAction } from "./queries"
 import { EngineUnit, ExhaustionEvent, REASON, runTurnEngine } from "./turnEngine"
 
 /**
@@ -179,6 +179,11 @@ export const resolveTurn = (input: ResolveTurnInput): TurnResolution => {
     food: input.food,
   }
 
+  // One board, one pawn-target set: staging asks the same question of the same
+  // cells for every unit on the roster, and building the set inside each of
+  // those asks is a board sweep per unit per turn (queries.ts::pawnTargetsOf).
+  const pawnTargets = pawnTargetsOf(shape)
+
   const rotations: { [unitID: string]: Orientation } = {}
   const paths: { [unitID: string]: number[] } = {}
   units.forEach((u) => {
@@ -186,7 +191,7 @@ export const resolveTurn = (input: ResolveTurnInput): TurnResolution => {
       paths[u.id] = u.path
       return
     }
-    const action = stagedAction(u, u.stagedMove, shape)
+    const action = stagedAction(u, u.stagedMove, shape, pawnTargets)
 
     if (action.kind === "move") {
       paths[u.id] = action.path
