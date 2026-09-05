@@ -9,7 +9,7 @@
 //
 // So this file plays a whole potions-on game, turn by turn, and pins the
 // complete produced turn stream as a byte-for-byte fixture. Every wire field
-// of every turn is in it: boards, health, deaths, clashes, moves, scores,
+// of every turn is in it: boards, energy, deaths, clashes, moves, scores,
 // potions, tiers and the effect schedule. Move a phase past another one and
 // the fixture disagrees somewhere.
 //
@@ -41,19 +41,11 @@
 // 8` differs from the run at 3 in the effects' `expiryTurn` values and in
 // nothing else at all.
 
-import { readFileSync, writeFileSync } from "fs"
 import { join } from "path"
 import { Timestamp } from "firebase-admin/firestore"
-import {
-  ActiveEffect,
-  GameState,
-  Move,
-  StartedGameSetup,
-  Team,
-  Turn,
-} from "@shared/types/Game"
-import { expandTeams } from "../utils/expandTeams"
-import { TeamSnekProcessor } from "./TeamSnekProcessor"
+import { ActiveEffect, StartedGameSetup, Team, Turn } from "@shared/types/Game"
+import { check, mv, runReplay as runReplayScript, serialise } from "./goldenReplay"
+import { mkSetup as sharedMkSetup } from "./playTurn"
 
 // ── the board ──────────────────────────────────────────────────────────────
 
@@ -116,22 +108,17 @@ const teams: Team[] = [
   { id: "t2", name: "Team Two", color: "#00ff00" },
 ]
 
-const mkSetup = (overrides: Partial<StartedGameSetup> = {}): StartedGameSetup => ({
-  teams,
-  snakesPerTeam: 2,
-  gamePlayers: expandTeams(teams, 2),
-  boardWidth: W,
-  boardHeight: W,
-  maxTurnTime: 5,
-  startRequested: false,
-  started: true,
-  timeCreated: Timestamp.fromMillis(0),
-  // Both spawners off: the replay's food and potions are the ones on the wire.
-  foodSpawnRate: 0,
-  invulnerabilityPotionEnabled: true,
-  invulnerabilityPotionSpawnRate: 0,
-  ...overrides,
-})
+const mkSetup = (overrides: Partial<StartedGameSetup> = {}): StartedGameSetup =>
+  sharedMkSetup({
+    teams,
+    snakesPerTeam: 2,
+    boardWidth: W,
+    boardHeight: W,
+    // Both spawners off: the replay's food and potions are the ones on the wire.
+    invulnerabilityPotionEnabled: true,
+    invulnerabilityPotionSpawnRate: 0,
+    ...overrides,
+  })
 
 /**
  * The effect schedule the replay starts on. Between them these reach every
@@ -153,7 +140,7 @@ const startingTurn = (): Turn => {
   })
   const ids = Object.keys(playerPieces)
   return {
-    playerHealth: Object.fromEntries(ids.map((id) => [id, 100])),
+    playerEnergy: Object.fromEntries(ids.map((id) => [id, 100])),
     startTime: Timestamp.fromMillis(0),
     endTime: Timestamp.fromMillis(5000),
     scores: Object.fromEntries(ids.map((id) => [id, playerPieces[id].length])),
@@ -172,87 +159,47 @@ const startingTurn = (): Turn => {
   }
 }
 
-const mkGameState = (setup: StartedGameSetup, turns: Turn[]): GameState => ({
-  setup,
-  turns,
-  walls: [],
-  timeCreated: Timestamp.fromMillis(0),
-  timeFinished: null,
-})
-
-const mv = (playerID: string, move: number): Move => ({
-  gameID: "replay",
-  moveNumber: 0,
-  playerID,
-  move,
-  timestamp: Timestamp.fromMillis(0),
-})
-
 // ── the replay ─────────────────────────────────────────────────────────────
-
-/** A seeded LCG, so the replay owns its own randomness rather than borrowing. */
-const seededRandom = (seed: number): (() => number) => {
-  let state = seed >>> 0
-  return () => {
-    state = (state * 1664525 + 1013904223) >>> 0
-    return state / 0x100000000
-  }
-}
 
 const REPLAY_SEED = 0x5eed1a5
 
 /** Plays REPLAY_TURNS turns and returns every turn the processor produced. */
-const runReplay = (setupOverrides: Partial<StartedGameSetup> = {}): Turn[] => {
-  const setup = mkSetup(setupOverrides)
-  const original = Math.random
-  Math.random = seededRandom(REPLAY_SEED)
-  try {
-    const turns: Turn[] = [startingTurn()]
-    const produced: Turn[] = []
-    for (let turn = 1; turn <= REPLAY_TURNS; turn++) {
-      const current = turns[turns.length - 1]
-      const processor = new TeamSnekProcessor(mkGameState(setup, turns))
-      const moves = current.alivePlayers.map((id) => mv(id, moveFor(id, turn)))
-      const next = processor.applyMoves(current, moves)
-      turns.push(next)
-      produced.push(next)
-    }
-    return produced
-  } finally {
-    Math.random = original
-  }
-}
-
-/**
- * Key order is not a wire fact (Firestore stores documents, not JSON text), so
- * the fixture is canonicalised with sorted keys. Array order IS a wire fact —
- * the clash stream and the effect schedule are both ordered — and is kept.
- */
-const canonical = (value: unknown): unknown => {
-  if (Array.isArray(value)) return value.map(canonical)
-  if (value && typeof value === "object") {
-    const source = value as { [key: string]: unknown }
-    const out: { [key: string]: unknown } = {}
-    Object.keys(source)
-      .sort()
-      .forEach((key) => {
-        out[key] = canonical(source[key])
-      })
-    return out
-  }
-  return value
-}
-
-const serialise = (stream: Turn[]): string =>
-  `${JSON.stringify(canonical(stream), null, 2)}\n`
+const runReplay = (setupOverrides: Partial<StartedGameSetup> = {}): Turn[] =>
+  runReplayScript({
+    setup: mkSetup(setupOverrides),
+    startingTurn: startingTurn(),
+    moves: (turn, alive) => alive.map((id) => mv(id, moveFor(id, turn))),
+    turns: REPLAY_TURNS,
+    seed: REPLAY_SEED,
+  })
 
 const GOLDEN = join(__dirname, "settlementReplay.golden.json")
 const GOLDEN_WINDOW_8 = join(__dirname, "settlementReplay.window8.golden.json")
+const GOLDEN_SPAWNERS_ON = join(__dirname, "settlementReplay.spawners.golden.json")
+const GOLDEN_LEAN_FOOD = join(__dirname, "settlementReplay.leanfood.golden.json")
+
+/**
+ * The same game with BOTH spawners running: a food every turn and a potion
+ * every turn, each placed on a free cell the seeded LCG picks. This is the
+ * variant the spawner migration is measured against, and it only works as a
+ * gate because the draws are pinned — the spawners consume the same sequence
+ * in the same order, so a spawner that moved across the phase boundary and
+ * changed WHEN it drew would put its items somewhere else, and every turn
+ * downstream of it would disagree.
+ *
+ * A potion spawning every turn also means potions land where snakes are about
+ * to walk, so this run collects several that the base replay never places —
+ * which is the point: it exercises the spawn/collect loop, not just the spawn.
+ */
+const SPAWNERS_ON: Partial<StartedGameSetup> = {
+  foodSpawnRate: 1,
+  invulnerabilityPotionSpawnRate: 1,
+}
 
 /**
  * The same stream with every `expiryTurn` blanked. Two runs whose blanked
  * serialisations match differ in expiry turns and in nothing whatsoever else
- * — not a board, not a health, not a tier, not the order of an effect.
+ * — not a board, not an energy, not a tier, not the order of an effect.
  */
 const withoutExpiryTurns = (stream: Turn[]): string =>
   serialise(stream).replace(/"expiryTurn": -?\d+/g, '"expiryTurn": <n>')
@@ -260,12 +207,6 @@ const withoutExpiryTurns = (stream: Turn[]): string =>
 /** Every effect on the last replayed turn, as (owner, expiry) pairs. */
 const finalSchedule = (stream: Turn[]): [string, number][] =>
   (stream[stream.length - 1].activeEffects ?? []).map((e) => [e.playerID, e.expiryTurn])
-
-/** Set UPDATE_GOLDEN=1 to re-record. Only ever legitimate before a move. */
-const check = (actual: string, path: string): void => {
-  if (process.env.UPDATE_GOLDEN === "1") writeFileSync(path, actual)
-  expect(actual).toBe(readFileSync(path, "utf8"))
-}
 
 describe("golden settlement replay", () => {
   it("replays a potions-on game turn by turn, byte for byte", () => {
@@ -298,6 +239,74 @@ describe("golden settlement replay", () => {
     ])
 
     check(serialise(eight), GOLDEN_WINDOW_8)
+  })
+
+  it("plays the same game with both spawners running", () => {
+    // Food and potion spawning are the last two things left outside the
+    // module that a turn actually does, and they are about to move inside it,
+    // behind an injected RNG. What makes that checkable is a run in which
+    // both spawners fire on every turn: the cells they choose are a function
+    // of the free-cell set AND of the draw order, so any change to either
+    // shows up here as a different board.
+    const stream = runReplay(SPAWNERS_ON)
+    check(serialise(stream), GOLDEN_SPAWNERS_ON)
+  })
+
+  /**
+   * The same spawners-on game with a food worth 5 instead of a whole tank.
+   *
+   * The base and window-8 replays never eat — both spawn rates are zero — so
+   * the food rule needs the spawners-on board to be visible at all, and it
+   * needs a `foodEnergy` small enough that a meal does NOT fill a snake that
+   * has spent a handful of energy walking its circuit. Here two snakes each
+   * eat one food (turns 8 and 9); at 100 the meal fills the tank and both grow
+   * to weight 4, at 5 it feeds them and neither does. That is the whole rule,
+   * pinned on a real board rather than a two-unit fixture: growth is what a
+   * full tank costs.
+   */
+  const LEAN_FOOD: Partial<StartedGameSetup> = { ...SPAWNERS_ON, foodEnergy: 5 }
+
+  it("feeds without growing when one food is worth less than the tank", () => {
+    const lean = runReplay(LEAN_FOOD)
+    check(serialise(lean), GOLDEN_LEAN_FOOD)
+
+    const full = runReplay(SPAWNERS_ON)
+    // The two meals of this replay, as (index into the produced stream, eater).
+    const meals: [number, string][] = [
+      [8, "t2"],
+      [9, "t1#2"],
+    ]
+    meals.forEach(([i, eater]) => {
+      const spentWalking = lean[i - 1].playerEnergy[eater]
+      // Fed to the brim: at max, and a length longer for it.
+      expect(full[i].playerEnergy[eater]).toBe(100)
+      expect(full[i].playerPieces[eater].length).toBe(4)
+      // Fed 5: one square's walking charged, five back, and no length. The
+      // snake is better off than it was and no heavier for it.
+      expect(lean[i].playerEnergy[eater]).toBe(spentWalking - 1 + 5)
+      expect(lean[i].playerPieces[eater].length).toBe(3)
+    })
+  })
+
+  it("spawns, and has the spawns collected, so the spawner fixture is not vacuous", () => {
+    const stream = runReplay(SPAWNERS_ON)
+    const base = runReplay()
+
+    // Both spawners actually placed things, on every turn.
+    stream.forEach((turn) => {
+      expect(turn.food.length).toBeGreaterThan(0)
+      expect((turn.invulnerabilityPotions ?? []).length).toBeGreaterThan(0)
+    })
+
+    // And what they placed was walked over: the board holds fewer foods than
+    // were spawned, because a snake ate one where it landed.
+    expect(stream[stream.length - 1].food.length).toBeLessThan(REPLAY_TURNS)
+
+    // And the spawned potions were picked up: this run ends with effects the
+    // base run — same moves, same board, no spawners — never wrote.
+    const effectsOf = (turns: Turn[]): number =>
+      (turns[turns.length - 1].activeEffects ?? []).length
+    expect(effectsOf(stream)).toBeGreaterThan(effectsOf(base))
   })
 
   it("fires every mechanic the migration moves, so the fixture is not vacuous", () => {

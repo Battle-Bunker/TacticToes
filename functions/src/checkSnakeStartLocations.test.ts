@@ -1,7 +1,6 @@
-import { GamePlayer, GameState } from "@shared/types/Game"
-import { Timestamp } from "firebase/firestore"
+import { GameState } from "@shared/types/Game"
 import { TeamSnekProcessor } from "./gameprocessors/TeamSnekProcessor"
-import { expandTeams } from "./utils/expandTeams"
+import { mkGameState, mkSetup } from "./gameprocessors/playTurn"
 import { assignCellsToSlices } from "./utils/radialSlices"
 
 // Mock Timestamp.now() to return a consistent value
@@ -27,28 +26,10 @@ describe("snake start locations", () => {
       name: `Team ${i + 1}`,
       color: "#ff0000",
     }))
-    const gamePlayers: GamePlayer[] = teams.map((team) => ({
-      id: team.id,
-      teamID: team.id,
-      letter: "A",
-    }))
-    return {
-      turns: [],
-      walls: [],
-      setup: {
-        teams,
-        snakesPerTeam: 1,
-        gamePlayers,
-        boardWidth: width,
-        boardHeight: height,
-        maxTurnTime: 10,
-        startRequested: false,
-        started: true,
-        timeCreated: Timestamp.now(),
-      },
-      timeCreated: Timestamp.fromMillis(0),
-      timeFinished: Timestamp.fromMillis(0),
-    }
+    return mkGameState(
+      mkSetup({ teams, boardWidth: width, boardHeight: height, maxTurnTime: 10 }),
+      [],
+    )
   }
 
   function createTeamGameState(
@@ -62,26 +43,17 @@ describe("snake start locations", () => {
       name: `Team ${i + 1}`,
       color: `#00${i + 1}0${i + 1}0`,
     }))
-    const gamePlayers: GamePlayer[] = expandTeams(teams, snakesPerTeam)
-
-    return {
-      turns: [],
-      walls: [],
-      setup: {
+    return mkGameState(
+      mkSetup({
         teams,
         snakesPerTeam,
-        gamePlayers,
         boardWidth: width,
         boardHeight: height,
         maxTurnTime: 10,
-        startRequested: false,
-        started: true,
-        timeCreated: Timestamp.now(),
         teamClustersEnabled: true,
-      },
-      timeCreated: Timestamp.fromMillis(0),
-      timeFinished: Timestamp.fromMillis(0),
-    }
+      }),
+      [],
+    )
   }
 
   function getManhattanDistance(
@@ -110,55 +82,61 @@ describe("snake start locations", () => {
     const gameState = createGameState(7, 7, 4)
     const game = new TeamSnekProcessor(gameState)
     const initializedGame = game.firstTurn()
-    const board = game.visualizeBoard(initializedGame)
-    const lines = board.split("\n")
-    expect(lines.length).toBe(7)
-    expect(lines[0].split(" ").length).toBe(7)
+    const positions = getPositionMap(gameState, initializedGame)
+    positions.forEach((pos) => {
+      expect(pos.x).toBeGreaterThanOrEqual(0)
+      expect(pos.x).toBeLessThan(gameState.setup.boardWidth)
+      expect(pos.y).toBeGreaterThanOrEqual(0)
+      expect(pos.y).toBeLessThan(gameState.setup.boardHeight)
+    })
   })
 
   test("places correct number of players", () => {
     const gameState = createGameState(9, 9, 4)
     const game = new TeamSnekProcessor(gameState)
     const initializedGame = game.firstTurn()
-    const board = game.visualizeBoard(initializedGame)
-    const playerCount = (board.match(/[1-4]/g) || []).length
-    expect(playerCount).toBe(4)
+    expect(Object.keys(initializedGame.playerPieces).length).toBe(4)
   })
 
   test("places players on even squares", () => {
     const gameState = createGameState(11, 11, 8)
     const game = new TeamSnekProcessor(gameState)
     const initializedGame = game.firstTurn()
-    const board = game.visualizeBoard(initializedGame)
-    const lines = board.split("\n")
-    for (let y = 0; y < lines.length; y++) {
-      const squares = lines[y].split(" ")
-      for (let x = 0; x < squares.length; x++) {
-        if (squares[x].match(/[1-8]/)) {
-          expect((x + y) % 2).toBe(0)
-        }
-      }
-    }
+    const positions = getPositionMap(gameState, initializedGame)
+    positions.forEach((pos) => {
+      expect((pos.x + pos.y) % 2).toBe(0)
+    })
+  })
+
+  // The board's capacity is its interior, one unit to a cell: a 5x5 holds
+  // nine. `firestore.rules` allows a 5x5 board and up to 26 units a team, so
+  // the lobby can ask for more than the board has — and every spawn path stops
+  // when it runs out of cells rather than inventing one. The tenth unit on a
+  // 5x5 used to read a position off the end of the list and fail with
+  // `Cannot destructure property 'x' of 'positions[index]'`.
+  test("fills a 5x5 to its capacity, and says which board is too small past it", () => {
+    const full = createGameState(5, 5, 9)
+    const placed = new TeamSnekProcessor(full).firstTurn()
+    expect(Object.keys(placed.playerPieces).length).toBe(9)
+
+    const crowded = createGameState(5, 5, 10)
+    expect(() => new TeamSnekProcessor(crowded).firstTurn()).toThrow(
+      "Board too small to start: 5x5 has 9 spawn cells for 10 units.",
+    )
   })
 
   test("places players near edges for small number of players", () => {
     const gameState = createGameState(7, 7, 2)
     const game = new TeamSnekProcessor(gameState)
     const initializedGame = game.firstTurn()
-    const board = game.visualizeBoard(initializedGame)
-    const lines = board.split("\n")
-    const playerPositions = []
-    for (let y = 0; y < lines.length; y++) {
-      const squares = lines[y].split(" ")
-      for (let x = 0; x < squares.length; x++) {
-        if (squares[x].match(/[1-2]/)) {
-          playerPositions.push({ x, y })
-        }
-      }
-    }
-    playerPositions.forEach((pos) => {
+    const positions = getPositionMap(gameState, initializedGame)
+    const { boardWidth, boardHeight } = gameState.setup
+    positions.forEach((pos) => {
       expect(
-        pos.x === 1 || pos.x === 5 || pos.y === 1 || pos.y === 5,
+        pos.x === 1 ||
+          pos.x === boardWidth - 2 ||
+          pos.y === 1 ||
+          pos.y === boardHeight - 2,
       ).toBeTruthy()
     })
   })
@@ -175,21 +153,15 @@ describe("snake start locations", () => {
       const gameState = createGameState(width, height, players)
       const game = new TeamSnekProcessor(gameState)
       const initializedGame = game.firstTurn()
-      const board = game.visualizeBoard(initializedGame)
-      const lines = board.split("\n")
+      const positions = getPositionMap(gameState, initializedGame)
 
-      expect(lines.length).toBe(height)
-      expect(lines[0].split(" ").length).toBe(width)
-
-      let playerCount = 0
-      lines.forEach((line) => {
-        line.split(" ").forEach((token) => {
-          if (/^\d+$/.test(token)) {
-            playerCount += 1
-          }
-        })
+      positions.forEach((pos) => {
+        expect(pos.x).toBeGreaterThanOrEqual(0)
+        expect(pos.x).toBeLessThan(width)
+        expect(pos.y).toBeGreaterThanOrEqual(0)
+        expect(pos.y).toBeLessThan(height)
       })
-      expect(playerCount).toBe(players)
+      expect(Object.keys(initializedGame.playerPieces).length).toBe(players)
     })
   })
 
@@ -383,6 +355,11 @@ describe("snake start locations", () => {
           engineTurn.playerPieces[player.id][0],
         )
       })
+      // The preview's purpose is to show the board the game is built on, so
+      // the whole build must agree, not just where the units stand.
+      expect(preview.hazards).toEqual(engineTurn.hazards)
+      expect(preview.fertileTiles).toEqual(engineTurn.fertileTiles ?? [])
+      expect(preview.food).toEqual(engineTurn.food)
     })
   })
 })

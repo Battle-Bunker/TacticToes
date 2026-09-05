@@ -13,6 +13,7 @@ import React from "react"
 import { useNavigate } from "react-router-dom"
 import { useGameStateContext } from "../../context/GameStateContext"
 import { pieceGlyph } from "../../utils/unitGlyphs"
+import { unitTypeFor } from "../../utils/unitTypes"
 
 interface TeamResult {
   teamID: string
@@ -44,10 +45,11 @@ const GameFinished: React.FC = () => {
       teamName: team.name,
       teamColor: team.color,
       // Scored off the final board, exactly as the engine scores
-      // (TeamSnekProcessor.getTeamScore) and exactly as the live scoreboard
+      // (engine/adjudicate.ts::weighTeams) and exactly as the live scoreboard
       // does: the summed weight of the team's surviving units. Reading it from
       // the board rather than from a stored summary is what makes an old log
-      // — written before teamScores existed — score correctly too.
+      // — written before teamScores existed — score correctly too. A DISPLAYED
+      // number only; the verdict below comes off the wire.
       teamScore: teamUnits.reduce(
         (total, gp) => total + (latestTurn.playerPieces[gp.id]?.length ?? 0),
         0,
@@ -55,7 +57,7 @@ const GameFinished: React.FC = () => {
       // The row already names the team, so a unit is its LETTER, with its type
       // glyph — the same division of labour the scoreboard's team groups use.
       unitNames: teamUnits.map((gp) => {
-        const glyph = pieceGlyph(latestTurn.unitTypes?.[gp.id] ?? gp.unitType)
+        const glyph = pieceGlyph(unitTypeFor(gameState, latestTurn, gp.id))
         return `${glyph ? `${glyph} ` : ""}${gp.letter}`
       }),
       mmr: winner?.newMMR,
@@ -65,10 +67,19 @@ const GameFinished: React.FC = () => {
 
   const sortedTeams = teamResults.sort((a, b) => b.teamScore - a.teamScore)
 
-  const draw =
-    sortedTeams.length > 1 &&
-    sortedTeams[0].teamScore === sortedTeams[1].teamScore
-  const winningTeam = !draw && sortedTeams.length > 0 ? sortedTeams[0] : null
+  // The verdict is the engine's, not this page's. `engine/adjudicate.ts` decided
+  // who won and on which board — the PREVIOUS committed one when every team was
+  // wiped on the same turn — and the server wrote that decision to
+  // `Turn.winners`. Re-deriving it from the settled board here got exactly that
+  // branch wrong: nobody is left standing, so every team weighs 0 and the page
+  // called a draw over a game the server had awarded (and paid MMR for, in the
+  // table below). `winnerRows` emits a row per PLAYER of a winning team, so
+  // several rows can carry one teamID — hence the Set. `winners` is non-empty by
+  // the guard above, so more than one distinct id is the engine's own draw.
+  const winningTeamIDs = new Set(winners.map((w) => w.teamID))
+  const draw = winningTeamIDs.size !== 1
+  const winningTeam =
+    sortedTeams.find((team) => winningTeamIDs.has(team.teamID)) ?? null
 
   return (
     <Box

@@ -58,7 +58,7 @@ interface UnitSpec {
 
 interface TurnSpec {
   pieces: { [playerID: string]: number[] }
-  health?: { [playerID: string]: number }
+  energy?: { [playerID: string]: number }
   deaths?: { [playerID: string]: UnitDeath }
   /** Omitted entirely — as a turn written by a server that forgot the field. */
   omitDeaths?: boolean
@@ -74,7 +74,7 @@ interface TurnSpec {
 const makeTurn = (spec: TurnSpec): Turn => {
   const ids = Object.keys(spec.pieces)
   const turn: Turn = {
-    playerHealth: spec.health ?? Object.fromEntries(ids.map((id) => [id, 88])),
+    playerEnergy: spec.energy ?? Object.fromEntries(ids.map((id) => [id, 88])),
     startTime: null,
     endTime: null,
     scores: Object.fromEntries(
@@ -163,7 +163,7 @@ const contest: Fixture = {
       { pieces: { red: [at(5, 3), at(6, 3), at(7, 3)], blue: [at(3, 3), at(2, 3), at(1, 3)] } },
       {
         pieces: { red: [at(4, 3), at(5, 3), at(6, 3), at(7, 3)] },
-        health: { red: 74 },
+        energy: { red: 74 },
         deaths: { blue: { cell: at(4, 3), subStep: 1, cause: "contest" } },
         clashes: [
           {
@@ -212,7 +212,7 @@ const edgeUnequal: Fixture = {
           red: Array(5).fill(at(5, 3)),
           green: [at(3, 1), at(2, 1)],
         },
-        health: { red: 91, green: 80 },
+        energy: { red: 91, green: 80 },
         unitTypes: { red: "rook" },
         deaths: { blue: { cell: at(5, 3), subStep: 1, cause: "edge" } },
         clashes: [
@@ -259,7 +259,7 @@ const edgeTie: Fixture = {
       },
       {
         pieces: { red: [at(3, 1), at(2, 1)] },
-        health: { red: 84 },
+        energy: { red: 84 },
         deaths: {
           green: { cell: at(3, 3), subStep: 1, cause: "edge" },
           violet: { cell: at(4, 3), subStep: 1, cause: "edge" },
@@ -317,7 +317,7 @@ const sever: Fixture = {
           red: Array(4).fill(at(4, 2)),
           blue: [at(2, 2), at(3, 2)],
         },
-        health: { red: 93, blue: 62 },
+        energy: { red: 93, blue: 62 },
         unitTypes: { red: "rook" },
         deaths: {},
         severedCells: { blue: [at(4, 2), at(5, 2), at(6, 2)] },
@@ -340,7 +340,7 @@ const sever: Fixture = {
 }
 
 // ── 5. Mid-ray exhaustion, fatal ────────────────────────────────────────────
-// A slider ran out of health part-way along its ray and halted on the square it
+// A slider ran out of energy part-way along its ray and halted on the square it
 // had reached. Nothing on that square to eat, so it was still at zero when the
 // turn ended and the registry names it. Nobody killed it.
 const midRayExhaustion: Fixture = {
@@ -361,12 +361,12 @@ const midRayExhaustion: Fixture = {
           red: Array(4).fill(at(1, 3)),
           blue: [at(6, 4), at(6, 3), at(6, 2)],
         },
-        health: { red: 9, blue: 70 },
+        energy: { red: 9, blue: 70 },
         unitTypes: { red: "rook" },
       },
       {
         pieces: { blue: [at(5, 4), at(6, 4), at(6, 3)] },
-        health: { blue: 64 },
+        energy: { blue: 64 },
         deaths: { red: { cell: at(3, 3), subStep: 3, cause: "exhaustion" } },
         paths: { red: [at(1, 3), at(2, 3), at(3, 3)] },
         clashes: [
@@ -377,7 +377,7 @@ const midRayExhaustion: Fixture = {
             playerIDs: ["red"],
             victimIDs: ["red"],
             reason:
-              "Red A ran out of health on the third square of its ray, halted there, and was still at zero at end of turn",
+              "Red A ran out of energy on the third square of its ray, halted there, and was still at zero at end of turn",
           },
         ],
       },
@@ -387,7 +387,7 @@ const midRayExhaustion: Fixture = {
 }
 
 // ── 6. Hazard exhaustion, fatal ─────────────────────────────────────────────
-// The same ending by another route: hazard damage emptied the unit's health and
+// The same ending by another route: hazard damage emptied the unit's energy and
 // it went down where it stood, on the hazard square itself, with nothing there
 // to bring it back.
 const hazardExhaustion: Fixture = {
@@ -408,12 +408,12 @@ const hazardExhaustion: Fixture = {
           blue: [at(4, 4), at(3, 4), at(2, 4)],
           red: [at(2, 1), at(3, 1)],
         },
-        health: { blue: 24, red: 90 },
+        energy: { blue: 24, red: 90 },
         hazards: [at(5, 4), at(6, 4), at(5, 5)],
       },
       {
         pieces: { red: [at(2, 1), at(2, 2)] },
-        health: { red: 86 },
+        energy: { red: 86 },
         hazards: [at(5, 4), at(6, 4), at(5, 5)],
         deaths: { blue: { cell: at(5, 4), subStep: 1, cause: "hazard" } },
         clashes: [
@@ -463,7 +463,7 @@ const corpsePile: Fixture = {
       },
       {
         pieces: { red: [at(3, 5), at(2, 5)] },
-        health: { red: 88 },
+        energy: { red: 88 },
         deaths: {
           green: { cell: at(4, 3), subStep: 1, cause: "contest" },
           violet: { cell: at(4, 3), subStep: 1, cause: "contest" },
@@ -520,7 +520,7 @@ const incompleteRecord: Fixture = {
       },
       {
         pieces: { red: [at(4, 2), at(3, 2)] },
-        health: { red: 77 },
+        energy: { red: 77 },
         omitDeaths: true,
         clashes: [
           {
@@ -549,7 +549,7 @@ const incompleteRecord: Fixture = {
 // ── 9. Mid-ray exhaustion, recovered ────────────────────────────────────────
 // The other ending of the same event, and the reason exhaustion cannot be drawn
 // as a death on sight: the rook ran out on the third square of its ray, halted
-// there — and there was food on that square. It ate, its health came back, and
+// there — and there was food on that square. It ate, its energy came back, and
 // it finished the turn alive. The registry names nobody, and the record it left
 // is an exhaustion with an EMPTY victim list.
 const exhaustionRecovered: Fixture = {
@@ -570,7 +570,7 @@ const exhaustionRecovered: Fixture = {
           red: Array(4).fill(at(1, 3)),
           blue: [at(6, 4), at(6, 3), at(6, 2)],
         },
-        health: { red: 9, blue: 70 },
+        energy: { red: 9, blue: 70 },
         unitTypes: { red: "rook" },
         food: [at(3, 3), at(6, 1)],
       },
@@ -579,7 +579,7 @@ const exhaustionRecovered: Fixture = {
           red: Array(4).fill(at(3, 3)),
           blue: [at(5, 4), at(6, 4), at(6, 3)],
         },
-        health: { red: 55, blue: 64 },
+        energy: { red: 55, blue: 64 },
         unitTypes: { red: "rook" },
         // Eaten off the halt square; the other one is still out there.
         food: [at(6, 1)],
@@ -593,7 +593,7 @@ const exhaustionRecovered: Fixture = {
             playerIDs: ["red"],
             victimIDs: [],
             reason:
-              "Red A ran out of health on the third square of its ray and halted there; it ate the food on that square and recovered",
+              "Red A ran out of energy on the third square of its ray and halted there; it ate the food on that square and recovered",
           },
         ],
       },
@@ -616,6 +616,3 @@ export const FIXTURES: Fixture[] = [
 
 /** The turn every fixture is displayed at: the second, so a "before" exists. */
 export const FIXTURE_TURN_INDEX = 1
-
-export const BOARD_WIDTH = W
-export const BOARD_HEIGHT = H

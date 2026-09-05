@@ -1,0 +1,1962 @@
+// PARTIAL SETTLEMENT, AGAINST THE ONE ENGINE ITSELF.
+//
+// `settlePartial` is a MODE of `settleTurn`, so the only oracle worth having
+// is `settleTurn`. Nothing here compares two encodings of the rules: every
+// assertion enumerates the CONCRETE worlds a held unit's unknown move could
+// produce, settles each one with the ordinary total settlement, and asks
+// whether the partial settlement said something true about all of them.
+//
+// The four properties, in the order they matter:
+//
+//   T5  with nothing held, `settlePartial` IS `settleTurn`, coordinate for
+//       coordinate — the reduction that makes "one engine" a fact rather
+//       than a slogan;
+//   T1  every concrete world differs from the optimistic timeline only where
+//       the ledger says it could, which is what makes an EMPTY LEDGER A
+//       PROOF and a non-empty one a work list;
+//   T2  `fates` "dead" and "alive" hold in every world; "contingent" claims
+//       nothing and must be backed by a ledger entry;
+//   T3  every coordinate a rule reads — survival, weight, energy, tier — is
+//       inside the bracket the ledger and the claims imply;
+//   T6  the END of the game is one of those coordinates. `outcome` is a
+//       bracket rather than an adjudication, every world's ending is inside
+//       it, and the `certain` field, when it is set, IS that ending.
+//
+// and separately, that the CLAIMS themselves contain the truth: where a held
+// unit actually went, in every world, is inside what `computeClaims` said it
+// could be, at every sub-step.
+//
+// Boards carry pieces of every kind, snakes, food, potions, hazards, effects
+// and an occasional king, because a claim that is only ever tested on a bare
+// board is a claim about a game nobody plays.
+
+import { UnitType } from "@shared/types/Game"
+import { Claim, computeClaims } from "./engine/claims"
+import { BoardShape, legalTargets } from "./engine/queries"
+import { ResolveUnit } from "./engine/resolveTurn"
+import { Outcome } from "./engine/adjudicate"
+import { OutcomeBracket, PartialSettleInput, settlePartial } from "./engine/settlePartial"
+import { Settlement, settleTurn } from "./engine/settleTurn"
+import { perimeter } from "./playTurn"
+import { W, WALLS, held, makeBoard } from "./engineBoards"
+import { NO_SPAWN } from "./engine/spawn"
+
+const shapeOf = (input: PartialSettleInput): BoardShape => ({
+  boardWidth: input.boardWidth,
+  boardHeight: input.boardHeight,
+  walls: input.walls,
+  hazards: input.hazards,
+  occupancy: input.units.map((u) => ({ id: u.id, cells: u.occupancy })),
+  food: input.food,
+})
+
+/** Every disposition a held unit could be given: each legal cell, and none. */
+export const optionsFor = (input: PartialSettleInput, id: string): (number | undefined)[] => {
+  const unit = input.units.find((u) => u.id === id) as ResolveUnit
+  const targets = legalTargets(unit, shapeOf(input))
+  return [undefined, ...targets]
+}
+
+/** The board with every held unit's move filled in — an ordinary total turn. */
+export const concrete = (
+  input: PartialSettleInput,
+  assignment: ReadonlyMap<string, number | undefined>,
+): Settlement =>
+  settleTurn(
+    {
+      ...input,
+      units: input.units.map((u) =>
+        assignment.has(u.id) ? { ...u, stagedMove: assignment.get(u.id), path: undefined } : u,
+      ),
+    },
+    NO_SPAWN,
+  )
+
+/** Every concrete world, or null when the product is bigger than the budget. */
+const worldsOf = (
+  input: PartialSettleInput,
+  budget: number,
+): ReadonlyArray<Map<string, number | undefined>> | null => {
+  const lists = input.held.map((h) => ({ id: h.id, options: optionsFor(input, h.id) }))
+  const size = lists.reduce((n, l) => n * l.options.length, 1)
+  if (size > budget) return null
+
+  let out: Map<string, number | undefined>[] = [new Map()]
+  lists.forEach((list) => {
+    const next: Map<string, number | undefined>[] = []
+    out.forEach((base) =>
+      list.options.forEach((option) => {
+        const copy = new Map(base)
+        copy.set(list.id, option)
+        next.push(copy)
+      }),
+    )
+    out = next
+  })
+  return out
+}
+
+/**
+ * A settlement read for its BOARD alone. Partial settlement's `outcome` is a
+ * bracket rather than an adjudication, so the two are not the same type any
+ * more — and every helper below reads occupancy, energy, tiers and traversals,
+ * none of which the ending touches.
+ */
+type SettledBoard = Omit<Settlement, "outcome">
+
+/** Head cell per sub-step, as a settlement left it. */
+export const headsOf = (settlement: SettledBoard, unit: ResolveUnit, subSteps: number): number[] => {
+  const traversed = settlement.traversed[unit.id] ?? []
+  const heads = [unit.occupancy[0]]
+  for (let k = 1; k <= subSteps; k++) heads.push(k <= traversed.length ? traversed[k - 1] : heads[k - 1])
+  return heads
+}
+
+/**
+ * The first sub-step at which two settlements disagree about one unit, or
+ * null when they agree about everything a rule reads.
+ */
+const divergedAtFor = (
+  a: SettledBoard,
+  b: SettledBoard,
+  unit: ResolveUnit,
+  subSteps: number,
+): number | null => {
+  const ha = headsOf(a, unit, subSteps)
+  const hb = headsOf(b, unit, subSteps)
+  for (let k = 1; k <= subSteps; k++) if (ha[k] !== hb[k]) return k
+  const ua = a.board[unit.id]
+  const ub = b.board[unit.id]
+  if (!ua !== !ub) return subSteps
+  if (ua && ub) {
+    if (ua.energy !== ub.energy) return subSteps
+    if (ua.occupancy.length !== ub.occupancy.length) return subSteps
+    if (ua.occupancy.join() !== ub.occupancy.join()) return subSteps
+  }
+  if ((a.tiers[unit.id] ?? 0) !== (b.tiers[unit.id] ?? 0)) return subSteps
+  return null
+}
+
+/**
+ * One ending, canonically. `settleTurn` writes a game that CONTINUES as null
+ * and the bracket writes it as an outcome of kind "continues", because a
+ * bracket's null already means "the worlds disagree" and one field cannot
+ * carry both. This is the two spellings reconciled, and the weights sorted so
+ * the comparison is about the verdict and not about key order.
+ */
+const outcomeKey = (outcome: Outcome | null | undefined): string => {
+  if (!outcome || outcome.kind === "continues") return "continues"
+  const weights = Object.keys(outcome.weightByTeam)
+    .sort()
+    .map((teamID) => `${teamID}=${outcome.weightByTeam[teamID]}`)
+  return `${outcome.kind}|${outcome.decidedOn}|${outcome.winners.join(",")}|${weights.join(",")}`
+}
+
+/**
+ * T6, in one place: every world's ending is inside the bracket, and a
+ * `certain` bracket IS that ending. Three admissions and one proof — the
+ * kinds and the possible winners are supersets, `certainWinners` is a subset,
+ * and `certain` is equality.
+ */
+const outcomeFailures = (
+  bracket: OutcomeBracket,
+  ending: Outcome | null,
+  tag: string,
+): string[] => {
+  const out: string[] = []
+  const kind = ending?.kind ?? "continues"
+  const won = ending?.winners ?? []
+  if (!bracket.possibleKinds.includes(kind)) {
+    out.push(`T6 ${tag} ending ${kind} outside [${bracket.possibleKinds}]`)
+  }
+  won.forEach((teamID) => {
+    if (!bracket.possibleWinners.includes(teamID)) {
+      out.push(`T6 ${tag} winner ${teamID} not admitted`)
+    }
+  })
+  bracket.certainWinners.forEach((teamID) => {
+    if (!won.includes(teamID)) out.push(`T6 ${tag} certain winner ${teamID} does not win`)
+  })
+  if (bracket.certain && outcomeKey(bracket.certain) !== outcomeKey(ending)) {
+    out.push(`T6 ${tag} certain ${outcomeKey(bracket.certain)} vs ${outcomeKey(ending)}`)
+  }
+  return out
+}
+
+// --------------------------------------------------------------- T5
+
+describe("T5 — with nothing held, partial settlement IS settlement", () => {
+  it("agrees with settleTurn coordinate for coordinate, on 300 random boards", () => {
+    for (let seed = 1; seed <= 300; seed++) {
+      const input = makeBoard(seed)
+      const total = settleTurn(input, NO_SPAWN)
+      const partial = settlePartial(input, NO_SPAWN)
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { ledger, fates, claims, outcome, ...rest } = partial
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { outcome: ended, ...board } = total
+      expect(JSON.parse(JSON.stringify(rest))).toEqual(JSON.parse(JSON.stringify(board)))
+      // The ending is a bracket even here, and with nothing held it is a
+      // bracket of ONE world: the verdict `settleTurn` reached on this board.
+      expect(outcomeKey(outcome.certain)).toBe(outcomeKey(ended))
+      expect(outcome.possibleKinds).toEqual([ended?.kind ?? "continues"])
+      expect(outcome.possibleWinners).toEqual(ended?.winners ?? [])
+      expect(outcome.certainWinners).toEqual(ended?.winners ?? [])
+      expect(ledger).toEqual([])
+      expect(claims).toEqual([])
+      input.units.forEach((u) => {
+        expect(fates[u.id]).toBe(total.deaths[u.id] ? "dead" : "alive")
+      })
+    }
+  })
+})
+
+// ------------------------------------------------- T1 / T2 / T3 / claims
+
+interface Coverage {
+  boards: number
+  skipped: number
+  worlds: number
+  entries: number
+  emptyLedgers: number
+  /** Worlds in which the game actually ENDED — what T6 is sized by. */
+  endings: number
+  /** Boards whose bracket named exactly one kind of ending. */
+  provedKind: number
+  /** Boards whose bracket named a team that wins in every world. */
+  provedWinner: number
+  /** Boards whose bracket proved the whole adjudication, weights and all. */
+  certainEndings: number
+}
+
+const zero = (): Coverage => ({
+  boards: 0,
+  skipped: 0,
+  worlds: 0,
+  entries: 0,
+  emptyLedgers: 0,
+  endings: 0,
+  provedKind: 0,
+  provedWinner: 0,
+  certainEndings: 0,
+})
+
+const sweep = (
+  seeds: readonly number[],
+  heldCount: number,
+  budget: number,
+  coverage: Coverage,
+  /** The board, adjusted before anything is held — a rule variant to sweep. */
+  variant: (input: PartialSettleInput) => PartialSettleInput = (input) => input,
+): string[] => {
+  const failures: string[] = []
+  const fail = (what: string): void => {
+    if (failures.length < 4) failures.push(what)
+  }
+  seeds.forEach((seed) => {
+    const base = variant(makeBoard(seed))
+    const ids = base.units.slice(0, heldCount).map((u) => u.id)
+    if (ids.length < heldCount) return
+    const input = held(base, ids)
+    const all = worldsOf(input, budget)
+    if (!all) {
+      coverage.skipped++
+      return
+    }
+    coverage.boards++
+    coverage.worlds += all.length
+
+    const partial = settlePartial(input, NO_SPAWN)
+    coverage.entries += partial.ledger.length
+    if (partial.ledger.length === 0) coverage.emptyLedgers++
+    if (partial.outcome.possibleKinds.length === 1) coverage.provedKind++
+    if (partial.outcome.certainWinners.length > 0) coverage.provedWinner++
+    if (partial.outcome.certain !== null) coverage.certainEndings++
+
+    const heldIds = new Set(ids)
+    const live = input.units.filter((u) => !heldIds.has(u.id))
+    const liveIds = new Set(live.map((u) => u.id))
+
+    // ATTRIBUTION. `heldId` is a held unit on every entry, whatever route the
+    // uncertainty took to get there, and `via` is the route: modelled units,
+    // in order, each named once and none of them the root.
+    partial.ledger.forEach((entry) => {
+      if (!heldIds.has(entry.heldId)) {
+        fail(`CHAIN seed=${seed} entry heldId=${entry.heldId} is not held`)
+      }
+      if (new Set(entry.via).size !== entry.via.length) {
+        fail(`CHAIN seed=${seed} via repeats a unit: ${entry.via.join(">")}`)
+      }
+      entry.via.forEach((link) => {
+        if (!liveIds.has(link)) fail(`CHAIN seed=${seed} via link ${link} is not modelled`)
+      })
+    })
+    const named = new Set(partial.ledger.map((e) => e.unitId))
+    const subSteps = Math.max(
+      partial.subStepCount,
+      ...partial.claims.map((c) => c.headPossible.length - 1),
+    )
+
+    all.forEach((assignment) => {
+      const truth = concrete(input, assignment)
+      const world = JSON.stringify(Array.from(assignment.entries()))
+
+      // T1 — divergence containment, and its corollary.
+      live.forEach((unit) => {
+        const at = divergedAtFor(partial, truth, unit, subSteps)
+        if (at === null) return
+        const entries = partial.ledger.filter((e) => e.unitId === unit.id)
+        if (entries.length === 0) {
+          fail(`T1 seed=${seed} unit=${unit.id}(${unit.type}) at=${at} world=${world} unledgered`)
+          return
+        }
+        const first = Math.min(...entries.map((e) => e.subStep))
+        if (first > at) {
+          fail(`T1 seed=${seed} unit=${unit.id}(${unit.type}) at=${at} first=${first} world=${world}`)
+        }
+      })
+
+      // T1, the survival half. `couldBeat: false` is the strongest thing an
+      // entry says — "the contact is real but this unit wins it in every
+      // world" — so a unit the optimistic timeline leaves standing that a
+      // concrete world kills must be named by an entry that ADMITS it could
+      // lose, at or before the sub-step it lost at. A ledger of nothing but
+      // `couldBeat: false` around a unit is a survival proof, and a survival
+      // proof the resolver contradicts is the one failure T1 cannot see by
+      // comparing coordinates: the unit IS named, and named early enough.
+      live.forEach((unit) => {
+        if (!partial.board[unit.id] || truth.board[unit.id]) return
+        const death = truth.deaths[unit.id]
+        const beatable = partial.ledger.filter((e) => e.unitId === unit.id && e.couldBeat)
+        if (beatable.length === 0) {
+          fail(
+            `T1b seed=${seed} unit=${unit.id}(${unit.type}) dies ` +
+              `${death?.cause}@${death?.cell} world=${world}, every entry says it wins`,
+          )
+          return
+        }
+        const first = Math.min(...beatable.map((e) => e.subStep))
+        if (death !== undefined && first > death.subStep) {
+          fail(
+            `T1b seed=${seed} unit=${unit.id}(${unit.type}) dies at ${death.subStep}, ` +
+              `earliest couldBeat ${first}, world=${world}`,
+          )
+        }
+      })
+
+      // T2 — fates are proofs in both directions.
+      live.forEach((unit) => {
+        const fate = partial.fates[unit.id]
+        if (fate === "dead" && truth.board[unit.id]) {
+          fail(`T2 seed=${seed} unit=${unit.id} called dead but lives, world=${world}`)
+        }
+        if (fate === "alive" && !truth.board[unit.id]) {
+          fail(`T2 seed=${seed} unit=${unit.id} called alive but dies, world=${world}`)
+        }
+        if (fate === "contingent" && !named.has(unit.id)) {
+          fail(`T2 seed=${seed} unit=${unit.id} contingent with no entry`)
+        }
+      })
+      partial.claims.forEach((claim) => {
+        if (claim.certainlyGone && truth.board[claim.id]) {
+          fail(`T2 seed=${seed} claim=${claim.id} certainlyGone but lives, world=${world}`)
+        }
+        if (!claim.deathPossible && !truth.board[claim.id]) {
+          fail(`T2 seed=${seed} claim=${claim.id} deathPossible=false but dies, world=${world}`)
+        }
+      })
+
+      // T3 — a unit no entry names is settled identically in every world.
+      live.forEach((unit) => {
+        if (named.has(unit.id)) return
+        const at = divergedAtFor(partial, truth, unit, subSteps)
+        if (at !== null) fail(`T3 seed=${seed} unit=${unit.id} unnamed but diverges at ${at}`)
+      })
+
+      // The claims contain the truth, at every sub-step.
+      partial.claims.forEach((claim) => {
+        const record = input.units.find((u) => u.id === claim.id) as ResolveUnit
+        claimFailures(claim, record, truth, subSteps, seed, world).forEach(fail)
+      })
+
+      // T6 — the END of the game, bracketed. Standing every held unit on its
+      // observed square and adjudicating ONCE answers for one world and calls
+      // the answer the turn's; a bracket answers for all of them.
+      if (truth.outcome) coverage.endings++
+      outcomeFailures(partial.outcome, truth.outcome, `seed=${seed} world=${world}`).forEach(fail)
+    })
+  })
+  return failures
+}
+
+const claimFailures = (
+  claim: Claim,
+  record: ResolveUnit,
+  truth: SettledBoard,
+  subSteps: number,
+  seed: number,
+  world: string,
+): string[] => {
+  const out: string[] = []
+  const tag = `seed=${seed} claim=${claim.id}(${record.type}) world=${world}`
+  const heads = headsOf(truth, record, subSteps)
+  for (let k = 0; k <= subSteps; k++) {
+    const set = claim.headPossible[Math.min(k, claim.headPossible.length - 1)]
+    if (!set.includes(heads[k])) out.push(`CLAIM head ${tag} k=${k} cell=${heads[k]} outside`)
+    else if (claim.earliestSubStep[heads[k]] > k) out.push(`CLAIM early ${tag} k=${k}`)
+  }
+  const settled = truth.board[claim.id]
+  if (!settled) return out
+  if (settled.occupancy.length < claim.weightMin || settled.occupancy.length > claim.weightMax) {
+    out.push(`CLAIM weight ${tag} ${settled.occupancy.length} vs [${claim.weightMin},${claim.weightMax}]`)
+  }
+  // Energy is a coordinate a rule reads (exhaustion), and its ceiling is now
+  // arithmetic — observed energy plus what the meals in reach are worth —
+  // rather than "there was food, so assume a full tank". Worth enumerating.
+  if (settled.energy > claim.energyMax) {
+    out.push(`CLAIM energy ${tag} ${settled.energy} vs max ${claim.energyMax}`)
+  }
+  const body = claim.bodyPossible[claim.bodyPossible.length - 1]
+  const front = claim.headPossible[claim.headPossible.length - 1]
+  settled.occupancy.forEach((cell) => {
+    if (!body.includes(cell) && !front.includes(cell)) {
+      out.push(`CLAIM body ${tag} cell=${cell} outside`)
+    }
+  })
+  return out
+}
+
+const report = (label: string, coverage: Coverage): void => {
+  // Printed rather than asserted: a property test whose reach nobody can see
+  // is a property test nobody can size.
+  process.stdout.write(
+    `  ${label}: ${coverage.boards} boards, ${coverage.worlds} worlds, ` +
+      `${coverage.skipped} skipped over budget, ${coverage.entries} ledger entries, ` +
+      `${coverage.emptyLedgers} boards proved by an empty ledger, ` +
+      `${coverage.endings} worlds ended the game, ` +
+      `${coverage.provedKind} boards whose KIND of ending the bracket proved, ` +
+      `${coverage.provedWinner} whose winner it proved, ` +
+      `${coverage.certainEndings} whose whole adjudication it proved\n`,
+  )
+}
+
+describe("T1–T3 by enumeration — one held unit", () => {
+  it("holds in every world of 400 boards", () => {
+    const coverage: Coverage = zero()
+    expect(sweep(range(1, 400), 1, 200, coverage)).toEqual([])
+    report("1 held", coverage)
+    expect(coverage.boards).toBeGreaterThan(350)
+    expect(coverage.worlds).toBeGreaterThan(3000)
+  })
+})
+
+describe("T1–T3 by enumeration — two held units", () => {
+  it("holds in every world of 250 boards", () => {
+    const coverage: Coverage = zero()
+    expect(sweep(range(1001, 1250), 2, 1200, coverage)).toEqual([])
+    report("2 held", coverage)
+    expect(coverage.boards).toBeGreaterThan(120)
+    expect(coverage.worlds).toBeGreaterThan(20000)
+  })
+})
+
+describe("T1–T3 by enumeration — three held units", () => {
+  it("holds in every world it can afford of 200 boards", () => {
+    const coverage: Coverage = zero()
+    expect(sweep(range(2001, 2200), 3, 4000, coverage)).toEqual([])
+    report("3 held", coverage)
+    expect(coverage.boards + coverage.skipped).toBe(200)
+    expect(coverage.worlds).toBeGreaterThan(20000)
+  })
+})
+
+// ------------------------------------------------------------- T6
+
+/**
+ * THE ENDING, WHERE IT IS HARDEST: a board played to its own last turn.
+ *
+ * The sweeps above run with `maxTurns: null`, where the only way to end a game
+ * is to take a whole team off the board — so the ending they exercise is the
+ * one branch a held unit rarely moves. Set the limit to the turn being played
+ * and `adjudicate` reads the WEIGHTS instead: every world ends the game, the
+ * winner is whoever is heaviest, and a held unit's weight interval and a
+ * severable ally are both in the answer. That is the branch the single
+ * adjudication got wrong most often, and it is the branch that says whether
+ * bracketing team weights by summing per-unit intervals is honest.
+ *
+ * Same board generator, same held sets, same T1/T2/T3 — only the limit moves.
+ */
+describe("T6 — the ending is a bracket, on a board at its turn limit", () => {
+  it("contains every world's verdict over 250 boards with two units held", () => {
+    const coverage: Coverage = zero()
+    const atTheLimit = (input: PartialSettleInput): PartialSettleInput => ({
+      ...input,
+      maxTurns: input.turn,
+    })
+    expect(sweep(range(1001, 1250), 2, 1200, coverage, atTheLimit)).toEqual([])
+    report("turn limit", coverage)
+    // Every world of every board ends here — the limit is this very turn — so
+    // the property is exercised on all of them and not on a lucky few.
+    expect(coverage.endings).toBe(coverage.worlds)
+    expect(coverage.worlds).toBeGreaterThan(20000)
+    // A bracket that admits everything passes the property and says nothing.
+    // These are the boards on which it is a claim rather than a shrug.
+    expect(coverage.provedKind).toBeGreaterThan(20)
+    expect(coverage.provedWinner).toBeGreaterThan(10)
+  })
+})
+
+// ------------------------------------------------- the n-turn premise
+
+/**
+ * A unit observed a turn ago has TWO unknown moves to answer for, and the
+ * plan's `Hist(h)` says exactly what the second one is played on: the board as
+ * `h` ALONE would have moved on it. So the first move is settled with `h` and
+ * nobody else — the same `settleTurn`, over a roster of one — and the turn
+ * under test opens on what that left behind, food eaten and energy spent
+ * included.
+ *
+ * Potions are switched off for this sweep. A pickup during the unknown turn
+ * rewrites an effect schedule that a roster of one cannot rewrite honestly,
+ * and the tier interval it produces is tested where it belongs, in the claim.
+ */
+const advanceAlone = (
+  input: PartialSettleInput,
+  id: string,
+  staged: number | undefined,
+): PartialSettleInput | null => {
+  const record = input.units.find((u) => u.id === id) as ResolveUnit
+  const solo = settleTurn(
+    {
+      ...input,
+      units: [{ ...record, stagedMove: staged, path: undefined }],
+      regicideTeamIDs: [],
+      turn: input.turn - 1,
+    },
+    NO_SPAWN,
+  )
+  const settled = solo.board[id]
+  const others = input.units.filter((u) => u.id !== id)
+  const next = {
+    ...input,
+    food: solo.food,
+    units: settled
+      ? [
+          ...others,
+          {
+            ...record,
+            type: solo.unitTypes[id],
+            occupancy: settled.occupancy,
+            energy: settled.energy,
+            orientation: solo.orientation[id],
+          },
+        ]
+      : others,
+  }
+  return settled || others.length > 0 ? next : null
+}
+
+describe("T1–T3 by enumeration — a unit observed a turn ago", () => {
+  it("holds over every two-move history on 400 boards", () => {
+    const coverage: Coverage = zero()
+    const failures: string[] = []
+    for (let seed = 3001; seed <= 3400; seed++) {
+      const base: PartialSettleInput = { ...makeBoard(seed), potions: [], potionsEnabled: false }
+      const id = base.units[0].id
+      const input: PartialSettleInput = {
+        ...base,
+        held: [{ id, observedTurn: base.turn - 2 }],
+      }
+      const first = optionsFor(input, id)
+      if (first.length > 14) {
+        coverage.skipped++
+        continue
+      }
+      coverage.boards++
+      const partial = settlePartial(input, NO_SPAWN)
+      coverage.entries += partial.ledger.length
+      if (partial.ledger.length === 0) coverage.emptyLedgers++
+      if (partial.outcome.possibleKinds.length === 1) coverage.provedKind++
+      if (partial.outcome.certainWinners.length > 0) coverage.provedWinner++
+      if (partial.outcome.certain !== null) coverage.certainEndings++
+      const live = input.units.filter((u) => u.id !== id)
+      const named = new Set(partial.ledger.map((e) => e.unitId))
+      const subSteps = Math.max(
+        partial.subStepCount,
+        ...partial.claims.map((c) => c.headPossible.length - 1),
+      )
+      const claim = partial.claims[0]
+
+      first.forEach((a1) => {
+        const mid = advanceAlone(input, id, a1)
+        if (!mid) return
+        const second = mid.units.some((u) => u.id === id) ? optionsFor(mid, id) : [undefined]
+        second.forEach((a2) => {
+          coverage.worlds++
+          const truth = settleTurn(
+            {
+              ...mid,
+              units: mid.units.map((u) =>
+                u.id === id ? { ...u, stagedMove: a2, path: undefined } : u,
+              ),
+            },
+            NO_SPAWN,
+          )
+          const world = `${a1}/${a2}`
+          if (truth.outcome) coverage.endings++
+          outcomeFailures(partial.outcome, truth.outcome, `SPAN2 seed=${seed} ${world}`).forEach(
+            (f) => {
+              if (failures.length < 4) failures.push(f)
+            },
+          )
+          live.forEach((unit) => {
+            const at = divergedAtFor(partial, truth, unit, subSteps)
+            if (at === null) return
+            if (!named.has(unit.id) && failures.length < 4) {
+              failures.push(`SPAN2 seed=${seed} unit=${unit.id}(${unit.type}) at=${at} ${world}`)
+            }
+          })
+          const record = mid.units.find((u) => u.id === id)
+          if (!record) {
+            if (claim.certainlyGone === false && !claim.deathPossible && failures.length < 4) {
+              failures.push(`SPAN2 seed=${seed} claim dies but deathPossible=false ${world}`)
+            }
+            return
+          }
+          claimFailures(claim, record, truth, subSteps, seed, world).forEach((f) => {
+            if (failures.length < 4) failures.push(f)
+          })
+        })
+      })
+    }
+    expect(failures).toEqual([])
+    report("span 2", coverage)
+    expect(coverage.boards).toBeGreaterThan(200)
+    expect(coverage.worlds).toBeGreaterThan(15000)
+  })
+})
+
+// ------------------------------------------- the tier the resolver freezes
+//
+// A POTION ROUND THE HELD UNIT DID NOT SEE.
+//
+// `Claim.tierMin`/`tierMax` are the strength interval a contest reads, so the
+// tier the resolver actually FREEZES for the settled turn — the record's own
+// `tier` field as that turn opens — has to be inside them in every world. The
+// sweeps above cannot see this: at span 1 no unknown turn has passed and the
+// interval is the record, and the span-2 sweep switches potions off because a
+// roster of one cannot rewrite an effect schedule honestly.
+//
+// So the unknown turn is played here by `settleTurn` over the WHOLE roster —
+// the oracle, again — with team-mates on potions, and the turn after it is
+// settled against a claim built from the record as it was BEFORE that turn.
+// A pickup is not one turn's worth of tier: the collector takes -1 and every
+// living ally takes +1, so three team-mates collecting at once is +3 to this
+// unit, and the potions they took are off the board by the time the claim
+// reads the board.
+const W9 = 9
+const cellAt = (x: number, y: number): number => y * W9 + x
+
+/** A rook, so every choice is a slide and the reachable set is easy to see. */
+const rook = (id: string, teamID: string, cell: number, staged?: number): ResolveUnit => ({
+  id,
+  type: "rook",
+  teamID,
+  isKing: false,
+  tier: 0,
+  energy: 100,
+  occupancy: [cell],
+  orientation: { dx: 1, dy: 0 },
+  stagedMove: staged,
+})
+
+/**
+ * The board as turn 6 opens: `collectors` team-mates each one step from a
+ * potion, a spare potion nobody takes, and — when `reachable` is set — one
+ * more on the held unit's own rank, so the world where it debuffs ITSELF
+ * while its team buffs it is enumerated too.
+ */
+const potionRound = (collectors: number, reachable: boolean): PartialSettleInput => {
+  const units: ResolveUnit[] = [rook("h", "A", cellAt(1, 1)), rook("e1", "B", cellAt(7, 7))]
+  const potions = [cellAt(7, 5)]
+  for (let i = 0; i < collectors; i++) {
+    const x = 1 + i * 2
+    units.push(rook(`a${i}`, "A", cellAt(x, 3), cellAt(x + 1, 3)))
+    potions.push(cellAt(x + 1, 3))
+  }
+  if (reachable) potions.push(cellAt(5, 1))
+  const teamOf: { [unitID: string]: string } = {}
+  units.forEach((u) => (teamOf[u.id] = u.teamID))
+  return {
+    units,
+    boardWidth: W9,
+    boardHeight: W9,
+    walls: perimeter(W9, W9),
+    hazards: [],
+    hazardDamage: 1,
+    food: [],
+    defaultMaxEnergy: 100,
+    maxEnergy: {},
+    foodEnergy: 100,
+    regicideTeamIDs: [],
+    turn: 6,
+    teamOf,
+    effects: [],
+    potions,
+    potionsEnabled: true,
+    potionWindowTurns: 3,
+    pawnPromotionWeight: 4,
+    maxTurns: null,
+    held: [],
+  }
+}
+
+describe("a claim brackets the tier the resolver froze", () => {
+  it("over every two-move history of a potion round the held unit did not see", () => {
+    const failures: string[] = []
+    let worlds = 0
+    let widest = 0
+    for (const collectors of [1, 2, 3]) {
+      for (const reachable of [false, true]) {
+        const six = potionRound(collectors, reachable)
+        const record = six.units.find((u) => u.id === "h") as ResolveUnit
+        const first: (number | undefined)[] = [undefined, ...legalTargets(record, shapeOf(six))]
+        first.forEach((choice) => {
+          // The unknown turn, played by the oracle over the whole roster.
+          const between = settleTurn(
+            {
+              ...six,
+              units: six.units.map((u) => (u.id === "h" ? { ...u, stagedMove: choice } : u)),
+            },
+            NO_SPAWN,
+          )
+          if (!between.board.h) return
+          worlds++
+          // Turn 7, as a caller has it: the modelled units where settlement
+          // left them and the schedule it left behind, and the held unit's
+          // record still the one taken as turn 6 opened.
+          const seven: PartialSettleInput = {
+            ...six,
+            turn: 7,
+            units: six.units.flatMap((u) => {
+              if (u.id === "h") return [u]
+              const settled = between.board[u.id]
+              if (!settled) return []
+              return [
+                {
+                  ...u,
+                  type: between.unitTypes[u.id],
+                  occupancy: settled.occupancy,
+                  energy: settled.energy,
+                  tier: between.tiers[u.id],
+                  orientation: between.orientation[u.id],
+                  stagedMove: undefined,
+                },
+              ]
+            }),
+            effects: between.effects,
+            potions: between.potions,
+            food: between.food,
+            held: [{ id: "h", observedTurn: 5 }],
+          }
+          const claim = settlePartial(seven, NO_SPAWN).claims[0]
+          // The frozen tier: what turn 7 adjudicates this unit at, which is
+          // the tier the turn before it left the unit carrying.
+          const frozen = between.tiers.h
+          widest = Math.max(widest, Math.abs(frozen - record.tier))
+          const tag = `collectors=${collectors} reachable=${reachable} choice=${choice}`
+          if (frozen < claim.tierMin || frozen > claim.tierMax) {
+            failures.push(
+              `TIER ${tag} frozen=${frozen} outside [${claim.tierMin},${claim.tierMax}] ` +
+                `with ${seven.potions.length} potions left on the board`,
+            )
+          }
+        })
+      }
+    }
+    expect(failures).toEqual([])
+    // The property is only worth asserting where the tier actually moved, and
+    // moved by more than the one potion a turn count would admit.
+    expect(widest).toBeGreaterThanOrEqual(3)
+    expect(worlds).toBeGreaterThan(50)
+  })
+})
+
+// ----------------------------------------- the causal chain, by enumeration
+//
+// The cascade property, on the shape the search actually meets: OUR units,
+// modelled, and ONE enemy nobody modelled. Three things are asked of it, and
+// the third is the one the bot cannot work without.
+//
+//   · T1/T2/T3 as ever, over every concrete world;
+//   · CERTAINTY BEFORE THE FIRST ENTRY. Everything a modelled ally did
+//     strictly before the earliest sub-step the ledger names it at is what it
+//     did in every world. A cascade that wrote every unit off from sub-step 1
+//     would leave nothing here to check, which is exactly how it went unnoticed;
+//   · ATTRIBUTION ALL THE WAY DOWN. However many modelled allies the
+//     uncertainty travelled through, `heldId` is the held enemy — so a caller
+//     partitions by ITS options, not by our own roster — and `via` is the road
+//     it came by.
+
+interface ChainCoverage extends Coverage {
+  chained: number
+  certainCells: number
+  contingent: number
+}
+
+describe("the causal chain — two modelled allies and one held enemy", () => {
+  it("attributes every divergence to the enemy, and keeps the rest certain", () => {
+    const coverage: ChainCoverage = { ...zero(), chained: 0, certainCells: 0, contingent: 0 }
+    const failures: string[] = []
+    const fail = (what: string): void => {
+      if (failures.length < 6) failures.push(what)
+    }
+
+    for (let seed = 4001; seed <= 4400; seed++) {
+      const base = makeBoard(seed)
+      const allies = base.units.filter((u) => u.teamID === "A")
+      const enemies = base.units.filter((u) => u.teamID === "B")
+      if (allies.length < 2 || enemies.length < 1) continue
+      const enemy = enemies[0].id
+      const input = held(base, [enemy])
+      const all = worldsOf(input, 200)
+      if (!all) {
+        coverage.skipped++
+        continue
+      }
+      coverage.boards++
+      coverage.worlds += all.length
+
+      const partial = settlePartial(input, NO_SPAWN)
+      coverage.entries += partial.ledger.length
+      if (partial.ledger.length === 0) coverage.emptyLedgers++
+      if (partial.ledger.some((e) => e.via.length > 0)) coverage.chained++
+
+      const live = input.units.filter((u) => u.id !== enemy)
+      const named = new Set(partial.ledger.map((e) => e.unitId))
+      const subSteps = Math.max(
+        partial.subStepCount,
+        ...partial.claims.map((c) => c.headPossible.length - 1),
+      )
+
+      // ATTRIBUTION. One held unit, so every entry — direct, cascaded through
+      // an ally, or carried by the regicide rule — must name it and nothing else.
+      partial.ledger.forEach((entry) => {
+        if (entry.heldId !== enemy) {
+          fail(`CHAIN seed=${seed} heldId=${entry.heldId} via=[${entry.via.join(">")}] not ${enemy}`)
+        }
+        if (entry.via.includes(enemy)) {
+          fail(`CHAIN seed=${seed} the root appears in its own via chain`)
+        }
+      })
+
+      // CERTAINTY. The sub-step each modelled unit is first named at is the
+      // frontier: before it, this timeline is a statement about every world.
+      const frontier = new Map<string, number>()
+      partial.ledger.forEach((e) => {
+        const known = frontier.get(e.unitId)
+        if (known === undefined || e.subStep < known) frontier.set(e.unitId, e.subStep)
+      })
+      live.forEach((unit) => {
+        const first = frontier.get(unit.id)
+        if (first === undefined) return
+        coverage.contingent++
+        coverage.certainCells += Math.max(0, first)
+      })
+
+      all.forEach((assignment) => {
+        const truth = concrete(input, assignment)
+        const world = JSON.stringify(Array.from(assignment.entries()))
+
+        live.forEach((unit) => {
+          const first = frontier.get(unit.id) ?? Infinity
+          const here = headsOf(partial, unit, subSteps)
+          const there = headsOf(truth, unit, subSteps)
+          for (let k = 0; k < Math.min(first, subSteps + 1); k++) {
+            if (here[k] !== there[k]) {
+              fail(
+                `CERTAIN seed=${seed} unit=${unit.id}(${unit.type}) k=${k} ` +
+                  `first=${first} ${here[k]} vs ${there[k]} world=${world}`,
+              )
+            }
+          }
+
+          // T1/T2/T3, restated on this shape.
+          const at = divergedAtFor(partial, truth, unit, subSteps)
+          if (at !== null && !named.has(unit.id)) {
+            fail(`T1 seed=${seed} unit=${unit.id} diverges at ${at} unledgered, world=${world}`)
+          }
+          const fate = partial.fates[unit.id]
+          if (fate === "dead" && truth.board[unit.id]) {
+            fail(`T2 seed=${seed} unit=${unit.id} called dead but lives, world=${world}`)
+          }
+          if (fate === "alive" && !truth.board[unit.id]) {
+            fail(`T2 seed=${seed} unit=${unit.id} called alive but dies, world=${world}`)
+          }
+        })
+      })
+    }
+
+    expect(failures).toEqual([])
+    process.stdout.write(
+      `  chain: ${coverage.boards} boards, ${coverage.worlds} worlds, ` +
+        `${coverage.skipped} skipped over budget, ${coverage.entries} ledger entries, ` +
+        `${coverage.chained} boards whose ledger carries a via chain, ` +
+        `${coverage.contingent} contingent units holding ` +
+        `${coverage.certainCells} certain pre-divergence sub-steps\n`,
+    )
+    expect(coverage.boards).toBeGreaterThan(150)
+    expect(coverage.worlds).toBeGreaterThan(2000)
+    // The cascade must actually travel, or the attribution proves nothing.
+    expect(coverage.chained).toBeGreaterThan(0)
+    // And it must stop somewhere, or there is nothing certain left to keep.
+    expect(coverage.certainCells).toBeGreaterThan(0)
+  })
+})
+
+function range(from: number, to: number): number[] {
+  const out: number[] = []
+  for (let i = from; i <= to; i++) out.push(i)
+  return out
+}
+
+// --------------------------------------------------------------- T4
+
+describe("T4 — narrowing may only tighten", () => {
+  it("a narrowed held set produces a subset of the ledger it had unnarrowed", () => {
+    const key = (e: { cell: number; subStep: number; unitId: string; kind: string }): string =>
+      `${e.subStep}|${e.cell}|${e.kind}|${e.unitId}`
+    let compared = 0
+    for (let seed = 501; seed <= 600; seed++) {
+      const base = makeBoard(seed)
+      const id = base.units[0].id
+      const wide = held(base, [id])
+      const options = legalTargets(base.units[0], shapeOf(base))
+      if (options.length < 2) continue
+      const narrow: PartialSettleInput = {
+        ...base,
+        held: [{ id, observedTurn: base.turn - 1, options: options.slice(0, 1) }],
+      }
+      const outer = new Set(settlePartial(wide, NO_SPAWN).ledger.map(key))
+      settlePartial(narrow, NO_SPAWN).ledger.forEach((entry) => {
+        expect({ seed, entry: key(entry), inside: outer.has(key(entry)) }).toEqual({
+          seed,
+          entry: key(entry),
+          inside: true,
+        })
+      })
+      compared++
+    }
+    expect(compared).toBeGreaterThan(50)
+  })
+
+  it("marks every entry a narrowing licensed", () => {
+    const base = makeBoard(7)
+    const options = legalTargets(base.units[0], shapeOf(base))
+    const narrow: PartialSettleInput = {
+      ...base,
+      held: [{ id: base.units[0].id, observedTurn: base.turn - 1, options }],
+    }
+    settlePartial(narrow, NO_SPAWN).ledger.forEach((entry) => expect(entry.narrowed).toBe(true))
+  })
+})
+
+// -------------------------------------------------------- claims alone
+
+describe("computeClaims", () => {
+  it("is a pure function of its input — two calls, the same answer", () => {
+    const input = held(makeBoard(11), ["u0"])
+    expect(JSON.stringify(computeClaims(input))).toEqual(JSON.stringify(computeClaims(input)))
+  })
+
+  it("is what settlePartial uses when it is handed one", () => {
+    const input = held(makeBoard(13), ["u0", "u1"])
+    const hoisted = computeClaims(input)
+    expect(settlePartial(input, NO_SPAWN, hoisted).ledger).toEqual(
+      settlePartial(input, NO_SPAWN).ledger,
+    )
+  })
+
+  it("gives a held trail unit the neck it cannot vacate, and a piece none", () => {
+    const base = makeBoard(3)
+    const snake = base.units.find((u) => u.type === "snake" && u.occupancy.length > 1)
+    if (snake) {
+      const claim = computeClaims(held(base, [snake.id]))[0]
+      expect(claim.certainIfAlive).toEqual(
+        snake.occupancy.slice(0, snake.occupancy.length - 1).sort((a, b) => a - b),
+      )
+    }
+    const piece = base.units.find((u) => u.type !== "snake")
+    if (piece) {
+      expect(computeClaims(held(base, [piece.id]))[0].certainIfAlive).toEqual([])
+    }
+  })
+
+  it("prices a held unit's meal at `foodEnergy`, not at a full tank", () => {
+    // The ceiling on what a held unit could be carrying is what it was seen
+    // with plus every meal it could reach, clamped to its kind's max. Under a
+    // lean food that is well short of the tank the old rule assumed.
+    const snake: ResolveUnit = {
+      id: "s",
+      type: "snake",
+      teamID: "A",
+      tier: 0,
+      energy: 50,
+      occupancy: [at(4, 4), at(3, 4), at(2, 4)],
+      orientation: { dx: 1, dy: 0 },
+    }
+    const fed = bench([snake], {
+      food: [at(5, 4)],
+      held: [{ id: "s", observedTurn: 3 }],
+    })
+    expect(computeClaims(fed)[0].energyMax).toBe(100) // default food = a tank
+    expect(computeClaims({ ...fed, foodEnergy: 5 })[0].energyMax).toBe(55)
+    expect(computeClaims({ ...fed, foodEnergy: 5, food: [] })[0].energyMax).toBe(50)
+  })
+
+  it("forks a pawn's kinds at the promotion threshold and nowhere else", () => {
+    const base = makeBoard(5)
+    const light: PartialSettleInput = {
+      ...base,
+      pawnPromotionWeight: 99,
+      units: base.units.map((u, i) => (i === 0 ? { ...u, type: "pawn" as UnitType } : u)),
+      held: [{ id: base.units[0].id, observedTurn: base.turn - 1 }],
+    }
+    expect(computeClaims(light)[0].kinds).toEqual(["pawn"])
+    expect(computeClaims({ ...light, pawnPromotionWeight: 1 })[0].kinds).toEqual(["pawn", "queen"])
+  })
+})
+
+
+// ----------------------------------------------------- worked examples
+//
+// The sweeps above prove the properties; these three say what the ledger
+// MEANS, on boards small enough to read.
+
+const at = (x: number, y: number): number => y * W + x
+
+const bench = (units: ResolveUnit[], overrides: Partial<PartialSettleInput> = {}) => {
+  const teamOf: { [unitID: string]: string } = {}
+  units.forEach((u) => {
+    teamOf[u.id] = u.teamID
+  })
+  const input: PartialSettleInput = {
+    units,
+    boardWidth: W,
+    boardHeight: W,
+    walls: WALLS,
+    hazards: [],
+    hazardDamage: 5,
+    food: [],
+    defaultMaxEnergy: 100,
+    turn: 4,
+    teamOf,
+    effects: [],
+    potions: [],
+    potionsEnabled: false,
+    potionWindowTurns: 3,
+    pawnPromotionWeight: 10,
+    maxTurns: null,
+    held: [],
+    ...overrides,
+  }
+  return input
+}
+
+// ------------------------------------------------------- the cost of a node
+//
+// A caller sweeping candidates pays for one `settlePartial` per node, so the
+// per-call allocation is a search parameter and not a detail. Printed rather
+// than asserted: a number that fails the build on a shared runner is a number
+// nobody can keep, and ts-jest's instrumentation inflates all three by about
+// five times over the same code run plainly.
+//
+// The allocation pass that removed the per-sub-step ghost sets, the per-pair
+// reach sets, the per-cell pawn-target rebuild and the coordinate objects in
+// `planUnitAction` moved these, on this board and this machine:
+//
+//                        under ts-jest        plain node
+//   settlePartial        3.10 -> 2.01 ms      —
+//   ...claims hoisted    1.11 -> 0.48 ms      0.173 -> 0.110 ms
+//   computeClaims        1.70 -> 1.39 ms      0.210 -> 0.100 ms
+//
+// The hoisted line is the one a search pays per node; the rest of that call
+// is `settleTurn` itself, which was 0.098 ms of it before and is untouched.
+
+describe("what a settlement costs", () => {
+  it("prints the per-call time on a twelve-unit board", () => {
+    const units: ResolveUnit[] = []
+    const teamOf: { [unitID: string]: string } = {}
+    const kinds: UnitType[] = ["queen", "rook", "bishop", "knight", "pawn", "snake"]
+    for (let i = 0; i < 12; i++) {
+      const type = kinds[i % kinds.length]
+      const teamID = i % 2 === 0 ? "A" : "B"
+      const x = 1 + (i % 7)
+      const y = 1 + Math.floor(i / 7) * 2
+      const occupancy = type === "snake" ? [at(x, y), at(x, y + 1)] : [at(x, y), at(x, y)]
+      const id = `n${i}`
+      teamOf[id] = teamID
+      units.push({
+        id,
+        type,
+        teamID,
+        isKing: false,
+        tier: (i % 3) - 1,
+        energy: 40 + i,
+        occupancy,
+        orientation: i % 2 === 0 ? { dx: 1, dy: 0 } : { dx: 0, dy: 1 },
+        stagedMove: at(1 + ((i + 3) % 7), 5),
+      })
+    }
+    const input: PartialSettleInput = {
+      ...bench(units, {
+        food: [at(3, 5), at(6, 3)],
+        potions: [at(5, 6)],
+        potionsEnabled: true,
+        hazards: [at(2, 5)],
+      }),
+      teamOf,
+      held: [
+        { id: "n1", observedTurn: 3 },
+        { id: "n3", observedTurn: 3 },
+      ],
+    }
+
+    const time = (runs: number, run: () => void): number => {
+      for (let i = 0; i < 20; i++) run() // warm
+      const started = process.hrtime.bigint()
+      for (let i = 0; i < runs; i++) run()
+      return Number(process.hrtime.bigint() - started) / 1e6 / runs
+    }
+
+    const hoisted = computeClaims(input)
+    const whole = time(400, () => settlePartial(input, NO_SPAWN))
+    const reused = time(400, () => settlePartial(input, NO_SPAWN, hoisted))
+    const claimsOnly = time(400, () => computeClaims(input))
+    process.stdout.write(
+      `  12 units, 2 held: settlePartial ${whole.toFixed(3)} ms/call, ` +
+        `${reused.toFixed(3)} ms/call with claims hoisted, ` +
+        `computeClaims ${claimsOnly.toFixed(3)} ms/call\n`,
+    )
+    expect(settlePartial(input, NO_SPAWN, hoisted).ledger).toEqual(
+      settlePartial(input, NO_SPAWN).ledger,
+    )
+  })
+})
+
+describe("the regicide cascade is conditional on the king", () => {
+  // A team that plays under regicide loses everything with its last king, so
+  // every unit of it CAN be taken off the board by a king it never met. That
+  // is a conditional, and pricing it as an unconditional is what made the
+  // material fold blind: it says exactly the same thing about the plan that
+  // takes a shot at the king and the plan that walks past it.
+  //
+  // The two halves of the conditional, on one board with the attacker moved.
+  //
+  //   bK  a held enemy KING, alone in the middle, nothing near it
+  //   bT  its held team-mate, out of everybody's reach — its OWN peril is nil,
+  //       so whatever `deathPossible` says about it is the cascade talking
+  //   bM  a modelled team-mate, so there is somebody for the ledger to name
+  //   ar  our rook, whose file either bears on the king or does not
+
+  const board = (rookAt: number, rookTo: number): PartialSettleInput => {
+    const king: ResolveUnit = {
+      id: "bK",
+      type: "king",
+      teamID: "B",
+      isKing: true,
+      tier: 0,
+      energy: 50,
+      occupancy: [at(4, 4)],
+      orientation: { dx: 1, dy: 0 },
+    }
+    const mate: ResolveUnit = {
+      id: "bT",
+      type: "pawn",
+      teamID: "B",
+      tier: 0,
+      energy: 50,
+      occupancy: [at(2, 6)],
+      orientation: { dx: 0, dy: 1 },
+    }
+    const modelled: ResolveUnit = {
+      id: "bM",
+      type: "pawn",
+      teamID: "B",
+      tier: 0,
+      energy: 50,
+      occupancy: [at(7, 7)],
+      orientation: { dx: 0, dy: -1 },
+      stagedMove: at(7, 6),
+    }
+    const rook: ResolveUnit = {
+      id: "ar",
+      type: "rook",
+      teamID: "A",
+      tier: 0,
+      energy: 50,
+      occupancy: [rookAt],
+      orientation: { dx: 0, dy: 1 },
+      stagedMove: rookTo,
+    }
+    return bench([king, mate, modelled, rook], {
+      regicideTeamIDs: ["A", "B"],
+      held: [
+        { id: "bK", observedTurn: 3 },
+        { id: "bT", observedTurn: 3 },
+      ],
+    })
+  }
+
+  const claimOf = (settled: { claims: ReadonlyArray<Claim> }, id: string): Claim =>
+    settled.claims.find((c) => c.id === id) as Claim
+
+  it("a king nothing can touch takes nobody with it", () => {
+    // The rook sits on the first file: its cover never crosses the king.
+    const input = board(at(1, 1), at(1, 2))
+    const settled = settlePartial(input, NO_SPAWN)
+
+    expect(claimOf(settled, "bK").deathPossible).toBe(false)
+    expect(claimOf(settled, "bT")).toMatchObject({
+      selfDeathPossible: false,
+      deathPossible: false,
+      regicideKingId: null,
+    })
+    expect(settled.fates.bT).toBe("alive")
+    expect(settled.ledger.filter((e) => e.kind === "regicide")).toEqual([])
+
+    // And "alive" is a proof: every world agrees, and it is the whole product
+    // of both held units' options, not a sample of it.
+    let worlds = 0
+    optionsFor(input, "bK").forEach((kingMove) => {
+      optionsFor(input, "bT").forEach((mateMove) => {
+        worlds++
+        const truth = concrete(
+          input,
+          new Map([
+            ["bK", kingMove],
+            ["bT", mateMove],
+          ]),
+        )
+        expect({ world: `${kingMove}/${mateMove}`, alive: truth.board.bT !== undefined }).toEqual({
+          world: `${kingMove}/${mateMove}`,
+          alive: true,
+        })
+      })
+    })
+    expect(worlds).toBeGreaterThan(8)
+  })
+
+  it("a king our rook bears on puts its whole team in doubt, and names the shot", () => {
+    // The same board with the rook on the king's file. Nothing else moved.
+    const input = board(at(4, 1), at(4, 2))
+    const settled = settlePartial(input, NO_SPAWN)
+
+    expect(claimOf(settled, "bK").deathPossible).toBe(true)
+    expect(claimOf(settled, "bT")).toMatchObject({
+      // Its own peril is still nil — everything below is the cascade.
+      selfDeathPossible: false,
+      deathPossible: true,
+      regicideKingId: "bK",
+    })
+    expect(settled.fates.bT).toBe("contingent")
+
+    // The modelled team-mate is where the LEDGER can say it, and it says it
+    // keyed to the king: the divergence is charged to the held unit at the
+    // root, and `via` ends at the one unit whose fall carries the team.
+    const regicide = settled.ledger.filter((e) => e.kind === "regicide")
+    expect(regicide.length).toBeGreaterThan(0)
+    regicide.forEach((entry) => {
+      expect(entry.heldId).toBe("bK")
+      expect(entry.via[entry.via.length - 1] ?? entry.heldId).toBe("bK")
+    })
+    expect(regicide.map((e) => e.unitId)).toContain("bM")
+  })
+})
+
+describe("what an entry says", () => {
+  it("marks a held trail unit's neck as present in every world it survives", () => {
+    // A snake must step and its body follows, so the cells behind its head
+    // are there whatever it chose: `assumedPresent` is true, and it is the
+    // BEST case that rides on the entry rather than the worst.
+    const snake: ResolveUnit = {
+      id: "s",
+      type: "snake",
+      teamID: "A",
+      tier: 1,
+      energy: 50,
+      occupancy: [at(4, 4), at(3, 4), at(2, 4)],
+      orientation: { dx: 1, dy: 0 },
+    }
+    const rook: ResolveUnit = {
+      id: "r",
+      type: "rook",
+      teamID: "B",
+      tier: 0,
+      energy: 50,
+      occupancy: [at(7, 4)],
+      orientation: { dx: -1, dy: 0 },
+      stagedMove: at(1, 4),
+    }
+    const input = bench([snake, rook], { held: [{ id: "s", observedTurn: 3 }] })
+    const settled = settlePartial(input, NO_SPAWN)
+    const neck = settled.ledger.filter((e) => e.cell === at(3, 4) && e.kind === "bodyBlock")
+    expect(neck.length).toBe(1)
+    expect(neck[0]).toMatchObject({ unitId: "r", heldId: "s", assumedPresent: true, couldBeat: true })
+    expect(settled.fates.r).toBe("contingent")
+  })
+
+  it("says a contact is about timing, not survival, when the unit wins it everywhere", () => {
+    // The queen outranks the claim at every strength its interval permits, so
+    // the claim can change where the queen stops and never whether it lives.
+    const snake: ResolveUnit = {
+      id: "s",
+      type: "snake",
+      teamID: "A",
+      tier: 0,
+      energy: 50,
+      occupancy: [at(4, 4), at(4, 5)],
+      orientation: { dx: 1, dy: 0 },
+    }
+    const queen: ResolveUnit = {
+      id: "q",
+      type: "queen",
+      teamID: "B",
+      tier: 2,
+      energy: 50,
+      occupancy: [at(7, 4), at(7, 4), at(7, 4)],
+      orientation: { dx: -1, dy: 0 },
+      stagedMove: at(1, 4),
+    }
+    const input = bench([snake, queen], { held: [{ id: "s", observedTurn: 3 }] })
+    const settled = settlePartial(input, NO_SPAWN)
+    expect(settled.ledger.length).toBeGreaterThan(0)
+    settled.ledger.forEach((entry) => expect(entry.couldBeat).toBe(false))
+  })
+
+  it("proves the held set did not matter when the ledger comes back empty", () => {
+    // The corollary, in one board: nothing the knight could have chosen
+    // reaches the pawn, so the pawn's turn is settled, not guessed — and
+    // every concrete world agrees, coordinate for coordinate.
+    const knight: ResolveUnit = {
+      id: "k",
+      type: "knight",
+      teamID: "A",
+      tier: 0,
+      energy: 50,
+      occupancy: [at(1, 1)],
+      orientation: { dx: 1, dy: 0 },
+    }
+    const pawn: ResolveUnit = {
+      id: "p",
+      type: "pawn",
+      teamID: "B",
+      tier: 0,
+      energy: 50,
+      occupancy: [at(7, 7)],
+      orientation: { dx: -1, dy: 0 },
+      stagedMove: at(6, 7),
+    }
+    const input = bench([knight, pawn], { held: [{ id: "k", observedTurn: 3 }] })
+    const settled = settlePartial(input, NO_SPAWN)
+    expect(settled.ledger).toEqual([])
+    expect(settled.fates.p).toBe("alive")
+
+    optionsFor(input, "k").forEach((option) => {
+      const truth = concrete(input, new Map([["k", option]]))
+      expect(truth.board.p).toEqual(settled.board.p)
+      expect(truth.traversed.p).toEqual(settled.traversed.p)
+      expect(truth.tiers.p).toEqual(settled.tiers.p)
+    })
+  })
+})
+
+// -------------------------------- the schedule a held unit keeps carrying
+//
+// `settlePartial` hands `settleTurn` the units whose moves are KNOWN, so a
+// held unit is absent from that roster and present on the board. The expiry
+// phase used to purge, on any turn where anything expired at all, every
+// effect whose owner was not on the roster — which is every effect a held
+// unit was carrying. The oracle is `settleTurn` over the same board with the
+// held unit's move filled in: whatever it chooses, its own window is still
+// open when the turn closes, and the schedule the next turn starts from has
+// to say so.
+
+describe("a held unit's invulnerability schedule survives the turn", () => {
+  const scheduled = (held: boolean): PartialSettleInput =>
+    bench(
+      [
+        {
+          id: "h",
+          type: "rook",
+          teamID: "A",
+          tier: 1,
+          energy: 50,
+          occupancy: [at(2, 2)],
+          orientation: { dx: 1, dy: 0 },
+          stagedMove: at(2, 2),
+        },
+        {
+          id: "m",
+          type: "rook",
+          teamID: "B",
+          tier: 1,
+          energy: 50,
+          occupancy: [at(6, 6)],
+          orientation: { dx: 0, dy: -1 },
+          stagedMove: at(6, 5),
+        },
+      ],
+      {
+        turn: 7,
+        effects: [
+          // h's window runs past this turn: no world closes it here.
+          { playerID: "h", type: "invulnerability_buff", level: 1, expiryTurn: 9, sourcePlayerID: "h" },
+          // m's lapses on this very turn, which is what makes the phase run.
+          { playerID: "m", type: "invulnerability_buff", level: 1, expiryTurn: 7, sourcePlayerID: "m" },
+        ],
+        held: held ? [{ id: "h", observedTurn: 6 }] : [],
+      },
+    )
+
+  it("keeps it when the unit is held, exactly as the oracle keeps it", () => {
+    const oracle = settleTurn(scheduled(false), NO_SPAWN)
+    const partial = settlePartial(scheduled(true), NO_SPAWN)
+
+    // The oracle: m's buff has lapsed and given its level back, h's stands.
+    expect(oracle.effects).toEqual([
+      { playerID: "h", type: "invulnerability_buff", level: 1, expiryTurn: 9, sourcePlayerID: "h" },
+    ])
+    expect(oracle.tiers).toEqual({ h: 1, m: 0 })
+
+    // And the partial settlement says the same about h, whose move it never saw.
+    expect(partial.effects).toEqual(oracle.effects)
+    expect(partial.tiers.h).toBe(1)
+  })
+
+  it("keeps it in every world the held unit could have chosen", () => {
+    const input = scheduled(true)
+    const partial = settlePartial(input, NO_SPAWN)
+    optionsFor(input, "h").forEach((option) => {
+      const truth = concrete(input, new Map([["h", option]]))
+      expect(partial.effects.filter((e) => e.playerID === "h")).toEqual(
+        truth.effects.filter((e) => e.playerID === "h"),
+      )
+    })
+  })
+
+  it("gives the level back when the held unit's own window closes", () => {
+    // The other half. A window lapses on the CLOCK — nothing the held unit
+    // chose is in it — so the tier it carries into the next turn is one lower
+    // in every world, and a settlement that left it where it was would have
+    // the unit invulnerable for the rest of the game.
+    const closing = (held: boolean): PartialSettleInput => {
+      const input = scheduled(held)
+      return {
+        ...input,
+        effects: input.effects.map((effect) =>
+          effect.playerID === "h" ? { ...effect, expiryTurn: input.turn } : effect,
+        ),
+      }
+    }
+
+    const oracle = settleTurn(closing(false), NO_SPAWN)
+    expect(oracle.effects).toEqual([])
+    expect(oracle.tiers.h).toBe(0)
+
+    const input = closing(true)
+    const partial = settlePartial(input, NO_SPAWN)
+    expect(partial.effects.filter((e) => e.playerID === "h")).toEqual([])
+    expect(partial.tiers.h).toBe(0)
+
+    // And it is the same answer in every world, because no world has a say.
+    optionsFor(input, "h").forEach((option) => {
+      expect(concrete(input, new Map([["h", option]])).tiers.h).toBe(0)
+    })
+  })
+})
+
+// ------------------------------------------- the sever that is not survivable
+//
+// The composition the trail branch of `entangle` used to miss, on the
+// smallest board that shows it. A cut is a weight loss and never a death, so
+// a `sever` entry says `couldBeat: false` — and that is right for ONE
+// arrival. It is not right for two, because the OTHER branch of the same
+// tier interval is a death ON the segment, a death removes nothing from the
+// board, and the batch that records it enters the segment's OWNER into the
+// cell's durable pile. The next arrival there is contested against that whole
+// pile, and everything in it that is not the unique strict maximum dies.
+//
+// Both halves are asserted: the board where the second arrival exists, where
+// the ledger has to admit the mover can lose; and the same board with that
+// arrival taken away, where the original reasoning is exactly right and a
+// ledger that cried danger would be selling a caller a pile that cannot form.
+
+const severPileBoard = (drop: string[] = []): PartialSettleInput => {
+  const roster: ResolveUnit[] = [
+    {
+      id: "rs",
+      type: "snake",
+      teamID: "A",
+      tier: 0,
+      energy: 50,
+      occupancy: [at(3, 2), at(4, 2), at(5, 2)],
+      orientation: { dx: -1, dy: 0 },
+      stagedMove: at(2, 2),
+    },
+    {
+      id: "rq",
+      type: "queen",
+      teamID: "A",
+      tier: 0,
+      energy: 50,
+      occupancy: [at(4, 3), at(4, 3), at(4, 3)],
+      orientation: { dx: 0, dy: -1 },
+    },
+    {
+      id: "bs",
+      type: "snake",
+      teamID: "B",
+      tier: 0,
+      energy: 50,
+      occupancy: [at(4, 6), at(5, 6), at(6, 6)],
+      orientation: { dx: -1, dy: 0 },
+    },
+    {
+      id: "br",
+      type: "rook",
+      teamID: "B",
+      tier: 0,
+      energy: 50,
+      occupancy: [at(3, 6), at(3, 6), at(3, 6)],
+      orientation: { dx: 0, dy: -1 },
+    },
+  ]
+  const units = roster.filter((u) => !drop.includes(u.id))
+  return bench(units, {
+    turn: 4,
+    held: units.filter((u) => u.id !== "rs").map((u) => ({ id: u.id, observedTurn: 4 })),
+  })
+}
+
+/** The trail cell the pile forms on: the mover's own neck, once it has gone west. */
+const PILE = at(3, 2)
+
+describe("a sever the resolver can make fatal", () => {
+  it("admits the mover can lose the cell its own tail is on", () => {
+    const input = severPileBoard()
+    const settled = settlePartial(input, NO_SPAWN)
+
+    // The optimistic timeline: the snake steps west, whole and alive, and its
+    // tail still lies across the cell two held units can reach.
+    expect(settled.board.rs).toMatchObject({ occupancy: [at(2, 2), PILE, at(4, 2)] })
+    expect(settled.deaths.rs).toBeUndefined()
+
+    // THE PROPERTY, FIRST: worlds in which the mover dies do exist, and every
+    // one of them must be admitted by an entry that says it could lose, at or
+    // before the sub-step it lost at. This is T1's survival half on the board
+    // it was written for, and it is what a ledger of nothing but
+    // `couldBeat: false` gets wrong.
+    const all = worldsOf(input, 4000) as ReadonlyArray<Map<string, number | undefined>>
+    expect(all).not.toBeNull()
+    const beatable = settled.ledger.filter((e) => e.unitId === "rs" && e.couldBeat)
+    const deadly: string[] = []
+    all.forEach((assignment) => {
+      const truth = concrete(input, assignment)
+      if (truth.board.rs) return
+      const death = truth.deaths.rs
+      deadly.push(`${death.cause}@${death.cell}`)
+      expect(beatable.length).toBeGreaterThan(0)
+      expect(Math.min(...beatable.map((e) => e.subStep))).toBeLessThanOrEqual(death.subStep)
+    })
+    expect(deadly.length).toBeGreaterThan(0)
+    expect([...new Set(deadly)]).toEqual([`contest@${PILE}`])
+
+    // And the shape of the answer, so the entry a caller reads is the one the
+    // property was proved against. The cut itself is still a weight loss: no
+    // `sever` entry claims a death.
+    const severs = settled.ledger.filter((e) => e.unitId === "rs" && e.kind === "sever")
+    expect(severs.length).toBeGreaterThan(0)
+    expect(severs.some((e) => e.couldBeat)).toBe(false)
+
+    // The pile is a SECOND entry at the same cell and sub-step, and it names
+    // both held units that can be there — the one that dies on the segment
+    // and the one that arrives onto what its death left behind.
+    const pile = settled.ledger.filter(
+      (e) => e.unitId === "rs" && e.cell === PILE && e.kind === "contest",
+    )
+    expect(pile.length).toBeGreaterThan(0)
+    pile.forEach((e) => expect(e.couldBeat).toBe(true))
+    expect([...new Set(pile.map((e) => e.heldId))].sort()).toEqual(["br", "rq"])
+    pile.forEach((e) => {
+      expect(severs.some((s) => s.cell === e.cell && s.subStep === e.subStep)).toBe(true)
+    })
+  })
+
+  it("and admits it again when the pile is already there, at any claim tier", () => {
+    // The same composition reached the other way round, and the reason the
+    // tier interval is only half the condition. Here a MODELLED unit dies on
+    // the tail in the optimistic timeline itself, so the cell is durable and
+    // holds the owner before any claim moves. The held rook outranks the
+    // snake outright — it severs the tail rather than dying on it — and it
+    // is still fatal, because the arrival tier runs before the body tier: it
+    // contests the standing pile the moment it lands, and the owner is in it.
+    const snake: ResolveUnit = {
+      id: "rs",
+      type: "snake",
+      teamID: "A",
+      tier: 0,
+      energy: 50,
+      occupancy: [at(3, 2), at(4, 2), at(5, 2)],
+      orientation: { dx: -1, dy: 0 },
+      stagedMove: at(2, 2),
+    }
+    const knight: ResolveUnit = {
+      id: "bn",
+      type: "knight",
+      teamID: "B",
+      tier: 0,
+      energy: 50,
+      occupancy: [at(4, 4)],
+      orientation: { dx: 0, dy: -1 },
+      stagedMove: PILE,
+    }
+    const rook: ResolveUnit = {
+      id: "br",
+      type: "rook",
+      teamID: "B",
+      tier: 1,
+      energy: 50,
+      occupancy: [at(3, 6), at(3, 6), at(3, 6)],
+      orientation: { dx: 0, dy: -1 },
+    }
+    const input = bench([snake, knight, rook], {
+      turn: 4,
+      held: [{ id: "br", observedTurn: 4 }],
+    })
+    const settled = settlePartial(input, NO_SPAWN)
+
+    // The premise: the knight died on the tail, and that is what made the
+    // cell durable with the snake in it.
+    expect(settled.deaths.bn).toMatchObject({ cell: PILE, cause: "bodyBlock" })
+    expect(settled.board.rs).toBeDefined()
+
+    const all = worldsOf(input, 4000) as ReadonlyArray<Map<string, number | undefined>>
+    const beatable = settled.ledger.filter((e) => e.unitId === "rs" && e.couldBeat)
+    let deadly = 0
+    all.forEach((assignment) => {
+      const truth = concrete(input, assignment)
+      if (truth.board.rs) return
+      deadly++
+      expect(beatable.length).toBeGreaterThan(0)
+      expect(Math.min(...beatable.map((e) => e.subStep))).toBeLessThanOrEqual(
+        truth.deaths.rs.subStep,
+      )
+    })
+    expect(deadly).toBeGreaterThan(0)
+    expect(beatable.every((e) => e.cell === PILE && e.kind === "contest")).toBe(true)
+  })
+
+  it("and still proves survival when only one claim can reach the segment", () => {
+    // Take the rook away and no second arrival is possible at that cell. The
+    // queen either dies on the tail or cuts it, the owner lives either way,
+    // and the ledger goes back to saying so — anti-vacuity for the entry
+    // above, and the reason the fix is a condition rather than a constant.
+    const input = severPileBoard(["br"])
+    const settled = settlePartial(input, NO_SPAWN)
+
+    const mine = settled.ledger.filter((e) => e.unitId === "rs")
+    expect(mine.filter((e) => e.cell === PILE && e.kind === "sever").length).toBeGreaterThan(0)
+    expect(mine.some((e) => e.couldBeat)).toBe(false)
+
+    const all = worldsOf(input, 4000) as ReadonlyArray<Map<string, number | undefined>>
+    expect(all).not.toBeNull()
+    all.forEach((assignment) => expect(concrete(input, assignment).board.rs).toBeDefined())
+  })
+})
+
+// ------------------------------- a staged action whose legality reads the board
+//
+// EVERY OTHER RULE IN THE GRAMMAR IS GEOMETRY. A pawn's diagonal step is the
+// one that is not: `planUnitAction` admits it only onto a cell in
+// `pawnTargetsOf` — the food, plus every body standing on the board as the
+// turn OPENS. So another unit's own square is what makes the capture a legal
+// move at all.
+//
+// `settlePartial` settles its optimistic timeline over the units whose moves
+// are known, and `resolveTurn` re-reads every staged cell through the grammar
+// against THAT roster. Take the held rook off it and the capture stops being
+// a legal action: `stagedAction` substitutes the kind's default, a piece
+// holds, and the timeline settles a pawn standing still with an empty ledger
+// — a proof that the turn is world-invariant, published for a turn whose
+// outcome is decided by the very unit that was removed to reach it.
+//
+// The board is the smallest one that shows it. Neither unit is decoration:
+// drop the rook and the diagonal is not a legal target for the pawn to stage
+// at all, and give the rook one square instead of two and the contest is a
+// tie that kills them both rather than one the pawn loses.
+
+const P = 5
+const pat = (x: number, y: number): number => y * P + x
+const P_WALLS = ((): number[] => {
+  const walls: number[] = []
+  for (let y = 0; y < P; y++) {
+    for (let x = 0; x < P; x++) {
+      if (x === 0 || y === 0 || x === P - 1 || y === P - 1) walls.push(pat(x, y))
+    }
+  }
+  return walls
+})()
+
+/** Our pawn facing -y, and one square diagonally forward a held enemy rook. */
+const pawnCaptureBoard = (): PartialSettleInput => {
+  const turn = 4
+  return {
+    units: [
+      {
+        id: "p",
+        type: "pawn",
+        teamID: "A",
+        tier: 0,
+        energy: 50,
+        occupancy: [pat(2, 3)],
+        orientation: { dx: 0, dy: -1 },
+        stagedMove: pat(3, 2),
+      },
+      {
+        id: "r",
+        type: "rook",
+        teamID: "B",
+        tier: 0,
+        energy: 50,
+        occupancy: [pat(3, 2), pat(3, 2)],
+        orientation: { dx: 0, dy: -1 },
+      },
+    ],
+    boardWidth: P,
+    boardHeight: P,
+    walls: P_WALLS,
+    hazards: [],
+    hazardDamage: 5,
+    food: [],
+    defaultMaxEnergy: 100,
+    turn,
+    teamOf: { p: "A", r: "B" },
+    effects: [],
+    potions: [],
+    potionsEnabled: false,
+    potionWindowTurns: 3,
+    pawnPromotionWeight: 10,
+    maxTurns: null,
+    held: [{ id: "r", observedTurn: turn - 1 }],
+  }
+}
+
+describe("a staged action a HOLD would make illegal is still the staged action", () => {
+  it("walks the capture the staged cell names, on the board the turn opens on", () => {
+    const input = pawnCaptureBoard()
+    // Anti-vacuity: the capture has to be a legal staged action on the
+    // OBSERVED board, or this board is not the fixture it claims to be.
+    expect(legalTargets(input.units[0], shapeOf(input))).toContain(pat(3, 2))
+
+    const settled = settlePartial(input, NO_SPAWN)
+    expect(settled.traversed.p).toEqual([pat(3, 2)])
+  })
+
+  it("holds T1 and T2 over every one of the rook's replies", () => {
+    const input = pawnCaptureBoard()
+    const settled = settlePartial(input, NO_SPAWN)
+    const all = worldsOf(input, 4000) as ReadonlyArray<Map<string, number | undefined>>
+    expect(all).not.toBeNull()
+    expect(all.length).toBeGreaterThan(4)
+
+    const pawn = input.units[0]
+    const subSteps = Math.max(
+      settled.subStepCount,
+      ...settled.claims.map((c) => c.headPossible.length - 1),
+    )
+    const named = settled.ledger.filter((e) => e.unitId === "p")
+    const beatable = named.filter((e) => e.couldBeat)
+
+    const failures: string[] = []
+    let deadly = 0
+    all.forEach((assignment) => {
+      const truth = concrete(input, assignment)
+      const world = JSON.stringify(Array.from(assignment.entries()))
+
+      // T1 — a world that differs from the timeline differs where the ledger
+      // said it could, and no earlier.
+      const at = divergedAtFor(settled, truth, pawn, subSteps)
+      if (at !== null) {
+        if (named.length === 0) failures.push(`T1 pawn diverges at ${at} unledgered, ${world}`)
+        else if (Math.min(...named.map((e) => e.subStep)) > at) {
+          failures.push(`T1 pawn diverges at ${at}, earliest entry later, ${world}`)
+        }
+      }
+
+      // T1b — a world that kills the pawn is admitted by an entry that says
+      // it could lose, at or before the sub-step it lost at.
+      if (settled.board.p && !truth.board.p) {
+        deadly++
+        const death = truth.deaths.p
+        if (beatable.length === 0) {
+          failures.push(`T1b pawn dies ${death.cause}@${death.cell} ${world}, every entry wins`)
+        } else if (Math.min(...beatable.map((e) => e.subStep)) > death.subStep) {
+          failures.push(`T1b pawn dies at ${death.subStep}, earliest couldBeat later, ${world}`)
+        }
+      }
+
+      // T2 — the fates are proofs in both directions.
+      if (settled.fates.p === "dead" && truth.board.p) failures.push(`T2 pawn lives, ${world}`)
+      if (settled.fates.p === "alive" && !truth.board.p) failures.push(`T2 pawn dies, ${world}`)
+      if (settled.fates.p === "contingent" && named.length === 0) {
+        failures.push("T2 pawn contingent with no entry")
+      }
+      settled.claims.forEach((claim) => {
+        if (claim.certainlyGone && truth.board[claim.id]) {
+          failures.push(`T2 claim ${claim.id} certainlyGone but lives, ${world}`)
+        }
+        if (!claim.deathPossible && !truth.board[claim.id]) {
+          failures.push(`T2 claim ${claim.id} deathPossible=false but dies, ${world}`)
+        }
+      })
+    })
+
+    expect(failures).toEqual([])
+    // Anti-vacuity: the worlds that kill the pawn exist, so T1b was asked.
+    expect(deadly).toBeGreaterThan(0)
+  })
+})
+
+// A unit observed on THIS board is standing where the record says when the
+// turn opens — staging happens before anything moves — so reading the staged
+// cells against it is a fact and not a guess. A unit observed a turn EARLIER
+// is the other case: it has had a move since, its record cell may be empty by
+// now, and whether our pawn's capture is a legal action at all is then a
+// question the worlds answer differently. That is a divergence like any
+// other, and it is written down rather than settled by picking a world.
+
+describe("a claim that may have left the square the staged action reads", () => {
+  // The rook is observed a COLUMN AWAY, so its own square is nowhere near the
+  // pawn and the cell the pawn stages is empty ground on the observed board:
+  // the capture is not a legal action there, and the optimistic timeline
+  // holds the pawn. It is the rook's UNKNOWN TURN that can put a body on that
+  // square, and the narrowing says it does exactly that. Nothing else in the
+  // ledger can cover this: the rook is a piece, so it drags no trail, and
+  // from the square it lands on it can never reach the pawn's own cell —
+  // `entangle` compares a claim against the cells a unit WALKED, and this
+  // pawn walks nowhere. Take the grammar entry away and the pawn's whole
+  // turn, its death included, is unledgered.
+  const CAPTURE = at(3, 2)
+  const spanTwoBoard = (observedTurn: number): PartialSettleInput =>
+    bench(
+      [
+        {
+          id: "p",
+          type: "pawn",
+          teamID: "A",
+          tier: 0,
+          energy: 50,
+          occupancy: [at(2, 3)],
+          orientation: { dx: 0, dy: -1 },
+          stagedMove: CAPTURE,
+        },
+        {
+          id: "r",
+          type: "rook",
+          teamID: "B",
+          tier: 0,
+          energy: 50,
+          occupancy: [at(3, 5), at(3, 5)],
+          orientation: { dx: 0, dy: -1 },
+        },
+      ],
+      { turn: 4, held: [{ id: "r", observedTurn, options: [CAPTURE] }] },
+    )
+
+  it("ledgers the legality itself, and holds over every two-move history", () => {
+    const input = spanTwoBoard(2)
+    const settled = settlePartial(input, NO_SPAWN)
+
+    // The timeline reads the staged cell against the board the turn opens on,
+    // where it is empty, so the pawn holds — and the ledger says which held
+    // unit that reading rides on, and that the pawn could lose on it.
+    expect(settled.traversed.p ?? []).toEqual([])
+    expect(settled.ledger.filter((e) => e.kind === "grammar")).toEqual([
+      {
+        cell: CAPTURE,
+        subStep: 1,
+        unitId: "p",
+        heldId: "r",
+        via: [],
+        kind: "grammar",
+        assumedPresent: true,
+        couldBeat: true,
+        narrowed: true,
+      },
+    ])
+    expect(settled.fates.p).toBe("contingent")
+    // Anti-vacuity for the paragraph above: no contact entry names the pawn,
+    // because nothing the rook could do ever touches the square it stands on.
+    expect(settled.ledger.filter((e) => e.unitId === "p" && e.kind !== "grammar")).toEqual([])
+
+    // The enumeration the entry is there for: the rook takes its one narrowed
+    // move alone, the turn under test opens on what that left behind, and the
+    // staged capture is a legal action after all.
+    const pawn = input.units[0]
+    const subSteps = Math.max(
+      settled.subStepCount,
+      ...settled.claims.map((c) => c.headPossible.length - 1),
+    )
+    const named = settled.ledger.filter((e) => e.unitId === "p")
+    const beatable = named.filter((e) => e.couldBeat)
+    const failures: string[] = []
+    let captured = 0
+    let deadly = 0
+    ;(input.held[0].options as ReadonlyArray<number>).forEach((a1) => {
+      const mid = advanceAlone(input, "r", a1) as PartialSettleInput
+      expect(mid).not.toBeNull()
+      optionsFor(mid, "r").forEach((a2) => {
+        const truth = settleTurn(
+          {
+            ...mid,
+            units: mid.units.map((u) => (u.id === "r" ? { ...u, stagedMove: a2 } : u)),
+          },
+          NO_SPAWN,
+        )
+        const world = `${a1}/${a2}`
+        if ((truth.traversed.p ?? []).length > 0) captured++
+        const when = divergedAtFor(settled, truth, pawn, subSteps)
+        if (when !== null) {
+          if (named.length === 0) failures.push(`SPAN2 pawn diverges at ${when} unledgered, ${world}`)
+          else if (Math.min(...named.map((e) => e.subStep)) > when) {
+            failures.push(`SPAN2 pawn diverges at ${when}, earliest entry later, ${world}`)
+          }
+        }
+        if (!truth.board.p) {
+          deadly++
+          if (settled.fates.p === "alive") failures.push(`SPAN2 pawn called alive, ${world}`)
+          if (beatable.length === 0) failures.push(`SPAN2 pawn dies ${world}, every entry wins`)
+          else if (Math.min(...beatable.map((e) => e.subStep)) > truth.deaths.p.subStep) {
+            failures.push(`SPAN2 pawn dies at ${truth.deaths.p.subStep}, entry later, ${world}`)
+          }
+        }
+      })
+    })
+    expect(failures).toEqual([])
+    // Both halves happened: worlds where the capture is legal after all, and
+    // worlds where taking it kills the pawn.
+    expect(captured).toBeGreaterThan(0)
+    expect(deadly).toBeGreaterThan(0)
+  })
+
+  it("says nothing at all when the claim was observed on this very board", () => {
+    // The other half, and the reason the entry is a condition rather than a
+    // constant: a unit whose record is this turn's IS on its square when the
+    // staged cells are read, so the reading is world-invariant and a ledger
+    // that cried doubt would be selling a caller a world that cannot exist.
+    const settled = settlePartial(spanTwoBoard(3), NO_SPAWN)
+    expect(settled.ledger.filter((e) => e.kind === "grammar")).toEqual([])
+    expect(settled.traversed.p ?? []).toEqual([])
+  })
+})

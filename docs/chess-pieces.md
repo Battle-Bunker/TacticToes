@@ -18,7 +18,7 @@ classic variant).
   then weight. Trail (snake) *bodies* are walls: an equal-or-lower-tier mover
   dies on them, a strictly-higher-tier mover severs.
 - **A mid-path winner stops on the kill cell**: capture ends the move, and the
-  mover pays health only for cells actually entered.
+  mover pays energy only for cells actually entered.
 - **Food is eaten at the destination only**: a slider passing over food leaves
   it on the board. Eating happens in the end-of-turn food phase.
 - **Regicide**: a team whose config includes kings is eliminated when its last
@@ -37,7 +37,7 @@ The engine sees one kind of thing, a unit with behavioural properties:
 - `path` — the cells to enter, ONE PER SUB-STEP. "Snakes move only in
   sub-step 1" is not a rule: it is what a path of length 1 means.
 - `weightAtTurnStart`, `tier` — frozen for the whole turn (see below).
-- `health` — the only thing that advances within the turn.
+- `energy` — the only thing that advances within the turn.
 - `status` — `active | stopped | exhausted | dead`. Exhausted is not dead:
   see "Exhaustion is provisional death" below.
 
@@ -46,8 +46,9 @@ Occupancy on the wire (`Turn.playerPieces`) is unchanged: a snake's body
 Weight = array length, so scoring, team scores, winner adjudication and the
 wire format all work unchanged.
 
-Pieces start at weight 1, snakes at 3. Eating: +1 weight and health restored
-to the type's configured max. A promoting pawn is the one place weight goes
+Pieces start at weight 1, snakes at 3. Eating: `foodEnergy` added and clamped
+to the type's configured max, +1 weight when the meal reaches that max. A
+promoting pawn is the one place weight goes
 down without a death: it returns to weight 1 as a queen. Weight never decays.
 Nothing is gained from a kill.
 
@@ -86,7 +87,7 @@ Sub-step count = the longest path staged this turn. Per sub-step:
 4. **Apply** the whole batch at once: deaths (victims halt in place and
    persist as collision objects), edge-loser fallbacks, capture-stops, sever
    registrations, durable-cell registrations.
-5. **Health phase**, strictly after the collisions (see below).
+5. **Energy phase**, strictly after the collisions (see below).
 
 Adjudication proceeds in fixed TIERS within one sub-step — edge exchanges
 (they decide who actually completed a crossing), then walls, then
@@ -158,12 +159,12 @@ survives**, and any tie leaves nobody standing.
   **Self-collision** applies to trail units only — a piece stack is all on one
   cell by construction.
 
-### Health, per sub-step
+### Energy, per sub-step
 
-Health loss is tied to movement, not turns. There is no per-turn tick, and
+Energy loss is tied to movement, not turns. There is no per-turn tick, and
 nothing is settled at end of turn any more.
 
-- **Movement cost**: 1 health per cell entered, charged in the sub-step where
+- **Movement cost**: 1 energy per cell entered, charged in the sub-step where
   it is entered. A snake enters exactly one cell per turn, so it still pays
   1/turn. A knight's jump is one cell entered, so a flat 1. Staying or
   rotating enters nothing and costs nothing.
@@ -171,18 +172,18 @@ nothing is settled at end of turn any more.
   configurable) per hazard cell entered, charged the same sub-step. A unit
   that does not move at all and stands on a hazard pays exactly one dose, at
   sub-step 1.
-- **Exhaustion**: health ≤ 0 makes the unit `exhausted` — see the section
+- **Exhaustion**: energy ≤ 0 makes the unit `exhausted` — see the section
   below. It halts immediately at the cell it reached, stays a live collision
   incumbent, and may or may not die for it.
-- **Units halt mid-ray from running out of health.** A slider that cannot
-  afford its ray halts where the health ran out and never reaches its staged
+- **Units halt mid-ray from running out of energy.** A slider that cannot
+  afford its ray halts where the energy ran out and never reaches its staged
   destination — so food waiting there is no rescue. Cost is charged as it is
   spent; only food on the cell it actually halted on can bring it back.
 - An edge-contest loser is never charged for the cell it did not enter.
 
 ### Exhaustion is provisional death
 
-Health at or below zero mid-turn does **not** kill. It stops MOVEMENT, and
+Energy at or below zero mid-turn does **not** kill. It stops MOVEMENT, and
 nothing else:
 
 - The unit becomes `exhausted` and halts on the cell it had reached. Whatever
@@ -194,18 +195,22 @@ nothing else:
   kill is an ordinary **collision** death (`contest`), not an exhaustion one,
   and the unit appears in `Turn.deaths` exactly once, with that cause.
 - **Exhaustion kills only if the unit is still at or below zero at END OF
-  TURN.** Food is the only heal in the game, and it is eaten at a unit's final
-  cell in the end-of-turn food phase — which now runs BEFORE exhaustion is
-  settled. So, with no carve-out anywhere: an exhausted unit whose halt cell
-  holds food eats, restores to its type's max, grows, and survives — halted,
-  short of where it was going, but alive. An exhausted unit anywhere else dies
-  on its halt cell, entering `Turn.deaths` with cause `"exhaustion"` (movement
-  cost) or `"hazard"` (a hazard dose), and the sub-step it halted on.
+  TURN.** Food is the only refill in the game, and it is eaten at a unit's
+  final cell in the end-of-turn food phase — which now runs BEFORE exhaustion
+  is settled. So, with no carve-out anywhere: an exhausted unit whose halt cell
+  holds food eats, and survives if that meal carries it back above zero —
+  halted, short of where it was going, but alive. A meal is worth `foodEnergy`
+  (default 100), not automatically a full tank, so a deeply drained unit can
+  eat and still finish the turn at or below zero, and then it dies as if it had
+  found nothing. An exhausted unit anywhere else dies on its halt cell,
+  entering `Turn.deaths` with cause `"exhaustion"` (movement cost) or
+  `"hazard"` (a hazard dose), and the sub-step it halted on.
 
-A snake at 1 health stepping onto food therefore exhausts on the food cell and
-comes straight back. A slider that cannot afford its ray still dies, unless it
-happens to halt on food — food further along the ray is no use to a unit that
-never reaches it.
+A snake at 1 energy stepping onto food therefore exhausts on the food cell and
+comes straight back — and at the default `foodEnergy` of 100 it comes back
+full, so it grows too. A slider that cannot afford its ray still dies, unless
+it happens to halt on food — food further along the ray is no use to a unit
+that never reaches it.
 
 **On the wire**, the halt is always visible. The engine emits a clash at the
 halt cell with kind `"exhaustion"` or `"hazard"` the moment it happens:
@@ -219,9 +224,30 @@ halt cell with kind `"exhaustion"` or `"hazard"` the moment it happens:
 ### Eating
 
 Eating happens in the end-of-turn food phase: every unit still on the board
-and standing on food consumes it, restores health to its current kind's
-configured max (`maxHealthPerUnit`, default 100) and gains one weight/length.
-It no longer replaces the movement cost — that was already charged in-sim.
+and standing on food consumes it. A meal is `GameSetup.foodEnergy` (default
+100), **added** to the eater's energy and clamped to its current kind's max
+(`maxEnergyPerUnit`, default 100).
+
+**Growth is what a full tank costs.** A meal adds one weight/length ONLY when
+it brings the unit TO its max — energy at or above max before the clamp. A
+unit that eats while nearly empty gets fuel and no length; the meal that tops
+it off is the one that grows it. A unit already sitting at max grows on every
+meal it takes, because the clamp leaves it at max and max is what the rule
+asks. At the shipped defaults — a food worth 100, a tank of 100 — every meal
+fills and every meal grows, which is exactly the rule food used to play.
+
+Set `foodEnergy` below a kind's max and that kind must eat several times to
+fill, growing on the meal that finishes the job. That is the knob: it decouples
+"stay alive" from "get heavy", so a unit can be kept running without being fed
+into promotion range.
+
+Food is eaten at the cell a unit ENDS on — a slider passing over food leaves it
+— and the spawner never puts two items on one cell, so exactly one meal per
+unit per turn is reachable. The phase applies its rule per food regardless, in
+board order, so a preset board that stacks two foods on one cell settles each
+meal in turn: add, clamp, grow if full.
+
+Eating no longer replaces the movement cost — that was already charged in-sim.
 The phase runs after the collision dead are removed but BEFORE exhaustion is
 settled, which is the whole mechanism by which an exhausted unit recovers.
 
@@ -243,7 +269,7 @@ engine-legality-bearing.
   cell is not a move. Its default action (nothing legal staged) is to
   **continue straight** one step along its orientation, wherever that leads.
 - **Rook**: any distance along a row/column. **Bishop**: along a diagonal.
-  **Queen**: either. Range is unlimited (health cost is the limiter).
+  **Queen**: either. Range is unlimited (energy cost is the limiter).
 - **Knight**: the 8 L-jumps; touches only its destination.
 - **King**: 1 step in any of the 8 directions.
 - **Pawn**: each turn exactly one of —
@@ -253,7 +279,7 @@ engine-legality-bearing.
     occupant moves away in flight, the pawn still completes the staged step
     onto the vacated cell: moves are simultaneous);
   - **rotate 90°** left or right: a full-turn action, no movement, no
-    movement health cost. Staged on the wire as the pawn's left/right *side*
+    movement energy cost. Staged on the wire as the pawn's left/right *side*
     cell, meaning "face that way". **Rotation is signalling, and the side cell
     is never entered, so it is legal wherever that cell falls — including onto
     the perimeter wall.** Turning around fully costs two turns;
@@ -261,7 +287,7 @@ engine-legality-bearing.
 
   The cell directly behind is never legal. **Promotion**: at weight ≥
   `pawnPromotionWeight` (config, default 10) a pawn becomes a queen, keeping
-  id, letter, orientation and current health (clamped down to the queen's
+  id, letter, orientation and current energy (clamped down to the queen's
   configured max) and **resetting to weight 1**.
 - **Pieces have no momentum**: staying is legal, free, and the default when a
   piece stages nothing or stages an illegal destination.
@@ -358,6 +384,6 @@ the piece path never fired it for a severed snake.)
   construction).
 - Board capacity guard counts total units per team.
 - A unit that never moves pays its stationary hazard dose inside the engine,
-  at sub-step 1, so ALL health accounting lives in one place — and a piece
+  at sub-step 1, so ALL energy accounting lives in one place — and a piece
   that exhausts on a hazard while standing still is an incumbent like any
   other exhausted unit — and recovers if it happens to be standing on food.

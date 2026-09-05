@@ -236,11 +236,12 @@ wire contract is unchanged in shape; what varies for a piece unit:
   self | regicide` — plus `playerIDs` (everyone involved), `victimIDs` (who
   died at that cell) and, when there is one, `survivorID`. `reason` is
   display text: read `kind` and the id lists, never the string.
-- `hazard` and `exhaustion` records mark a unit that ran out of health and
+- `hazard` and `exhaustion` records mark a unit that ran out of energy and
   HALTED there. That is provisional death only: the unit stays on the board
   and contests normally, and it dies of it only if it is still at or below
   zero once the end-of-turn food phase has run — so a unit that halted on food
-  eats, recovers and lives. A fatal one names the unit in `victimIDs`; a
+  eats, and lives if that meal (`setup.foodEnergy`, default 100) carries it
+  back above zero. A fatal one names the unit in `victimIDs`; a
   survived one leaves `victimIDs` empty, and is purely the explanation for why
   the unit stopped short of its staged path.
 - `turn.deaths[playerID] = { cell, subStep, cause }` is the authoritative

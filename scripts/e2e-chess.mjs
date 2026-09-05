@@ -2,7 +2,7 @@
 // Provisions two centaurs (admin SDK), configures a mixed snake+piece game,
 // then drives both centaurs through the REAL client-SDK path, asserting the
 // chess mechanics on the resolved turns: piece spawns (weight-1 stacks,
-// unitTypes, every-unit orientation), per-type max health, movement-tied health loss
+// unitTypes, every-unit orientation), per-type max energy, movement-tied energy loss
 // (stationary pieces spend nothing), slider paths + applied-move recording,
 // pawn rotation, pawn promotion (weight reset to 1), and snake 1/turn drain.
 //
@@ -145,7 +145,7 @@ async function main() {
   log("setup doc:", gameID)
 
   // Mixed game: each team gets snake + king + rook + pawn. Kings run at max
-  // health 10 to prove stationary units spend nothing. 13x13, no hazards.
+  // energy 10 to prove stationary units spend nothing. 13x13, no hazards.
   await adb.doc(`sessions/${sessionID}/setups/${gameID}`).update({
     teams: [
       { id: alpha.id, name: alpha.name, color: "#E5484D" },
@@ -153,7 +153,7 @@ async function main() {
     ],
     snakesPerTeam: 1,
     unitsPerTeam: { snake: 1, king: 1, rook: 1, pawn: 1 },
-    maxHealthPerUnit: { king: 10 },
+    maxEnergyPerUnit: { king: 10 },
     pawnPromotionWeight: 3,
     boardWidth: 13, boardHeight: 13,
     maxTurnTime: 5, firstTurnTime: 15, maxTurns: 20,
@@ -263,13 +263,13 @@ async function main() {
     for (const id of [snakeId, kingId, rookId, pawnId]) {
       check(!!t0.orientation[id], `${id} has spawn orientation`)
     }
-    check(t0.playerHealth[kingId] === 10, `king starts at configured max 10 (got ${t0.playerHealth[kingId]})`)
-    check(t0.playerHealth[snakeId] === 100, "snake starts at 100")
+    check(t0.playerEnergy[kingId] === 10, `king starts at configured max 10 (got ${t0.playerEnergy[kingId]})`)
+    check(t0.playerEnergy[snakeId] === 100, "snake starts at 100")
     check(t0.scores[kingId] === 1 && t0.scores[snakeId] === 3, "scores = weight (piece 1, snake 3)")
   }
 
   // --- Rook slide staged on turn 0, visible in turn 1 ---
-  log("rook slide (paths, applied move, movement-cost health)")
+  log("rook slide (paths, applied move, movement-cost energy)")
   for (const [rookId, slide] of Object.entries(state.rookSlide)) {
     const t1 = turns[1]
     if (!t1 || !t1.alivePlayers.includes(rookId)) { log(`  note: rook ${rookId} not alive turn 1, skipping`); continue }
@@ -280,10 +280,10 @@ async function main() {
     check(Array.isArray(path) && path.length >= 1 && path[path.length - 1] === pos,
       `turn.paths records traversal ending at the rook (path=${JSON.stringify(path)})`)
     if (!ate) {
-      check(t1.playerHealth[rookId] === 100 - (path?.length ?? 0),
-        `rook health = 100 - traversed (${t1.playerHealth[rookId]} vs path ${path?.length})`)
+      check(t1.playerEnergy[rookId] === 100 - (path?.length ?? 0),
+        `rook energy = 100 - traversed (${t1.playerEnergy[rookId]} vs path ${path?.length})`)
     } else {
-      check(t1.playerHealth[rookId] === 100, "rook ate at destination: restored to max")
+      check(t1.playerEnergy[rookId] === 100, "rook ate at destination: restored to max")
     }
     check(pos === slide.to || (path?.length ?? 0) < 2,
       "rook reached its staged destination (or was stopped in flight)")
@@ -295,8 +295,8 @@ async function main() {
     const kingId = byType(team, "king")
     const last = Math.min(turns.length - 1, 5)
     if (!turns[last].alivePlayers.includes(kingId)) { log(`  note: king ${kingId} died, skipping`); continue }
-    check(turns[last].playerHealth[kingId] === 10,
-      `king still at 10 health after ${last} turns of holding (got ${turns[last].playerHealth[kingId]})`)
+    check(turns[last].playerEnergy[kingId] === 10,
+      `king still at 10 energy after ${last} turns of holding (got ${turns[last].playerEnergy[kingId]})`)
     check(turns[last].playerPieces[kingId][0] === t0.playerPieces[kingId][0], "king never moved")
     check(turns[last].moves[kingId] === t0.playerPieces[kingId][0], "king's applied move records stay (own square)")
   }
@@ -311,7 +311,7 @@ async function main() {
       `pawn orientation changed (${JSON.stringify(rot.orientation)} -> ${JSON.stringify(f2)})`)
     check(t2.playerPieces[pawnId][0] === rot.at, "rotating pawn did not move")
     const t1 = turns[1]
-    check(t2.playerHealth[pawnId] === t1.playerHealth[pawnId], "rotation cost no health")
+    check(t2.playerEnergy[pawnId] === t1.playerEnergy[pawnId], "rotation cost no energy")
   }
 
   // --- Promotion (opportunistic): if any pawn promoted, it did so at weight 1 ---
@@ -339,8 +339,8 @@ async function main() {
       if (!cur.alivePlayers.includes(snakeId) || !prev.alivePlayers.includes(snakeId)) continue outer
       const ate = cur.playerPieces[snakeId].length > prev.playerPieces[snakeId].length
       if (!ate) {
-        check(cur.playerHealth[snakeId] === prev.playerHealth[snakeId] - 1,
-          `snake lost exactly 1 health turn ${i} (${prev.playerHealth[snakeId]} -> ${cur.playerHealth[snakeId]})`)
+        check(cur.playerEnergy[snakeId] === prev.playerEnergy[snakeId] - 1,
+          `snake lost exactly 1 energy turn ${i} (${prev.playerEnergy[snakeId]} -> ${cur.playerEnergy[snakeId]})`)
         break outer
       }
     }

@@ -17,19 +17,21 @@ import { Clash, ClashKind } from "@shared/types/Game"
  * movement (a trail sweep including the tail pop, a piece stack teleporting)
  * and halting — never through removal. Dead units, exhausted units and severed
  * segments all stay on the board as collision objects until the collision
- * phase (every sub-step) has finished. Health is the only thing that advances.
+ * phase (every sub-step) has finished. Energy is the only thing that advances.
  *
  * ## Exhaustion is provisional death
  *
- * Running out of health mid-turn (movement cost or a hazard dose) stops
+ * Running out of energy mid-turn (movement cost or a hazard dose) stops
  * MOVEMENT and nothing else. The unit halts on the cell it reached and stays a
  * fully live collision incumbent for the rest of the phase: it still beats
  * lighter arrivals on frozen tier and weight, and a heavier arrival can still
  * kill it — which is an ordinary collision death, not an exhaustion one.
  * Whether exhaustion itself kills is decided at END OF TURN by the caller,
- * after the food phase: food is the only heal, and it is eaten at a unit's
- * final cell, so an exhausted unit that halted on food recovers and lives.
- * The engine therefore reports exhaustions rather than acting on them.
+ * after the food phase: food is the only refill, and it is eaten at a unit's
+ * final cell, so an exhausted unit that halted on food may come back — it
+ * lives if the meal's energy carries it above zero, and a meal is worth
+ * `foodEnergy`, not a full tank. The engine therefore reports exhaustions
+ * rather than acting on them.
  *
  * ## Sub-step loop: snapshot → resolve → apply
  *
@@ -42,7 +44,7 @@ import { Clash, ClashKind } from "@shared/types/Game"
  *      ordering;
  *   d. the whole batch is applied at once (deaths, fallbacks, capture-stops,
  *      sever registrations, durable-cell registrations);
- *   e. the health phase runs, strictly after the collisions.
+ *   e. the energy phase runs, strictly after the collisions.
  *
  * Adjudication proceeds in fixed tiers within one sub-step — edge exchanges
  * decide who actually completed a crossing, then walls, then self-collisions,
@@ -80,7 +82,7 @@ export const REASON = {
   wall: "Hit the wall",
   self: "Ran into its own body",
   hazard: "Drained by a hazard",
-  exhaustion: "Ran out of health",
+  exhaustion: "Ran out of energy",
   regicide: "Team eliminated: king fell",
 } as const
 
@@ -94,7 +96,7 @@ export interface EngineUnit {
   occupancy: number[]
   /** Invulnerability tier, frozen for the whole turn. */
   tier: number
-  health: number
+  energy: number
   /** One cell per sub-step, in order. Empty means the unit holds. */
   path: number[]
 }
@@ -107,7 +109,7 @@ export interface UnitDeathRecord {
 }
 
 /**
- * A unit that ran out of health mid-turn. Exhaustion is PROVISIONAL death: it
+ * A unit that ran out of energy mid-turn. Exhaustion is PROVISIONAL death: it
  * halts movement and nothing else. Whether it kills is settled at end of turn,
  * after the food phase, by the caller — so this is a report, not a death.
  */
@@ -132,7 +134,7 @@ export interface TurnEngineResult {
   clashes: Clash[]
   /** Units killed outright during the collision phase. Exhaustion is separate. */
   deaths: UnitDeathRecord[]
-  /** Units that ran out of health and halted; fatality is the caller's call. */
+  /** Units that ran out of energy and halted; fatality is the caller's call. */
   exhaustions: ExhaustionEvent[]
   /** Cells actually cut from each SURVIVING trail unit. */
   severedCells: Map<string, number[]>
@@ -144,7 +146,7 @@ export interface TurnEngineResult {
   traversed: Map<string, number[]>
   /** Cell each unit ended on — the death square for anything that died. */
   finalCell: Map<string, number>
-  health: Map<string, number>
+  energy: Map<string, number>
 }
 
 interface RuntimeUnit extends EngineUnit {
@@ -169,14 +171,34 @@ type Outcome =
 
 const byID = (a: { id: string }, b: { id: string }): number => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
 
-/** Tier first, then frozen weight. At most one unique strict maximum survives. */
-const strictMaximum = (participants: RuntimeUnit[]): RuntimeUnit | null => {
-  const maxTier = Math.max(...participants.map((u) => u.tier))
-  const top = participants.filter((u) => u.tier === maxTier)
-  const maxWeight = Math.max(...top.map((u) => u.weight))
-  const heaviest = top.filter((u) => u.weight === maxWeight)
-  return heaviest.length === 1 ? heaviest[0] : null
-}
+/**
+ * The contest rule itself, over the only two coordinates a contest reads: the
+ * frozen tier, and then the frozen weight. Exported because it is the rule,
+ * and anything that has to ask "would this beat that" — a search pricing a
+ * cell it has not walked into yet, a partial settlement asking whether a claim
+ * could hold a cell — must ask the rule rather than restate it. Restating it
+ * is how the comparator came to exist twice.
+ */
+export const outranks = (
+  a: { readonly tier: number; readonly weight: number },
+  b: { readonly tier: number; readonly weight: number },
+): boolean => a.tier > b.tier || (a.tier === b.tier && a.weight > b.weight)
+
+/**
+ * Energy spent per cell entered. A rule, not a magic number: anything that
+ * brackets a unit's energy against where it might have been halted prices the
+ * difference with this.
+ */
+export const COST_PER_CELL = 1
+
+/**
+ * The unique participant that `outranks` every other, or null when the top of
+ * the pile is shared — a tie kills everyone in it. One encoding of the
+ * comparison, asked once per participant rather than restated as a pair of
+ * maxima.
+ */
+const strictMaximum = (participants: RuntimeUnit[]): RuntimeUnit | null =>
+  participants.find((u) => participants.every((o) => o === u || outranks(u, o))) ?? null
 
 /** Why the contest ended the way it did — display text only. */
 const contestReason = (participants: RuntimeUnit[], survivor: RuntimeUnit | null): string => {
@@ -219,7 +241,7 @@ export const runTurnEngine = (
 
   const byId = new Map(units.map((u) => [u.id, u]))
   // Exhausted counts as living: it has halted, but it is on the board, it
-  // contests, and it may yet be fed back to health at end of turn.
+  // contests, and it may yet be fed back to energy at end of turn.
   const isLiving = (u: RuntimeUnit): boolean => u.status !== "dead"
 
   const record = (
@@ -502,7 +524,7 @@ export const runTurnEngine = (
       if (outcome.op === "stop" && outcome.unit.status === "active") outcome.unit.status = "stopped"
     })
 
-    // e. Health, strictly after the collisions. Movement costs one health per
+    // e. Energy, strictly after the collisions. Movement costs one energy per
     // cell entered; each hazard cell entered costs a full dose. A unit that
     // never moves at all pays a single dose for standing on a hazard.
     units.forEach((u) => {
@@ -513,11 +535,11 @@ export const runTurnEngine = (
 
       const cell = u.occupancy[0]
       const onHazard = hazardSet.has(cell)
-      const cost = (entered ? 1 : 0) + (onHazard ? hazardDamage : 0)
+      const cost = (entered ? COST_PER_CELL : 0) + (onHazard ? hazardDamage : 0)
       if (cost === 0) return
 
-      u.health -= cost
-      if (u.health > 0) return
+      u.energy -= cost
+      if (u.energy > 0) return
 
       // Exhausted: MOVEMENT stops here and nothing else does. It stays on the
       // board as a full collision incumbent — a dying animal that still beats
@@ -578,7 +600,7 @@ export const runTurnEngine = (
   const occupancy = new Map<string, number[]>()
   const traversed = new Map<string, number[]>()
   const finalCell = new Map<string, number>()
-  const health = new Map<string, number>()
+  const energy = new Map<string, number>()
   units.forEach((u) => {
     occupancy.set(u.id, u.occupancy)
     traversed.set(u.id, u.traversed)
@@ -586,7 +608,7 @@ export const runTurnEngine = (
     // only cell was the tail it shed. It still died somewhere, and that is the
     // cell the wire must name.
     finalCell.set(u.id, u.occupancy.length > 0 ? u.occupancy[0] : (u.death as UnitDeathRecord).cell)
-    health.set(u.id, u.health)
+    energy.set(u.id, u.energy)
   })
 
   return {
@@ -598,6 +620,6 @@ export const runTurnEngine = (
     occupancy,
     traversed,
     finalCell,
-    health,
+    energy,
   }
 }

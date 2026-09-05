@@ -80,18 +80,18 @@ service cloud.firestore {
           + uc.get('rook', 0) + uc.get('queen', 0) + uc.get('king', 0)) <= 26;
     }
 
-    // Per-type max health for units. Every key is optional; a missing key
+    // Per-type max energy for units. Every key is optional; a missing key
     // means the default of 100, so `.get(k, 100)` makes absent keys pass.
-    function isValidUnitMaxHealth(mh) {
-      return mh is map &&
-        mh.keys().hasOnly(['snake', 'pawn', 'knight', 'bishop', 'rook', 'queen', 'king']) &&
-        mh.get('snake', 100) is int && mh.get('snake', 100) >= 1 && mh.get('snake', 100) <= 1000 &&
-        mh.get('pawn', 100) is int && mh.get('pawn', 100) >= 1 && mh.get('pawn', 100) <= 1000 &&
-        mh.get('knight', 100) is int && mh.get('knight', 100) >= 1 && mh.get('knight', 100) <= 1000 &&
-        mh.get('bishop', 100) is int && mh.get('bishop', 100) >= 1 && mh.get('bishop', 100) <= 1000 &&
-        mh.get('rook', 100) is int && mh.get('rook', 100) >= 1 && mh.get('rook', 100) <= 1000 &&
-        mh.get('queen', 100) is int && mh.get('queen', 100) >= 1 && mh.get('queen', 100) <= 1000 &&
-        mh.get('king', 100) is int && mh.get('king', 100) >= 1 && mh.get('king', 100) <= 1000;
+    function isValidUnitMaxEnergy(me) {
+      return me is map &&
+        me.keys().hasOnly(['snake', 'pawn', 'knight', 'bishop', 'rook', 'queen', 'king']) &&
+        me.get('snake', 100) is int && me.get('snake', 100) >= 1 && me.get('snake', 100) <= 1000 &&
+        me.get('pawn', 100) is int && me.get('pawn', 100) >= 1 && me.get('pawn', 100) <= 1000 &&
+        me.get('knight', 100) is int && me.get('knight', 100) >= 1 && me.get('knight', 100) <= 1000 &&
+        me.get('bishop', 100) is int && me.get('bishop', 100) >= 1 && me.get('bishop', 100) <= 1000 &&
+        me.get('rook', 100) is int && me.get('rook', 100) >= 1 && me.get('rook', 100) <= 1000 &&
+        me.get('queen', 100) is int && me.get('queen', 100) >= 1 && me.get('queen', 100) <= 1000 &&
+        me.get('king', 100) is int && me.get('king', 100) >= 1 && me.get('king', 100) <= 1000;
     }
 
     function isValidSetup(setup) {
@@ -116,8 +116,11 @@ service cloud.firestore {
         (!('firstTurnTime' in setup.keys()) || (setup.firstTurnTime is int && setup.firstTurnTime > 0)) &&
         (!('pawnPromotionWeight' in setup.keys()) || (setup.pawnPromotionWeight is int && setup.pawnPromotionWeight >= 2 && setup.pawnPromotionWeight <= 100)) &&
         (!('hazardDamage' in setup.keys()) || (setup.hazardDamage is int && setup.hazardDamage >= 1 && setup.hazardDamage <= 1000)) &&
+        // Energy one food replenishes. Same 1..1000 band as max energy, since a
+        // meal is measured against a tank and a tank tops out at 1000.
+        (!('foodEnergy' in setup.keys()) || (setup.foodEnergy is int && setup.foodEnergy >= 1 && setup.foodEnergy <= 1000)) &&
         (!('unitsPerTeam' in setup.keys()) || isValidUnitCounts(setup.unitsPerTeam)) &&
-        (!('maxHealthPerUnit' in setup.keys()) || isValidUnitMaxHealth(setup.maxHealthPerUnit))
+        (!('maxEnergyPerUnit' in setup.keys()) || isValidUnitMaxEnergy(setup.maxEnergyPerUnit))
       );
 
       let validTournamentFields = (

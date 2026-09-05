@@ -1,5 +1,7 @@
-import { ClashKind, GameState, Turn, UnitDeath, UnitType } from "@shared/types/Game"
+import { GameState, Turn, UnitDeath } from "@shared/types/Game"
 import { teamColorMap } from "../hooks/useTeamColors"
+import { CLASH_HEADLINE, EXHAUSTION_KINDS } from "./clashes"
+import { isPieceType, unitTypeFor } from "../utils/unitTypes"
 import {
   BoardClash,
   BoardClashKind,
@@ -13,7 +15,6 @@ import {
   RosterUnit,
   SeverMark,
   UncertaintyMark,
-  UnitIconKey,
 } from "./renderer"
 
 const NEUTRAL_COLOR = "#888888"
@@ -38,23 +39,24 @@ const NEUTRAL_COLOR = "#888888"
 // left the board with no death written for it all end up as an uncertainty
 // mark and a note, never as an invented death or an invented attacker.
 
-/** The kinds this board knows how to draw. */
-const KNOWN_KINDS: ReadonlySet<string> = new Set<ClashKind>([
-  "contest",
-  "edge",
-  "bodyBlock",
-  "sever",
-  "hazard",
-  "exhaustion",
-  "wall",
-  "self",
-  "regicide",
-])
+/**
+ * The kinds this board knows how to draw — derived from the headline table, so
+ * there is nothing to keep in step by hand. `unknown` is this board's own
+ * marker for a kind off a newer server, never something the wire can send.
+ */
+const KNOWN_KINDS: ReadonlySet<string> = new Set(
+  Object.keys(CLASH_HEADLINE).filter((kind) => kind !== "unknown"),
+)
+
+const boardKind = (kind: unknown): BoardClashKind =>
+  typeof kind === "string" && KNOWN_KINDS.has(kind)
+    ? (kind as BoardClashKind)
+    : "unknown"
 
 /**
- * The two causes that are not a killing: the unit's health ran out mid-move and
- * it halted where it stood. Nobody beat it, and the board should not draw as
- * though somebody had.
+ * EXHAUSTION_KINDS are the two causes that are not a killing: the unit's energy
+ * ran out mid-move and it halted where it stood. Nobody beat it, and the board
+ * should not draw as though somebody had.
  *
  * Exhaustion is a PROVISIONAL death. A unit that is still at or below zero when
  * the turn ends is in the death registry and gets the hollow exhaustion mark;
@@ -62,19 +64,9 @@ const KNOWN_KINDS: ReadonlySet<string> = new Set<ClashKind>([
  * the recovery mark instead. Which of the two happened is never guessed here —
  * the registry decides it.
  */
-const EXHAUSTION_CAUSES: ReadonlySet<string> = new Set<ClashKind>([
-  "hazard",
-  "exhaustion",
-])
-
-const boardKind = (kind: unknown): BoardClashKind =>
-  typeof kind === "string" && KNOWN_KINDS.has(kind)
-    ? (kind as BoardClashKind)
-    : "unknown"
-
 const deathStyle = (cause: BoardClashKind): DeathStyle => {
   if (cause === "unknown" || cause === "sever") return "unknown"
-  return EXHAUSTION_CAUSES.has(cause) ? "exhausted" : "combat"
+  return EXHAUSTION_KINDS.has(cause) ? "exhausted" : "combat"
 }
 
 /**
@@ -96,19 +88,6 @@ const mapIndices = (
   width: number,
   height: number,
 ): Cell[] => (indices ?? []).map((i) => indexToCell(i, width, height))
-
-/**
- * A unit's CURRENT type: the turn's live map (promotion changes it mid-game)
- * first, then the setup's initial type, then "snake".
- */
-const unitTypeFor = (
-  gameState: GameState,
-  turn: Turn,
-  playerID: string,
-): UnitType =>
-  turn.unitTypes?.[playerID] ??
-  gameState.setup.gamePlayers.find((gp) => gp.id === playerID)?.unitType ??
-  "snake"
 
 /**
  * The earliest turn on which any of a unit's invulnerability effects lapses —
@@ -212,7 +191,7 @@ export const turnToBoard = (
       teamID: gamePlayer.teamID,
       teamName: teamNames.get(gamePlayer.teamID) ?? gamePlayer.teamID,
       color: teamColors.get(gamePlayer.teamID) ?? NEUTRAL_COLOR,
-      unitType: unitType as UnitIconKey,
+      unitType,
     }
     // A unit the board has dropped is dead. It stays in the roster at its
     // last-known state so a scoreboard can keep listing it — struck through,
@@ -225,7 +204,7 @@ export const turnToBoard = (
       return
     }
     aliveNow.add(playerID)
-    const isPiece = unitType !== "snake"
+    const isPiece = isPieceType(unitType)
     const body = (isPiece ? positions.slice(0, 1) : positions).map((i) =>
       indexToCell(i, width, height),
     )
@@ -234,8 +213,8 @@ export const turnToBoard = (
       body,
       // A piece's weight is the height of its stack; a snake's is its length.
       weight: positions.length,
-      health: turn.playerHealth[playerID] ?? 0,
-      maxHealth: gameState.setup.maxHealthPerUnit?.[unitType] ?? 100,
+      energy: turn.playerEnergy[playerID] ?? 0,
+      maxEnergy: gameState.setup.maxEnergyPerUnit?.[unitType] ?? 100,
       orientation: turn.orientation?.[playerID],
       invulnerabilityLevel: turn.playerInvulnerabilityLevel?.[playerID] ?? 0,
       invulnerabilityExpiryTurn: invulnerabilityExpiryTurn(turn, playerID),
@@ -367,7 +346,7 @@ export const turnToBoard = (
   })
 
   // ── Near-deaths ───────────────────────────────────────────────────────────
-  // An exhaustion record naming NO victim is a unit that ran out of health,
+  // An exhaustion record naming NO victim is a unit that ran out of energy,
   // halted short of where it was going, ate what was on its halt square and
   // finished the turn alive. The death registry is what settles it: a unit
   // named there stayed down and gets a grave, and only a unit the registry does
