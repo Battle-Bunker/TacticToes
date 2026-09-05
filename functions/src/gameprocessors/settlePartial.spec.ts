@@ -30,140 +30,16 @@
 // and an occasional king, because a claim that is only ever tested on a bare
 // board is a claim about a game nobody plays.
 
-import { ActiveEffect, UnitType } from "@shared/types/Game"
+import { UnitType } from "@shared/types/Game"
 import { Claim, computeClaims } from "./engine/claims"
-import { Orientation } from "./engine/moveGrammar"
 import { BoardShape, legalTargets } from "./engine/queries"
 import { ResolveUnit } from "./engine/resolveTurn"
 import { Outcome } from "./engine/adjudicate"
 import { OutcomeBracket, PartialSettleInput, settlePartial } from "./engine/settlePartial"
 import { Settlement, settleTurn } from "./engine/settleTurn"
 import { perimeter } from "./playTurn"
+import { W, WALLS, held, makeBoard } from "./engineBoards"
 import { NO_SPAWN } from "./engine/spawn"
-
-const W = 9
-const KINDS: UnitType[] = ["snake", "pawn", "knight", "bishop", "rook", "queen", "king"]
-const ORTHO: Orientation[] = [
-  { dx: 1, dy: 0 },
-  { dx: -1, dy: 0 },
-  { dx: 0, dy: 1 },
-  { dx: 0, dy: -1 },
-]
-
-const mulberry32 = (seed: number): (() => number) => {
-  let a = seed >>> 0
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0
-    let t = Math.imul(a ^ (a >>> 15), 1 | a)
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-  }
-}
-
-const WALLS = perimeter(W, W)
-const INTERIOR = (): number[] => {
-  const cells: number[] = []
-  for (let y = 1; y < W - 1; y++) for (let x = 1; x < W - 1; x++) cells.push(y * W + x)
-  return cells
-}
-
-/** A crowded 9x9 with every kind, a trail or two, items, hazards and effects. */
-export const makeBoard = (seed: number): PartialSettleInput => {
-  const rnd = mulberry32(seed)
-  const pick = <T>(xs: readonly T[]): T => xs[Math.floor(rnd() * xs.length)]
-  const free = new Set(INTERIOR())
-  const take = (): number => {
-    const options = Array.from(free)
-    const cell = options[Math.floor(rnd() * options.length)]
-    free.delete(cell)
-    return cell
-  }
-
-  const unitCount = 3 + Math.floor(rnd() * 5)
-  const units: ResolveUnit[] = []
-  const teamOf: { [unitID: string]: string } = {}
-  for (let i = 0; i < unitCount; i++) {
-    const type = pick(KINDS)
-    const teamID = i % 2 === 0 ? "A" : "B"
-    const head = take()
-    const occupancy = [head]
-    if (type === "snake") {
-      const length = 2 + Math.floor(rnd() * 3)
-      let at = head
-      for (let j = 1; j < length; j++) {
-        const step = pick(ORTHO)
-        const next = at + step.dx + step.dy * W
-        if (!free.has(next)) break
-        free.delete(next)
-        occupancy.push(next)
-        at = next
-      }
-    } else {
-      const stack = 1 + Math.floor(rnd() * 3)
-      for (let j = 1; j < stack; j++) occupancy.push(head)
-    }
-    const id = `u${i}`
-    teamOf[id] = teamID
-    units.push({
-      id,
-      type,
-      teamID,
-      isKing: type === "king",
-      tier: Math.floor(rnd() * 3) - 1,
-      energy: rnd() < 0.35 ? 1 + Math.floor(rnd() * 4) : 20 + Math.floor(rnd() * 80),
-      occupancy,
-      orientation: pick(ORTHO),
-      stagedMove: Math.floor(rnd() * W * W),
-    })
-  }
-
-  const food: number[] = []
-  for (let i = 0; i < 2 + Math.floor(rnd() * 4); i++) if (free.size) food.push(take())
-  const potions: number[] = []
-  for (let i = 0; i < Math.floor(rnd() * 3); i++) if (free.size) potions.push(take())
-  const hazards: number[] = []
-  for (let i = 0; i < Math.floor(rnd() * 4); i++) if (free.size) hazards.push(take())
-
-  const turn = 7
-  const effects: ActiveEffect[] = []
-  units.forEach((u) => {
-    if (rnd() > 0.25) return
-    effects.push({
-      playerID: u.id,
-      type: rnd() < 0.5 ? "invulnerability_buff" : "invulnerability_debuff",
-      level: rnd() < 0.5 ? 1 : -1,
-      expiryTurn: turn - 1 + Math.floor(rnd() * 4),
-      sourcePlayerID: u.id,
-    })
-  })
-
-  return {
-    units,
-    boardWidth: W,
-    boardHeight: W,
-    walls: WALLS,
-    hazards,
-    hazardDamage: pick([1, 5, 40]),
-    food,
-    defaultMaxEnergy: 100,
-    maxEnergy: { queen: 80 },
-    // A third of the boards play a food worth far less than a tank, where a
-    // meal feeds without growing and an exhausted unit's rescue is not
-    // automatic. Derived from the seed rather than drawn, so every board's
-    // units, items and terrain are the ones they always were.
-    foodEnergy: seed % 3 === 0 ? 5 : 100,
-    regicideTeamIDs: units.some((u) => u.isKing) ? ["A", "B"] : [],
-    turn,
-    teamOf,
-    effects,
-    potions,
-    potionsEnabled: potions.length > 0,
-    potionWindowTurns: 3,
-    pawnPromotionWeight: 4,
-    maxTurns: null,
-    held: [],
-  }
-}
 
 const shapeOf = (input: PartialSettleInput): BoardShape => ({
   boardWidth: input.boardWidth,
@@ -260,11 +136,6 @@ const divergedAtFor = (
   if ((a.tiers[unit.id] ?? 0) !== (b.tiers[unit.id] ?? 0)) return subSteps
   return null
 }
-
-export const held = (input: PartialSettleInput, ids: string[]): PartialSettleInput => ({
-  ...input,
-  held: ids.map((id) => ({ id, observedTurn: input.turn - 1 })),
-})
 
 /**
  * One ending, canonically. `settleTurn` writes a game that CONTINUES as null
