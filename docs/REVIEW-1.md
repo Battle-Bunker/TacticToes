@@ -4,9 +4,10 @@ Scope: `git diff origin/develop...HEAD`. Correctness only; two simplification
 plans have already run over this branch and style is not reviewed here.
 
 Gates run on every commit: `npm --prefix functions test` (21 suites, 352 tests
-at the baseline, 355 with the two tests this review added; the byte-for-byte
-goldens are unchanged and were never re-recorded), and, for the frontend files,
-`cd frontend && npm ci && npx tsc -b && npx vite build`.
+at the baseline, 355 with the two tests this review added, 356 with the
+outcome bracket's and 358 with the two the verdicts below added; the
+byte-for-byte goldens are unchanged and were never re-recorded), and, for the
+frontend files, `cd frontend && npm ci && npx tsc -b && npx vite build`.
 
 ---
 
