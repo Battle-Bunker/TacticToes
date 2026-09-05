@@ -765,6 +765,152 @@ describe("T1–T3 by enumeration — a unit observed a turn ago", () => {
   })
 })
 
+// ------------------------------------------- the tier the resolver freezes
+//
+// A POTION ROUND THE HELD UNIT DID NOT SEE.
+//
+// `Claim.tierMin`/`tierMax` are the strength interval a contest reads, so the
+// tier the resolver actually FREEZES for the settled turn — the record's own
+// `tier` field as that turn opens — has to be inside them in every world. The
+// sweeps above cannot see this: at span 1 no unknown turn has passed and the
+// interval is the record, and the span-2 sweep switches potions off because a
+// roster of one cannot rewrite an effect schedule honestly.
+//
+// So the unknown turn is played here by `settleTurn` over the WHOLE roster —
+// the oracle, again — with team-mates on potions, and the turn after it is
+// settled against a claim built from the record as it was BEFORE that turn.
+// A pickup is not one turn's worth of tier: the collector takes -1 and every
+// living ally takes +1, so three team-mates collecting at once is +3 to this
+// unit, and the potions they took are off the board by the time the claim
+// reads the board.
+const W9 = 9
+const cellAt = (x: number, y: number): number => y * W9 + x
+
+/** A rook, so every choice is a slide and the reachable set is easy to see. */
+const rook = (id: string, teamID: string, cell: number, staged?: number): ResolveUnit => ({
+  id,
+  type: "rook",
+  teamID,
+  isKing: false,
+  tier: 0,
+  energy: 100,
+  occupancy: [cell],
+  orientation: { dx: 1, dy: 0 },
+  stagedMove: staged,
+})
+
+/**
+ * The board as turn 6 opens: `collectors` team-mates each one step from a
+ * potion, a spare potion nobody takes, and — when `reachable` is set — one
+ * more on the held unit's own rank, so the world where it debuffs ITSELF
+ * while its team buffs it is enumerated too.
+ */
+const potionRound = (collectors: number, reachable: boolean): PartialSettleInput => {
+  const units: ResolveUnit[] = [rook("h", "A", cellAt(1, 1)), rook("e1", "B", cellAt(7, 7))]
+  const potions = [cellAt(7, 5)]
+  for (let i = 0; i < collectors; i++) {
+    const x = 1 + i * 2
+    units.push(rook(`a${i}`, "A", cellAt(x, 3), cellAt(x + 1, 3)))
+    potions.push(cellAt(x + 1, 3))
+  }
+  if (reachable) potions.push(cellAt(5, 1))
+  const teamOf: { [unitID: string]: string } = {}
+  units.forEach((u) => (teamOf[u.id] = u.teamID))
+  return {
+    units,
+    boardWidth: W9,
+    boardHeight: W9,
+    walls: perimeter(W9, W9),
+    hazards: [],
+    hazardDamage: 1,
+    food: [],
+    defaultMaxEnergy: 100,
+    maxEnergy: {},
+    foodEnergy: 100,
+    regicideTeamIDs: [],
+    turn: 6,
+    teamOf,
+    effects: [],
+    potions,
+    potionsEnabled: true,
+    potionWindowTurns: 3,
+    pawnPromotionWeight: 4,
+    maxTurns: null,
+    held: [],
+  }
+}
+
+describe("a claim brackets the tier the resolver froze", () => {
+  it("over every two-move history of a potion round the held unit did not see", () => {
+    const failures: string[] = []
+    let worlds = 0
+    let widest = 0
+    for (const collectors of [1, 2, 3]) {
+      for (const reachable of [false, true]) {
+        const six = potionRound(collectors, reachable)
+        const record = six.units.find((u) => u.id === "h") as ResolveUnit
+        const first: (number | undefined)[] = [undefined, ...legalTargets(record, shapeOf(six))]
+        first.forEach((choice) => {
+          // The unknown turn, played by the oracle over the whole roster.
+          const between = settleTurn(
+            {
+              ...six,
+              units: six.units.map((u) => (u.id === "h" ? { ...u, stagedMove: choice } : u)),
+            },
+            NO_SPAWN,
+          )
+          if (!between.board.h) return
+          worlds++
+          // Turn 7, as a caller has it: the modelled units where settlement
+          // left them and the schedule it left behind, and the held unit's
+          // record still the one taken as turn 6 opened.
+          const seven: PartialSettleInput = {
+            ...six,
+            turn: 7,
+            units: six.units.flatMap((u) => {
+              if (u.id === "h") return [u]
+              const settled = between.board[u.id]
+              if (!settled) return []
+              return [
+                {
+                  ...u,
+                  type: between.unitTypes[u.id],
+                  occupancy: settled.occupancy,
+                  energy: settled.energy,
+                  tier: between.tiers[u.id],
+                  orientation: between.orientation[u.id],
+                  stagedMove: undefined,
+                },
+              ]
+            }),
+            effects: between.effects,
+            potions: between.potions,
+            food: between.food,
+            held: [{ id: "h", observedTurn: 5 }],
+          }
+          const claim = settlePartial(seven, NO_SPAWN).claims[0]
+          // The frozen tier: what turn 7 adjudicates this unit at, which is
+          // the tier the turn before it left the unit carrying.
+          const frozen = between.tiers.h
+          widest = Math.max(widest, Math.abs(frozen - record.tier))
+          const tag = `collectors=${collectors} reachable=${reachable} choice=${choice}`
+          if (frozen < claim.tierMin || frozen > claim.tierMax) {
+            failures.push(
+              `TIER ${tag} frozen=${frozen} outside [${claim.tierMin},${claim.tierMax}] ` +
+                `with ${seven.potions.length} potions left on the board`,
+            )
+          }
+        })
+      }
+    }
+    expect(failures).toEqual([])
+    // The property is only worth asserting where the tier actually moved, and
+    // moved by more than the one potion a turn count would admit.
+    expect(widest).toBeGreaterThanOrEqual(3)
+    expect(worlds).toBeGreaterThan(50)
+  })
+})
+
 // ----------------------------------------- the causal chain, by enumeration
 //
 // The cascade property, on the shape the search actually meets: OUR units,

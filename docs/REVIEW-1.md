@@ -110,9 +110,10 @@ played — no compatibility exposure.
 
 ---
 
-## 3. Unconfirmed findings
+## 3. Findings taken to a verdict
 
-Nothing below is a proved defect. Each names the site and the experiment.
+Each was named here with a site and an experiment, and each has since been
+run. The verdict is written under the finding, with the test that carries it.
 
 1. **`PartialSettlement.outcome` is a guess, not a bracket.**
    `engine/settlePartial.ts:1393` (`outcomeOf`) stands every held unit on the
@@ -130,6 +131,10 @@ Nothing below is a proved defect. Each names the site and the experiment.
    proof; if it is not, the ledger should carry the fact rather than the
    docstring.
 
+   **CONFIRMED and fixed** (`7483724`). `outcome` is an `OutcomeBracket` over
+   the completion worlds now, derived from the ledger and the claims, and the
+   sweep asserts every world's ending is inside it (T6).
+
 2. **The claim's tier ceiling counts TURNS, not simultaneous collectors.**
    `engine/claims.ts:558-573`: `potionTurns = min(span - 1, potionWindowTurns,
    potions.length)` and `tierMax = ceiling + (allies > 0 ? potionTurns : 0)`.
@@ -141,6 +146,39 @@ Nothing below is a proved defect. Each names the site and the experiment.
    `tierMin/tierMax` asserted against the tier the resolver actually froze —
    note that `truth.tiers` is the POST-turn tier and is the wrong quantity to
    compare against, which is why my own sweep could not settle this.
+
+   **CONFIRMED and fixed.** The quantity that settles it is the tier the
+   resolver FREEZES for the turn being settled — the record's own `tier` as
+   that turn opens, which is what `outranks` reads — and the unknown turn has
+   to be played by `settleTurn` over the WHOLE roster, not the roster of one
+   the span-2 sweep advances with. Done that way, three team-mates each taking
+   a potion on the unknown turn freeze the held unit at `+3` against a claim
+   of `[-1, +1]`: `settlePartial.spec.ts`, *a claim brackets the tier the
+   resolver froze*, enumerating every two-move history of a potion round for
+   one, two and three collectors, with and without a potion in the held unit's
+   own reach. Two counts were wrong, not one: a pickup is not a turn's worth
+   of tier (the collector takes −1 and every living ally takes +1, so one turn
+   is worth as many levels as there are collectors), and the potions those
+   collectors took are OFF the board by the time the ceiling reads
+   `input.potions` — so `potionTurns` can be zero on the very board that moved
+   the tier by three.
+
+   The fix reads the width off the SCHEDULE the caller handed for this turn
+   rather than off the turn count: every level still in force on the unit,
+   buffs widening the ceiling and debuffs the floor, because a claim cannot
+   tell an entry the record already counts from one taken since it was
+   observed. That is exact for a caller whose schedule is its board's, which
+   is what a pickup guarantees — an entry per unit it touches, lasting a
+   window, and a level already given back is one already off the tier. The old
+   turn count stays as a lower bound on the width, for a caller whose schedule
+   is older than its board. Span 1 is untouched and still exact: no unknown
+   turn has passed, so no potion can have moved anything.
+
+   Residual, and out of this finding's scope: an effect that was in force when
+   the record was observed and lapsed before this turn moves the tier DOWN,
+   and a caller that hands a schedule pruned of it (as settlement itself
+   prunes) shows the claim no evidence of it. `tierAtArrival`'s lapse loop
+   covers exactly the caller that has not pruned.
 
 3. **`resolveTurn` consumes the food a doomed unit eats.**
    `engine/resolveTurn.ts:270`: an exhausted unit at, say, −30 energy eats a
