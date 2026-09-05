@@ -344,6 +344,8 @@ export const settlePartial = (
   claims?: ReadonlyArray<Claim>,
 ): PartialSettlement => {
   const claimList = claims ?? computeClaims(input)
+  // The claim half of this settlement, built once for the whole held set.
+  const preamble = preambleOf(claimList)
   const held = new Set(input.held.map((h) => h.id))
   const byId = new Map(input.units.map((u) => [u.id, u]))
   const live = input.units.filter((u) => !held.has(u.id))
@@ -360,8 +362,6 @@ export const settlePartial = (
     input.units.filter((u) => u.isKing && held.has(u.id)).map((u) => u.teamID),
   )
   const regicideTeamIDs = (input.regicideTeamIDs ?? []).filter((team) => !heldKings.has(team))
-  const hidden = new Set<number>()
-  claimList.forEach((claim) => claim.everPossible.forEach((cell) => hidden.add(cell)))
 
   // THE BOARD THE STAGED CELLS ARE READ AGAINST is the board the turn OPENS
   // on, held units included. `resolveTurn` re-reads every staged cell through
@@ -383,13 +383,10 @@ export const settlePartial = (
   })
   const settlement = settleTurn(
     { ...input, units: live, regicideTeamIDs, presence },
-    shield(spawn, Array.from(hidden)),
+    shield(spawn, preamble.hidden),
   )
 
-  const subSteps = Math.max(
-    settlement.subStepCount,
-    ...claimList.map((claim) => claim.headPossible.length - 1),
-  )
+  const subSteps = Math.max(settlement.subStepCount, preamble.span)
   const tracks = live.map((unit) => trackOf(unit, settlement, subSteps))
   const trackById = new Map(tracks.map((t) => [t.id, t]))
 
@@ -407,9 +404,9 @@ export const settlePartial = (
   // Who could still be ENTERING a cell, and when. `entangle` is asked about
   // one unknown presence at a time, and the pile composition below takes two:
   // the claim that dies on a trail cell, and whatever arrives there after it.
-  const arrivals = arrivalsOf(claimList, tracks, subSteps)
+  const arrivals = arrivalsOf(preamble.byCell, tracks, subSteps)
 
-  claimList.forEach((claim) => entangle(ghostOfClaim(claim), tracks, subSteps, arrivals, add))
+  preamble.ghosts.forEach((ghost) => entangle(ghost, tracks, subSteps, arrivals, add))
   itemDivergences(input, settlement, claimList, tracks, add)
   grammarDivergences(input, live, claimList, add)
 
@@ -727,6 +724,74 @@ const ghostOfClaim = (claim: Claim): Ghost => {
 }
 
 /**
+ * THE CLAIM HALF OF A SETTLEMENT, BUILT ONCE PER HELD SET.
+ *
+ * `claims` is already the hoist — "a pure function of the held records and the
+ * board, so a caller sweeping many plans over one held set computes it once".
+ * Three things DERIVED from it were not hoisted with it, and each of them is a
+ * sweep of every cell every claim can reach, paid once per settled plan:
+ *
+ *  - `hidden`, the union of `everPossible` the spawner is shielded from;
+ *  - the claim half of `arrivalsOf`'s table, which notes every claim at every
+ *    cell it could enter, all of them at the same sub-step;
+ *  - `ghostOfClaim`, which is a pure function of ONE claim and builds a body
+ *    set per distinct trail array, a first-appearance map and a certainty set.
+ *
+ * On a 15x15 board with six held units that is ~580 table notes and ~50 union
+ * adds per settled plan, tens of thousands of times a decision — cells x held
+ * units of work and garbage inside a loop over PLANS, none of which reads a
+ * plan. Remembered here against the claim list the caller hoisted, so the
+ * per-plan cost is the lookup and the work is done once for the sweep.
+ *
+ * A `WeakMap` and not a cache: the entry lives exactly as long as the caller's
+ * own claim list does, and a caller that recomputes its claims gets a fresh
+ * one. Every field is a pure function of the claims and of nothing else — not
+ * of the board, not of the roster, not of the sub-step count — which is what
+ * makes one preamble valid for every plan settled against that held set. A
+ * caller that MUTATES a claim list it has already handed in has changed the
+ * rules under the engine and gets the answer for the list it handed in.
+ */
+interface ClaimPreamble {
+  /** The union of every claim's `everPossible`, in first-seen order. */
+  readonly hidden: ReadonlyArray<number>
+  /** The longest claim's span, minus one; -1 when there are no claims. */
+  readonly span: number
+  /** Which claims could be entering each cell — `arrivalsOf`'s claim half. */
+  readonly byCell: ReadonlyMap<number, ReadonlyArray<string>>
+  /** One ghost per claim, in claim order. */
+  readonly ghosts: ReadonlyArray<Ghost>
+}
+
+const preambles = new WeakMap<ReadonlyArray<Claim>, ClaimPreamble>()
+
+const preambleOf = (claims: ReadonlyArray<Claim>): ClaimPreamble => {
+  const known = preambles.get(claims)
+  if (known !== undefined) return known
+  const hidden = new Set<number>()
+  const byCell = new Map<number, string[]>()
+  let span = -1
+  claims.forEach((claim) => {
+    claim.everPossible.forEach((cell) => hidden.add(cell))
+    if (claim.headPossible.length - 1 > span) span = claim.headPossible.length - 1
+    claim.headPossible.forEach((cells) =>
+      cells.forEach((cell) => {
+        const ids = byCell.get(cell)
+        if (ids === undefined) byCell.set(cell, [claim.id])
+        else if (!ids.includes(claim.id)) ids.push(claim.id)
+      }),
+    )
+  })
+  const made: ClaimPreamble = {
+    hidden: Array.from(hidden),
+    span,
+    byCell,
+    ghosts: claims.map(ghostOfClaim),
+  }
+  preambles.set(claims, made)
+  return made
+}
+
+/**
  * A modelled unit whose own outcome is contingent, read as an unknown
  * presence: from the sub-step its outcome became unknown, it could be halted
  * on any cell of its own traversal rather than the one this timeline has it
@@ -793,7 +858,7 @@ type Arrivals = (cell: number, after: number, exceptId: string) => boolean
  * prove impossible; it may never miss one.
  */
 const arrivalsOf = (
-  claims: ReadonlyArray<Claim>,
+  claimCells: ReadonlyMap<number, ReadonlyArray<string>>,
   tracks: ReadonlyArray<Track>,
   subSteps: number,
 ): Arrivals => {
@@ -812,10 +877,20 @@ const arrivalsOf = (
     const until = Math.min(subSteps, track.lastSubStep)
     for (let k = 1; k <= until; k++) if (track.moved[k]) note(track.head[k], track.id, k)
   })
-  claims.forEach((claim) => {
-    claim.headPossible.forEach((cells) => cells.forEach((cell) => note(cell, claim.id, subSteps)))
-  })
+  // A claim's entry is `last = subSteps` for every cell it can reach, so the
+  // claim half needs no per-call table at all: the sub-step comparison is the
+  // SAME comparison for all of them, and `preambleOf` already knows which
+  // claims can reach which cell. A track and a claim can never share an id —
+  // the tracks are the units the caller modelled and the claims are the ones
+  // it held — so the two halves are disjoint and answering them in turn is
+  // answering the one merged table the two used to be built into.
   return (cell, after, exceptId) => {
+    if (subSteps > after) {
+      const ids = claimCells.get(cell)
+      if (ids !== undefined) {
+        for (let i = 0; i < ids.length; i++) if (ids[i] !== exceptId) return true
+      }
+    }
     const entries = byCell.get(cell)
     if (entries === undefined) return false
     return entries.some((entry) => entry.id !== exceptId && entry.last > after)
