@@ -251,7 +251,7 @@ interface Ground {
    * the kind. It belongs to the Ground because the answer does: a board and
    * the steps it admits travel together, exactly as its pawn targets do.
    */
-  readonly facing: Map<UnitType, Map<number, ReadonlyArray<Step>>>
+  readonly facing: Map<UnitType, (ReadonlyArray<Step> | undefined)[]>
   /**
    * The same, for every kind whose answer depends on NEITHER the facing nor
    * the board's contents (`moveGrammar.ts::readsFacingAndContents`) — keyed by
@@ -259,12 +259,12 @@ interface Ground {
    * moves off a square are a rook's moves off that square whichever way it is
    * turned and whichever of the two boards is asking.
    */
-  readonly blind: Map<UnitType, Map<number, ReadonlyArray<Step>>>
+  readonly blind: Map<UnitType, (ReadonlyArray<Step> | undefined)[]>
 }
 
 const groundOf = (
   shape: BoardShape,
-  blind: Map<UnitType, Map<number, ReadonlyArray<Step>>>,
+  blind: Map<UnitType, (ReadonlyArray<Step> | undefined)[]>,
 ): Ground => ({
   shape,
   pawnTargets: pawnTargetsOf(shape),
@@ -338,16 +338,20 @@ const stepsFrom = (
   // by the facing and held per board, every other kind's by the cell alone.
   const reads = readsFacingAndContents(type)
   const memo = reads ? ground.facing : ground.blind
+  const cells = ground.shape.boardWidth * ground.shape.boardHeight
   let byState = memo.get(type)
   if (byState === undefined) {
-    byState = new Map()
+    // A dense array, not a second hash: the key is a cell or a state, and both
+    // are small dense integers. The lookup is the innermost thing the dilation
+    // does that is not the grammar itself.
+    byState = new Array(reads ? cells * 4 : cells).fill(undefined)
     memo.set(type, byState)
   }
   const key = reads ? keyOf(cell, ori) : cell
-  let steps = byState.get(key)
+  let steps = byState[key]
   if (steps === undefined) {
     steps = allStepsFrom(type, cell, ori, ground)
-    byState.set(key, steps)
+    byState[key] = steps
   }
   // The narrowing is a caller's, not the board's, so it is applied to the
   // remembered answer rather than baked into it.
@@ -417,7 +421,7 @@ export const computeClaims = (input: PartialSettleInput): ReadonlyArray<Claim> =
   const heldIds = new Set(input.held.map((h) => h.id))
   // Both boards, and both pawn-target sets, built ONCE for the whole call:
   // everything below asks the grammar about one of these two and nothing else.
-  const blind: Map<UnitType, Map<number, ReadonlyArray<Step>>> = new Map()
+  const blind: Map<UnitType, (ReadonlyArray<Step> | undefined)[]> = new Map()
   const real = groundOf(shapeOf(input), blind)
   const permissive = groundOf(permissiveShapeOf(real.shape), blind)
   const subSteps = subStepsOf(input, heldIds, real)
