@@ -4,9 +4,10 @@ Scope: `git diff origin/develop...HEAD`. Correctness only; two simplification
 plans have already run over this branch and style is not reviewed here.
 
 Gates run on every commit: `npm --prefix functions test` (21 suites, 352 tests
-at the baseline, 355 with the two tests this review added; the byte-for-byte
-goldens are unchanged and were never re-recorded), and, for the frontend files,
-`cd frontend && npm ci && npx tsc -b && npx vite build`.
+at the baseline, 355 with the two tests this review added, 356 with the
+outcome bracket's and 358 with the two the verdicts below added; the
+byte-for-byte goldens are unchanged and were never re-recorded), and, for the
+frontend files, `cd frontend && npm ci && npx tsc -b && npx vite build`.
 
 ---
 
@@ -110,9 +111,10 @@ played — no compatibility exposure.
 
 ---
 
-## 3. Unconfirmed findings
+## 3. Findings taken to a verdict
 
-Nothing below is a proved defect. Each names the site and the experiment.
+Each was named here with a site and an experiment, and each has since been
+run. The verdict is written under the finding, with the test that carries it.
 
 1. **`PartialSettlement.outcome` is a guess, not a bracket.**
    `engine/settlePartial.ts:1393` (`outcomeOf`) stands every held unit on the
@@ -130,6 +132,10 @@ Nothing below is a proved defect. Each names the site and the experiment.
    proof; if it is not, the ledger should carry the fact rather than the
    docstring.
 
+   **CONFIRMED and fixed** (`7483724`). `outcome` is an `OutcomeBracket` over
+   the completion worlds now, derived from the ledger and the claims, and the
+   sweep asserts every world's ending is inside it (T6).
+
 2. **The claim's tier ceiling counts TURNS, not simultaneous collectors.**
    `engine/claims.ts:558-573`: `potionTurns = min(span - 1, potionWindowTurns,
    potions.length)` and `tierMax = ceiling + (allies > 0 ? potionTurns : 0)`.
@@ -142,6 +148,39 @@ Nothing below is a proved defect. Each names the site and the experiment.
    note that `truth.tiers` is the POST-turn tier and is the wrong quantity to
    compare against, which is why my own sweep could not settle this.
 
+   **CONFIRMED and fixed.** The quantity that settles it is the tier the
+   resolver FREEZES for the turn being settled — the record's own `tier` as
+   that turn opens, which is what `outranks` reads — and the unknown turn has
+   to be played by `settleTurn` over the WHOLE roster, not the roster of one
+   the span-2 sweep advances with. Done that way, three team-mates each taking
+   a potion on the unknown turn freeze the held unit at `+3` against a claim
+   of `[-1, +1]`: `settlePartial.spec.ts`, *a claim brackets the tier the
+   resolver froze*, enumerating every two-move history of a potion round for
+   one, two and three collectors, with and without a potion in the held unit's
+   own reach. Two counts were wrong, not one: a pickup is not a turn's worth
+   of tier (the collector takes −1 and every living ally takes +1, so one turn
+   is worth as many levels as there are collectors), and the potions those
+   collectors took are OFF the board by the time the ceiling reads
+   `input.potions` — so `potionTurns` can be zero on the very board that moved
+   the tier by three.
+
+   The fix reads the width off the SCHEDULE the caller handed for this turn
+   rather than off the turn count: every level still in force on the unit,
+   buffs widening the ceiling and debuffs the floor, because a claim cannot
+   tell an entry the record already counts from one taken since it was
+   observed. That is exact for a caller whose schedule is its board's, which
+   is what a pickup guarantees — an entry per unit it touches, lasting a
+   window, and a level already given back is one already off the tier. The old
+   turn count stays as a lower bound on the width, for a caller whose schedule
+   is older than its board. Span 1 is untouched and still exact: no unknown
+   turn has passed, so no potion can have moved anything.
+
+   Residual, and out of this finding's scope: an effect that was in force when
+   the record was observed and lapsed before this turn moves the tier DOWN,
+   and a caller that hands a schedule pruned of it (as settlement itself
+   prunes) shows the claim no evidence of it. `tierAtArrival`'s lapse loop
+   covers exactly the caller that has not pruned.
+
 3. **`resolveTurn` consumes the food a doomed unit eats.**
    `engine/resolveTurn.ts:270`: an exhausted unit at, say, −30 energy eats a
    meal worth 5, stays at or below zero, and dies — but the food has already
@@ -150,6 +189,32 @@ Nothing below is a proved defect. Each names the site and the experiment.
    meal cannot lift it"), and a rule change against `develop`, where a rescue
    was always a full tank. Flagged only so it is a decision rather than a
    side effect.
+
+   **NOT A DEFECT — a rule decision, and one the PR did not introduce the
+   shape of.** Three things settle it. (a) It is the documented rule and it is
+   pinned to the cell: `resolveTurn.spec.ts`, *lets an exhausted unit eat and
+   die anyway when the meal cannot lift it*, asserts `settled.food` is `[]`
+   over the eater's corpse. (b) The order is not an accident of phasing that
+   could be swapped: the food phase runs on the survivors of the collision
+   phase and BEFORE exhaustion stops being provisional, because the meal is
+   what decides whether the unit is doomed at all — a unit killed by a
+   collision never reaches the phase and never eats, and putting the food back
+   afterwards would make a meal conditional on its own outcome. (c) A doomed
+   unit consuming the food it ends on is already `develop`'s behaviour by
+   another route, on byte-identical phase ordering (`4. Food`, `5. Exhaustion`,
+   `6. Regicide` in both): a unit whose king falls this turn eats first and is
+   eliminated after. Measured on this branch —
+
+   ```
+   REGICIDE deaths={"k":{...,"cause":"contest"},"p":{"cell":58,"cause":"regicide"}}
+            food=[] board=["e"]
+   ```
+
+   — the pawn ate the meal at 58 and left the board on the same turn. What is
+   new is only that the EXHAUSTION instance is reachable at all, and it is
+   reachable because `foodEnergy` can now be worth less than a tank (§2.3),
+   where `develop`'s meal restored to max and always rescued. So the decision
+   in front of the owner is the food rule already taken, not a new one.
 
 4. **Spawn parity is not a property of the non-cluster spawn path.**
    `placement.ts:99` / `generateStartingPositions`. `getSpawnCells` enforces
@@ -163,6 +228,33 @@ Nothing below is a proved defect. Each names the site and the experiment.
    byte-identical to `develop`'s (verified by comparing normalised method
    bodies), so this PR neither causes nor worsens it.
 
+   **NOT A DEFECT — parity is a property of the CLUSTER path, and of nothing
+   else.** Re-measured over the same sweep (5..20 by 5..20, 2..12 units, the
+   non-cluster path, three combinations excluded as the crash of finding 5):
+   2,557 of 2,816 board/count combinations place at least one unit on an odd
+   square — far more than the original sweep found, and systematic rather than
+   incidental. Any board with an even dimension breaks it at the CORNERS, which
+   are the first four positions the edge algorithm emits: `startX = 1` and
+   `endX = boardWidth - 2`, so on a 12x12 the corners are (1,1), (10,1), (1,10),
+   (10,10) and two of the four are odd. A 5x5 with three units breaks it on the
+   third position.
+
+   That is not a rule being violated, because there is no rule: `(x + y) % 2`
+   appears exactly once outside a test in the whole repo — in
+   `isValidSpawnPosition`'s `requireParity` branch — and `requireParity` is
+   passed `true` from exactly one caller, `getSpawnCells`, which is the team
+   cluster path. Nothing in the engine, the wire or the frontend reads a
+   spawn's parity (the renderer's other `% 2` is a hex-row stagger). So the
+   even-square rule is a constraint the cluster spawner is written to satisfy,
+   asserted where it is meant to hold (`expectSpawnConstraints`), and the
+   edge/midpoint spawner has never claimed it in either repo.
+
+   What overstates its reach is the NAME of the old test: *places players on
+   even squares* is a fact about 11x11 with 8 units, not a property of the
+   placer. Left as it is rather than renamed — this is a pre-existing test on
+   a pre-existing path, and the finding to record is that a reader should not
+   take it for a guarantee.
+
 5. **A crowded small board throws rather than placing.**
    `placement.ts:99`, `const { x, y } = positions[index]`. A 5x5 board with 20
    units raises `Cannot destructure property 'x' of 'positions[index]' as it is
@@ -171,6 +263,30 @@ Nothing below is a proved defect. Each names the site and the experiment.
    TeamSnekProcessor.ts:865 is the same line). Confirm: `firstTurn()` on a 5x5
    setup with 20 game players.
 
+   **CONFIRMED and fixed** — and it is nearer the lobby than the finding said.
+   A 5x5 board holds nine units (its interior, one to a cell): `n = 9` places
+   nine, and `n = 10` is already the crash. Measured over the 5..20 by 5..20
+   sweep with 2..12 units, three combinations throw — `5x5` at 10, 11 and 12
+   units — so a full game of six two-unit teams on the smallest legal board is
+   enough to reach it, no crafted write required.
+
+   Placing is not the alternative: there is no tenth cell, and every spawn path
+   already stops when it runs out rather than inventing one. What was wrong was
+   the FAILURE — `initializeSnakes` read a position off the end of the list and
+   raised `Cannot destructure property 'x' of 'positions[index]'` from inside
+   the placer, which names neither the board nor the count. It now states the
+   capacity it could not meet:
+
+   ```
+   Board too small to start: 5x5 has 9 spawn cells for 10 units.
+   ```
+
+   Pinned by `checkSnakeStartLocations.test.ts`, *fills a 5x5 to its capacity,
+   and says which board is too small past it*, which also pins the capacity
+   itself at nine. The lobby-side half — `firestore.rules` has no cross-field
+   constraint tying the unit count to `boardWidth * boardHeight` — is left as a
+   rules decision; the server now refuses intelligibly either way.
+
 6. **The cluster minimum distance is vacuous.** `placement.ts:598`,
    `minDistance = 2`, checked against candidates that `getSpawnCells` has
    already filtered to even parity — and two distinct even-parity cells are
@@ -178,9 +294,41 @@ Nothing below is a proved defect. Each names the site and the experiment.
    enforces distinctness. **Pre-existing** and byte-identical to `develop`;
    noted because the comment claims a spacing guarantee it does not provide.
 
+   **NOT A DEFECT.** The vacuity is real and it is provable rather than
+   merely measured: on two cells with `(x + y)` even, `dx + dy` is even, so
+   `|dx| + |dy|` is even; distinct makes it non-zero; an even non-zero number
+   is at least 2. Checked exhaustively as well — every pair of even-parity
+   interior cells on the square boards 5..21, 70,046 pairs, minimum Manhattan
+   distance 2.
+
+   But the comments do not claim otherwise, which is the half of the finding
+   that does not survive reading them. `getSpawnCells` says the parity is
+   there "so any two spawns sit an even Manhattan distance apart" — which is
+   exactly what parity gives and all it gives — and the call site says "the
+   minimum distance ALSO keeps spawns distinct, since a cell is zero away
+   from itself", which names distinctness as the work it does. Nothing in
+   `placement.ts` promises spacing beyond that. The constraint is a
+   `minDistance` parameter written to be raised, and raising it is the only
+   change that would make it do anything; that is a game-design knob, not a
+   defect. Left alone.
+
 7. **My `settleTurn` fix must be vendored.** `Chris-Centaur` carries a copy of
    the engine at `src/engine-vendor/`. Fix #1 above is inside the vendored
    directory, so the bot's copy needs re-vendoring or it keeps the defect.
+
+   **TRUE, and already discharged for `settleTurn`; now outstanding for
+   `claims.ts` alone.** Diffed file by file against `src/engine-vendor/engine/`
+   as it stands: every one of the nine files differs from this branch by
+   exactly the nine-line `VENDORED from Battle-Bunker/TacticToes` header and
+   nothing else — `settleTurn.ts` included, so the bot has re-vendored since
+   this review was written and carries the expiry fix. The one exception is
+   `claims.ts`, which differs by the header AND by the tier-width change of
+   finding 2 above. So the re-vendor this branch requires is `npm run
+   sync-engine` in the bot repo after merge, and `claims.ts` is the file it
+   moves. Nothing else in the module changed: no import was added, no file was
+   added or removed, and `engineVendor.spec.ts` — real imports parsed, no
+   `require`/`Math.random`/`Date.now`, the directory compiled standing alone —
+   passes.
 
 ---
 

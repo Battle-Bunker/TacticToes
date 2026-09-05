@@ -569,8 +569,26 @@ const claimOf = (
   // two would be sound only for callers that agreed with it.
   const floor = Math.min(record.tier, tierAtArrival)
   const ceiling = Math.max(record.tier, tierAtArrival)
-  const tierMin = floor - Math.min(potionTurns, potionsInReach)
-  const tierMax = ceiling + (allies > 0 ? potionTurns : 0)
+  // The width, when the record is older than a turn. Counting the TURNS of
+  // the span admits one potion per turn, and a potion is not a turn: three
+  // team-mates collecting on the same unknown turn is +3 to this unit, and
+  // the potions they took are off the board by the time this reads
+  // `input.potions`, so the turn count can be zero on the very board that
+  // moved the tier by three. What did move it is on the SCHEDULE the caller
+  // handed for this turn — every pickup pushes one entry per unit it touches,
+  // lasting a window — so the width is read off that: every level still in
+  // force on this unit, buffs widening the ceiling and debuffs the floor,
+  // because a claim cannot tell an entry the record already counts from one
+  // taken since it was observed. The turn count stays as a lower bound on the
+  // width for a caller whose schedule is older than its board.
+  const carried =
+    span > 1
+      ? input.effects.filter((e) => e.playerID === record.id && e.expiryTurn >= input.turn)
+      : []
+  const gained = carried.reduce((n, e) => n + Math.max(0, e.level), 0)
+  const lost = carried.reduce((n, e) => n + Math.max(0, -e.level), 0)
+  const tierMin = floor - Math.max(lost, Math.min(potionTurns, potionsInReach))
+  const tierMax = ceiling + Math.max(gained, allies > 0 ? potionTurns : 0)
 
   // Death. `certainlyGone` is a PROOF and is claimed only where one exists:
   // every choice it had walks into terrain that kills, or it had no energy
