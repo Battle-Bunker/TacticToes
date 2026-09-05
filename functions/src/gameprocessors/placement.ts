@@ -91,9 +91,22 @@ export class BoardPlacement {
     playerPieces: { [playerID: string]: number[] }
     teamClusterFallback: boolean
   } {
-    const { boardWidth, gamePlayers } = this.gameSetup
+    const { boardWidth, boardHeight, gamePlayers } = this.gameSetup
     const { positions, teamClusterFallback } = this.generateStartingPositions()
     const playerPieces: { [playerID: string]: number[] } = {}
+
+    // A board can be asked for more units than it has squares — the lobby
+    // allows a 5x5 and 26 units a team, and a 5x5 has nine interior cells.
+    // Every path above stops when it runs out of cells rather than inventing
+    // one, so say so here: a unit per cell is the constraint, and the failure
+    // is the board, not the arithmetic that reads the position off the end of
+    // the list.
+    if (positions.length < gamePlayers.length) {
+      throw new Error(
+        `Board too small to start: ${boardWidth}x${boardHeight} has ${positions.length} ` +
+          `spawn cells for ${gamePlayers.length} units.`,
+      )
+    }
 
     gamePlayers.forEach((player, index) => {
       const { x, y } = positions[index]

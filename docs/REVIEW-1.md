@@ -235,6 +235,30 @@ run. The verdict is written under the finding, with the test that carries it.
    TeamSnekProcessor.ts:865 is the same line). Confirm: `firstTurn()` on a 5x5
    setup with 20 game players.
 
+   **CONFIRMED and fixed** — and it is nearer the lobby than the finding said.
+   A 5x5 board holds nine units (its interior, one to a cell): `n = 9` places
+   nine, and `n = 10` is already the crash. Measured over the 5..20 by 5..20
+   sweep with 2..12 units, three combinations throw — `5x5` at 10, 11 and 12
+   units — so a full game of six two-unit teams on the smallest legal board is
+   enough to reach it, no crafted write required.
+
+   Placing is not the alternative: there is no tenth cell, and every spawn path
+   already stops when it runs out rather than inventing one. What was wrong was
+   the FAILURE — `initializeSnakes` read a position off the end of the list and
+   raised `Cannot destructure property 'x' of 'positions[index]'` from inside
+   the placer, which names neither the board nor the count. It now states the
+   capacity it could not meet:
+
+   ```
+   Board too small to start: 5x5 has 9 spawn cells for 10 units.
+   ```
+
+   Pinned by `checkSnakeStartLocations.test.ts`, *fills a 5x5 to its capacity,
+   and says which board is too small past it*, which also pins the capacity
+   itself at nine. The lobby-side half — `firestore.rules` has no cross-field
+   constraint tying the unit count to `boardWidth * boardHeight` — is left as a
+   rules decision; the server now refuses intelligibly either way.
+
 6. **The cluster minimum distance is vacuous.** `placement.ts:598`,
    `minDistance = 2`, checked against candidates that `getSpawnCells` has
    already filtered to even parity — and two distinct even-parity cells are

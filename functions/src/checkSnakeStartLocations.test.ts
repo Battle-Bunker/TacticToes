@@ -108,6 +108,23 @@ describe("snake start locations", () => {
     })
   })
 
+  // The board's capacity is its interior, one unit to a cell: a 5x5 holds
+  // nine. `firestore.rules` allows a 5x5 board and up to 26 units a team, so
+  // the lobby can ask for more than the board has — and every spawn path stops
+  // when it runs out of cells rather than inventing one. The tenth unit on a
+  // 5x5 used to read a position off the end of the list and fail with
+  // `Cannot destructure property 'x' of 'positions[index]'`.
+  test("fills a 5x5 to its capacity, and says which board is too small past it", () => {
+    const full = createGameState(5, 5, 9)
+    const placed = new TeamSnekProcessor(full).firstTurn()
+    expect(Object.keys(placed.playerPieces).length).toBe(9)
+
+    const crowded = createGameState(5, 5, 10)
+    expect(() => new TeamSnekProcessor(crowded).firstTurn()).toThrow(
+      "Board too small to start: 5x5 has 9 spawn cells for 10 units.",
+    )
+  })
+
   test("places players near edges for small number of players", () => {
     const gameState = createGameState(7, 7, 2)
     const game = new TeamSnekProcessor(gameState)
