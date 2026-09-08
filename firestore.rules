@@ -94,6 +94,33 @@ service cloud.firestore {
         me.get('king', 100) is int && me.get('king', 100) >= 1 && me.get('king', 100) <= 1000;
     }
 
+    // One unit type's configuration group: what a meal is worth to the kind,
+    // how much energy it holds, and the weight it spawns at. Every field is
+    // optional and an absent one is the default, so `.get(k, default)` makes
+    // absent fields pass. Food energy is bounded by the same 1..1000 band as
+    // the tank it is measured against; a starting weight is an opening
+    // occupancy, so it is bounded far lower.
+    function isValidUnitTypeConfig(g) {
+      return g is map &&
+        g.keys().hasOnly(['foodEnergy', 'maxEnergy', 'startingWeight']) &&
+        g.get('foodEnergy', 100) is int && g.get('foodEnergy', 100) >= 1 && g.get('foodEnergy', 100) <= 1000 &&
+        g.get('maxEnergy', 100) is int && g.get('maxEnergy', 100) >= 1 && g.get('maxEnergy', 100) <= 1000 &&
+        g.get('startingWeight', 1) is int && g.get('startingWeight', 1) >= 1 && g.get('startingWeight', 1) <= 20;
+    }
+
+    // The per-unit-type configuration: one group per kind, every kind optional.
+    function isValidUnitConfig(uc) {
+      return uc is map &&
+        uc.keys().hasOnly(['snake', 'pawn', 'knight', 'bishop', 'rook', 'queen', 'king']) &&
+        isValidUnitTypeConfig(uc.get('snake', {})) &&
+        isValidUnitTypeConfig(uc.get('pawn', {})) &&
+        isValidUnitTypeConfig(uc.get('knight', {})) &&
+        isValidUnitTypeConfig(uc.get('bishop', {})) &&
+        isValidUnitTypeConfig(uc.get('rook', {})) &&
+        isValidUnitTypeConfig(uc.get('queen', {})) &&
+        isValidUnitTypeConfig(uc.get('king', {}));
+    }
+
     function isValidSetup(setup) {
       let hasRequiredFields = setup.keys().hasAll([
           'teams', 'snakesPerTeam', 'boardWidth', 'boardHeight',
@@ -120,6 +147,10 @@ service cloud.firestore {
         // meal is measured against a tank and a tank tops out at 1000.
         (!('foodEnergy' in setup.keys()) || (setup.foodEnergy is int && setup.foodEnergy >= 1 && setup.foodEnergy <= 1000)) &&
         (!('unitsPerTeam' in setup.keys()) || isValidUnitCounts(setup.unitsPerTeam)) &&
+        (!('unitConfig' in setup.keys()) || isValidUnitConfig(setup.unitConfig)) &&
+        // Legacy, still accepted so a setup written before the per-unit-type
+        // group existed keeps validating: both are read through one reader
+        // (engine/unitConfig.ts), and only `unitConfig` is written now.
         (!('maxEnergyPerUnit' in setup.keys()) || isValidUnitMaxEnergy(setup.maxEnergyPerUnit))
       );
 

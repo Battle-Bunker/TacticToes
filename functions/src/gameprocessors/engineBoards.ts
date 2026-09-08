@@ -10,11 +10,25 @@
 // Not part of the vendorable engine: this is a fixture, and the module under
 // `engine/` may not import it (see engine/VENDOR.md).
 
-import { ActiveEffect, UnitType } from "@shared/types/Game"
+import { ActiveEffect, UnitConfig, UnitType } from "@shared/types/Game"
 import { Orientation } from "./engine/moveGrammar"
 import { ResolveUnit } from "./engine/resolveTurn"
 import { PartialSettleInput } from "./engine/settlePartial"
+import { everyUnitType } from "./engine/unitConfig"
 import { perimeter } from "./playTurn"
+
+/**
+ * The per-unit-type configuration a generated board plays with: one meal
+ * worth `5` on a third of the seeds and a whole tank on the rest, and the
+ * queen's tank at 80 — the numbers these boards have always used, now stated
+ * as the group the engine reads.
+ */
+const boardUnitConfig = (seed: number): UnitConfig => {
+  const foodEnergy = seed % 3 === 0 ? 5 : 100
+  const config = everyUnitType({ foodEnergy, maxEnergy: 100 })
+  config.queen = { foodEnergy, maxEnergy: 80 }
+  return config
+}
 
 export const W = 9
 export const KINDS: UnitType[] = ["snake", "pawn", "knight", "bishop", "rook", "queen", "king"]
@@ -120,13 +134,12 @@ export const makeBoard = (seed: number): PartialSettleInput => {
     hazards,
     hazardDamage: pick([1, 5, 40]),
     food,
-    defaultMaxEnergy: 100,
-    maxEnergy: { queen: 80 },
     // A third of the boards play a food worth far less than a tank, where a
     // meal feeds without growing and an exhausted unit's rescue is not
     // automatic. Derived from the seed rather than drawn, so every board's
-    // units, items and terrain are the ones they always were.
-    foodEnergy: seed % 3 === 0 ? 5 : 100,
+    // units, items and terrain are the ones they always were. The queen's
+    // tank is 80 on every board.
+    unitConfig: boardUnitConfig(seed),
     regicideTeamIDs: units.some((u) => u.isKing) ? ["A", "B"] : [],
     turn,
     teamOf,

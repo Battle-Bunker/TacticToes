@@ -1,5 +1,6 @@
-import { GamePlayer, StartedGameSetup } from "@shared/types/Game"
-import { ORTHOGONALS, isPieceType } from "./engine/moveGrammar"
+import { GamePlayer, StartedGameSetup, UnitConfig } from "@shared/types/Game"
+import { ORTHOGONALS } from "./engine/moveGrammar"
+import { unitConfigOf, unitTypeConfig } from "./engine/unitConfig"
 import { freeCells } from "./engine/spawn"
 import { assignCellsToSlices, sliceDistance } from "../utils/radialSlices"
 
@@ -23,10 +24,30 @@ export class BoardPlacement {
   private readonly gameSetup: StartedGameSetup
   /** The board perimeter, fixed for the life of the game — built once. */
   readonly walls: number[]
+  /**
+   * The per-unit-type configuration, read once through the one reader (an
+   * older document states its settings under the fields this replaced). The
+   * only field placement reads is `startingWeight`: creating a unit is the one
+   * rule about weight that is not settlement's, so it is applied HERE, off the
+   * same groups the engine reads its other two numbers from.
+   */
+  private readonly unitConfig: UnitConfig
 
   constructor(gameSetup: StartedGameSetup) {
     this.gameSetup = gameSetup
     this.walls = this.getWallPositions()
+    this.unitConfig = unitConfigOf(gameSetup)
+  }
+
+  /**
+   * The occupancy a unit is created with: its kind's starting weight, as N
+   * copies of the cell it spawns on — the stacked triple a snake has always
+   * spawned as, the single square a piece has, or whatever the setup
+   * configured for that kind.
+   */
+  private spawnOccupancy(player: GamePlayer, cell: number): number[] {
+    const weight = unitTypeConfig(this.unitConfig, player.unitType ?? "snake").startingWeight
+    return new Array(Math.max(1, Math.round(weight))).fill(cell)
   }
 
   // The board build, in the one order the lobby preview and turn 0 both use:
@@ -58,7 +79,7 @@ export class BoardPlacement {
       gamePlayers.forEach((player) => {
         const pos = presetPositions[player.id]
         if (pos !== undefined) {
-          playerPieces[player.id] = isPieceType(player.unitType) ? [pos] : [pos, pos, pos]
+          playerPieces[player.id] = this.spawnOccupancy(player, pos)
         }
       })
       if (Object.keys(playerPieces).length !== gamePlayers.length) {
@@ -111,10 +132,7 @@ export class BoardPlacement {
     gamePlayers.forEach((player, index) => {
       const { x, y } = positions[index]
       const startIndex = y * boardWidth + x
-      // Snakes spawn as a stacked triple; chess pieces as a single square (weight 1)
-      playerPieces[player.id] = isPieceType(player.unitType)
-        ? [startIndex]
-        : [startIndex, startIndex, startIndex]
+      playerPieces[player.id] = this.spawnOccupancy(player, startIndex)
     })
 
     return { playerPieces, teamClusterFallback }

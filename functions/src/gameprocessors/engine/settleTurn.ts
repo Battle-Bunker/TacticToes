@@ -3,6 +3,7 @@ import { BoardView, Outcome, adjudicate } from "./adjudicate"
 import { Orientation, toXY } from "./moveGrammar"
 import { ResolveTurnInput, TurnResolution, resolveTurn } from "./resolveTurn"
 import { Spawner } from "./spawn"
+import { unitTypeConfig } from "./unitConfig"
 
 /**
  * Turn SETTLEMENT: everything `resolveTurn` does, and then the end-of-turn
@@ -282,7 +283,7 @@ export const settleTurn = (input: SettleInput, spawn: Spawner): Settlement => {
   // free-cell set it would have seen before.
   const unitTypes: { [unitID: string]: UnitType } = {}
   const promoted: string[] = []
-  const queenMaxEnergy = input.maxEnergy?.queen ?? input.defaultMaxEnergy ?? 100
+  const queenMaxEnergy = unitTypeConfig(input.unitConfig, "queen").maxEnergy
   input.units.forEach((u) => {
     if (!alive.has(u.id)) return
     unitTypes[u.id] = u.type

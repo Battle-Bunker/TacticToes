@@ -40,6 +40,7 @@ import { Settlement, settleTurn } from "./engine/settleTurn"
 import { perimeter } from "./playTurn"
 import { W, WALLS, held, makeBoard } from "./engineBoards"
 import { NO_SPAWN } from "./engine/spawn"
+import { everyUnitType } from "./engine/unitConfig"
 
 const shapeOf = (input: PartialSettleInput): BoardShape => ({
   boardWidth: input.boardWidth,
@@ -695,9 +696,6 @@ const potionRound = (collectors: number, reachable: boolean): PartialSettleInput
     hazards: [],
     hazardDamage: 1,
     food: [],
-    defaultMaxEnergy: 100,
-    maxEnergy: {},
-    foodEnergy: 100,
     regicideTeamIDs: [],
     turn: 6,
     teamOf,
@@ -1010,8 +1008,8 @@ describe("computeClaims", () => {
       held: [{ id: "s", observedTurn: 3 }],
     })
     expect(computeClaims(fed)[0].energyMax).toBe(100) // default food = a tank
-    expect(computeClaims({ ...fed, foodEnergy: 5 })[0].energyMax).toBe(55)
-    expect(computeClaims({ ...fed, foodEnergy: 5, food: [] })[0].energyMax).toBe(50)
+    expect(computeClaims({ ...fed, unitConfig: everyUnitType({ foodEnergy: 5 }) })[0].energyMax).toBe(55)
+    expect(computeClaims({ ...fed, unitConfig: everyUnitType({ foodEnergy: 5 }), food: [] })[0].energyMax).toBe(50)
   })
 
   it("forks a pawn's kinds at the promotion threshold and nowhere else", () => {
@@ -1048,7 +1046,6 @@ const bench = (units: ResolveUnit[], overrides: Partial<PartialSettleInput> = {}
     hazards: [],
     hazardDamage: 5,
     food: [],
-    defaultMaxEnergy: 100,
     turn: 4,
     teamOf,
     effects: [],
@@ -1739,7 +1736,6 @@ const pawnCaptureBoard = (): PartialSettleInput => {
     hazards: [],
     hazardDamage: 5,
     food: [],
-    defaultMaxEnergy: 100,
     turn,
     teamOf: { p: "A", r: "B" },
     effects: [],

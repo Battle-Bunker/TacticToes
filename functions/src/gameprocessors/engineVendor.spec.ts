@@ -33,6 +33,7 @@ describe("engine/ is vendorable", () => {
       "settleTurn.ts",
       "spawn.ts",
       "turnEngine.ts",
+      "unitConfig.ts",
     ])
     // Exactly these, because vendoring copies the whole directory. Anything
     // else that lands here travels with it — a stale compiled .js beside its

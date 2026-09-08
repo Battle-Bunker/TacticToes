@@ -6,6 +6,7 @@
 
 import { ResolveUnit, resolveTurn } from "./engine/resolveTurn"
 import { at as curriedAt, perimeter } from "./playTurn"
+import { everyUnitType } from "./engine/unitConfig"
 
 // 11x11 board: index = y * 11 + x, perimeter is wall (interior 1..9).
 const W = 11
@@ -205,7 +206,7 @@ describe("resolveTurn, called from outside the processor", () => {
     const foodAt = at(2, 5)
     const settled = settle(
       [unit({ id: "r", occupancy: [at(1, 5)], energy: 50, stagedMove: foodAt })],
-      { food: [foodAt], foodEnergy: 20 }
+      { food: [foodAt], unitConfig: everyUnitType({ foodEnergy: 20 }) }
     )
 
     // 50, one cell entered, twenty back: 69, and no length for it.
@@ -217,7 +218,7 @@ describe("resolveTurn, called from outside the processor", () => {
     const foodAt = at(2, 5)
     const settled = settle(
       [unit({ id: "r", occupancy: [at(1, 5)], energy: 95, stagedMove: foodAt })],
-      { food: [foodAt], foodEnergy: 20 }
+      { food: [foodAt], unitConfig: everyUnitType({ foodEnergy: 20 }) }
     )
 
     // 94 after the step, plus 20 would be 114: clamped to 100, which IS the
@@ -232,7 +233,7 @@ describe("resolveTurn, called from outside the processor", () => {
     const pawnAt = at(3, 5)
     const settled = settle(
       [unit({ id: "p", type: "pawn", occupancy: [pawnAt], stagedMove: at(3, 4) })],
-      { food: [pawnAt], foodEnergy: 20 }
+      { food: [pawnAt], unitConfig: everyUnitType({ foodEnergy: 20 }) }
     )
 
     expect(settled.rotations).toEqual({ p: { dx: 0, dy: -1 } })
@@ -255,11 +256,45 @@ describe("resolveTurn, called from outside the processor", () => {
           stagedMove: knightFood,
         }),
       ],
-      { food: [rookFood, knightFood], foodEnergy: 20, maxEnergy: { rook: 60, knight: 200 } }
+      {
+        food: [rookFood, knightFood],
+        unitConfig: {
+          rook: { foodEnergy: 20, maxEnergy: 60 },
+          knight: { foodEnergy: 20, maxEnergy: 200 },
+        },
+      }
     )
 
     expect(settled.board.r).toEqual({ occupancy: [rookFood, rookFood], energy: 60 })
     expect(settled.board.n).toEqual({ occupancy: [knightFood], energy: 74 })
+  })
+
+  it("measures the meal against the eater's OWN kind's food energy", () => {
+    // The same food on two boards' worth of kinds: what a meal is worth is the
+    // eater's configuration, not the board's.
+    const rookFood = at(2, 5)
+    const knightFood = at(3, 7)
+    const settled = settle(
+      [
+        unit({ id: "r", type: "rook", occupancy: [at(1, 5)], energy: 50, stagedMove: rookFood }),
+        unit({
+          id: "n",
+          type: "knight",
+          occupancy: [at(1, 6)],
+          energy: 50,
+          stagedMove: knightFood,
+        }),
+      ],
+      {
+        food: [rookFood, knightFood],
+        unitConfig: { rook: { foodEnergy: 40 }, knight: { foodEnergy: 5 } },
+      }
+    )
+
+    // 49 after the step: the rook's meal is 40 and the knight's is 5, and
+    // neither reaches the default max of 100, so neither grows.
+    expect(settled.board.r).toEqual({ occupancy: [rookFood], energy: 89 })
+    expect(settled.board.n).toEqual({ occupancy: [knightFood], energy: 54 })
   })
 
   it("defaults a meal to a whole tank, which is the rule food always played", () => {
@@ -282,7 +317,7 @@ describe("resolveTurn, called from outside the processor", () => {
     const halt = at(3, 5)
     const settled = settle(
       [unit({ id: "r", occupancy: [at(1, 5)], energy: 2, stagedMove: at(9, 5) })],
-      { food: [halt], foodEnergy: 20 }
+      { food: [halt], unitConfig: everyUnitType({ foodEnergy: 20 }) }
     )
 
     expect(settled.deaths).toEqual({})
@@ -297,7 +332,7 @@ describe("resolveTurn, called from outside the processor", () => {
     const halt = at(3, 5)
     const settled = settle(
       [unit({ id: "r", occupancy: [at(1, 5)], energy: 2, stagedMove: at(9, 5) })],
-      { food: [halt], hazards: [halt], hazardDamage: 30, foodEnergy: 5 }
+      { food: [halt], hazards: [halt], hazardDamage: 30, unitConfig: everyUnitType({ foodEnergy: 5 }) }
     )
 
     expect(settled.board).toEqual({})
@@ -313,7 +348,7 @@ describe("resolveTurn, called from outside the processor", () => {
     const foodAt = at(2, 5)
     const settled = settle(
       [unit({ id: "r", occupancy: [at(1, 5)], energy: 92, stagedMove: foodAt })],
-      { food: [foodAt, foodAt], foodEnergy: 5 }
+      { food: [foodAt, foodAt], unitConfig: everyUnitType({ foodEnergy: 5 }) }
     )
 
     expect(settled.board.r).toEqual({ occupancy: [foodAt, foodAt], energy: 100 })

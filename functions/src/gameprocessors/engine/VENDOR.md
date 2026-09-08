@@ -19,6 +19,7 @@ Copy exactly these, together, keeping their relative layout:
 | `moveGrammar.ts` | The movement grammar: staged cell → the path a unit of that kind walks, plus spawn orientation and the per-kind property flags. |
 | `queries.ts` | The grammar asked questions instead of applied: which cells may be staged, what a unit would walk, what it covers. |
 | `settlePartial.ts` | **The same turn with some units' moves unknown.** `settleTurn`'s phases over a board where some movers are held, plus the ledger of every point a concrete world could differ at. A mode of the one engine, not a second one. |
+| `unitConfig.ts` | **The per-unit-type configuration group**: the defaults, the indexing by kind, and the one reader that folds an older document's `maxEnergyPerUnit`/`foodEnergy` into the group. The wire types carry no runtime code, so the numbers a kind is configured with live here — and the board placement that CREATES a unit reads its starting weight from the same function. |
 | `claims.ts` | What a held unit could be doing: where it could be at each sub-step, how strong it could be, and whether it could be gone — derived from the grammar through `queries.ts`. |
 | `VENDOR.md` | This file. |
 
@@ -93,8 +94,8 @@ const settled = settleTurn({
     // ...one per unit alive at the start of the turn
   ],
   boardWidth, boardHeight, walls, hazards, hazardDamage, food,
-  maxEnergy,          // per-kind overrides; the rest default to 100
-  foodEnergy,         // energy one food replenishes (100)
+  unitConfig,         // per-unit-type groups: { foodEnergy, maxEnergy, startingWeight }
+                      //   — absent groups and fields take the shipped defaults
   regicideTeamIDs,    // teams configured with at least one king
   turn,               // the turn being resolved
   teamOf,             // unit id -> team id, for every configured unit
@@ -140,7 +141,20 @@ rewrite (so it was still a pawn when its facing was decided), and before
 spawning — which changes nothing either way, because a piece's occupancy is N
 copies of one square and the collapse frees no cell.
 
-**Eating adds `foodEnergy`, and only a FULL TANK grows.** A meal is
+**Three numbers are configured per unit KIND, and each is read at the one
+place its rule lives.** `unitConfig` carries a group per kind —
+`{ foodEnergy, maxEnergy, startingWeight }`, every field optional — and
+`unitConfig.ts`'s `unitTypeConfig(config, kind)` is how any of them is
+read: indexed by the kind in hand, never branched on. The food phase of
+`resolveTurn` reads a kind's `foodEnergy` and `maxEnergy`, the promotion clamp
+in `settleTurn` reads the queen's `maxEnergy`, `claims.ts` prices a held
+unit's meals with the most generous of the kinds it could be, and
+`startingWeight` is read where a unit is CREATED — which is placement, the
+caller's (see "What is deliberately NOT in the module"). An older document
+that names `maxEnergyPerUnit` and a global `foodEnergy` is folded into the
+same shape by `unitConfigOf`, on read; nothing writes those fields any more.
+
+**Eating adds the kind's `foodEnergy`, and only a FULL TANK grows.** A meal is
 `foodEnergy` (default 100) added to the eater and clamped to its kind's max,
 and it adds one weight/length only when it brings the unit TO that max. So
 growth is not what eating costs — it is what filling up costs. Three

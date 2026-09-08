@@ -2,6 +2,7 @@ import { GameState, Turn, UnitDeath } from "@shared/types/Game"
 import { teamColorMap } from "../hooks/useTeamColors"
 import { CLASH_HEADLINE, EXHAUSTION_KINDS } from "./clashes"
 import { isPieceType, unitTypeFor } from "../utils/unitTypes"
+import { unitConfigOf, unitTypeConfig } from "../utils/unitConfig"
 import {
   BoardClash,
   BoardClashKind,
@@ -147,6 +148,10 @@ export const turnToBoard = (
   const width = gameState.setup.boardWidth
   const height = gameState.setup.boardHeight
   const teamColors = teamColorMap(gameState.setup.teams)
+  // The per-unit-type configuration, read once through the one reader: a setup
+  // written before the group existed states its energy settings under the
+  // fields it replaced, and this is what folds them in.
+  const unitConfig = unitConfigOf(gameState.setup)
   // The team's display NAME is the one the game setup snapshotted from the
   // controlling centaur — never the team's document id, which is a key rather
   // than a name.
@@ -214,7 +219,7 @@ export const turnToBoard = (
       // A piece's weight is the height of its stack; a snake's is its length.
       weight: positions.length,
       energy: turn.playerEnergy[playerID] ?? 0,
-      maxEnergy: gameState.setup.maxEnergyPerUnit?.[unitType] ?? 100,
+      maxEnergy: unitTypeConfig(unitConfig, unitType).maxEnergy,
       orientation: turn.orientation?.[playerID],
       invulnerabilityLevel: turn.playerInvulnerabilityLevel?.[playerID] ?? 0,
       invulnerabilityExpiryTurn: invulnerabilityExpiryTurn(turn, playerID),

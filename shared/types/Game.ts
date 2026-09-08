@@ -49,15 +49,55 @@ export type PerUnitType<T> = { [K in UnitType]?: T }
 // Per-team unit counts. Absent → snakesPerTeam snakes.
 export type UnitCounts = PerUnitType<number>
 
-// Per-type max energy. Absent keys (or the whole map) mean 100.
+// Per-type max energy. LEGACY: superseded by the per-type configuration group
+// below. Documents written before the group existed carry this map, and
+// `shared/unitConfig.ts` folds it in on read. Absent keys mean 100.
 export type UnitMaxEnergy = PerUnitType<number>
+
+/**
+ * One unit kind's configuration group. Every field is optional and an absent
+ * field takes the shipped default — `shared/unitConfig.ts` is where those
+ * defaults live and where a document of any age is read for these.
+ */
+export interface UnitTypeConfig {
+  /**
+   * Energy one food replenishes for this kind, added to the eater and clamped
+   * to `maxEnergy`. Defaults to 100 — the default max — so an unconfigured
+   * game plays food's old meaning: one meal fills the tank.
+   *
+   * A meal grows the eater by one weight/length ONLY when it brings the unit
+   * TO its max, so growth is what a full tank costs. Set this below the kind's
+   * max and the kind needs several meals to fill, and grows on the one that
+   * fills it.
+   */
+  foodEnergy?: number
+  /** Energy this kind can hold. Defaults to 100. */
+  maxEnergy?: number
+  /**
+   * Weight (occupancy length) a unit of this kind is created with at game
+   * start. Defaults to 3 for snakes — the stacked triple a snake has always
+   * spawned as — and 1 for every chess piece.
+   */
+  startingWeight?: number
+}
+
+/** One configuration group per unit kind. Absent keys are all defaults. */
+export type UnitConfig = PerUnitType<UnitTypeConfig>
 
 export interface GameSetup {
   teams: Team[]
   snakesPerTeam: number
   unitsPerTeam?: UnitCounts // When present, snakesPerTeam is ignored by expansion
   pawnPromotionWeight?: number // Pawns promote to queens at this weight (default 10)
-  maxEnergyPerUnit?: UnitMaxEnergy // per-type max energy, default 100
+  /**
+   * Per-unit-type configuration: food energy, max energy and starting weight,
+   * one group per kind. Read it through `shared/unitConfig.ts` — that reader
+   * applies the defaults and folds the legacy `maxEnergyPerUnit`/`foodEnergy`
+   * of an older document into this one shape.
+   */
+  unitConfig?: UnitConfig
+  /** @deprecated Legacy per-type max energy; read through `unitConfigOf`, never written. */
+  maxEnergyPerUnit?: UnitMaxEnergy
   boardWidth: number
   boardHeight: number
   maxTurnTime: number // Time limit per turn in seconds
@@ -74,16 +114,7 @@ export interface GameSetup {
   maxTurns?: number | null
   hazardPercentage?: number // Percentage of the board to fill with hazards (defaults to 0)
   hazardDamage?: number // energy lost per hazard square entered (default 100)
-  /**
-   * Energy one food replenishes, added to the eater and clamped to its kind's
-   * max. Defaults to 100 — the default `maxEnergyPerUnit` — so an unconfigured
-   * game plays food's old meaning: one meal fills the tank.
-   *
-   * A meal grows the eater by one weight/length ONLY when it brings the unit
-   * TO its max, so growth is what a full tank costs. Set this below a kind's
-   * max and that kind needs several meals to fill and grows only on the one
-   * that fills it.
-   */
+  /** @deprecated Legacy global food energy; read through `unitConfigOf`, never written. */
   foodEnergy?: number
   teamClustersEnabled?: boolean
   fertileGroundEnabled?: boolean

@@ -23,7 +23,10 @@
     /* Paths for shared types */
     "baseUrl": ".", // Set baseUrl to current directory
     "paths": {
-      "@shared/*": ["../shared/*"] // Path to the shared folder
+      "@shared/*": ["../shared/*"], // Path to the shared folder
+      // The vendorable rules module: read for the per-unit-type configuration
+      // defaults rather than restating them here.
+      "@engine/*": ["../functions/src/gameprocessors/engine/*"]
     }
   },
   "include": ["src", "../shared/*"] // Only include "src" for frontend app

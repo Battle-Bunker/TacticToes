@@ -46,8 +46,9 @@ Occupancy on the wire (`Turn.playerPieces`) is unchanged: a snake's body
 Weight = array length, so scoring, team scores, winner adjudication and the
 wire format all work unchanged.
 
-Pieces start at weight 1, snakes at 3. Eating: `foodEnergy` added and clamped
-to the type's configured max, +1 weight when the meal reaches that max. A
+Pieces start at weight 1, snakes at 3 — each kind's `startingWeight`. Eating:
+the kind's `foodEnergy` added and clamped to the kind's `maxEnergy`, +1 weight
+when the meal reaches that max. A
 promoting pawn is the one place weight goes
 down without a death: it returns to weight 1 as a queen. Weight never decays.
 Nothing is gained from a kill.
@@ -224,9 +225,39 @@ halt cell with kind `"exhaustion"` or `"hazard"` the moment it happens:
 ### Eating
 
 Eating happens in the end-of-turn food phase: every unit still on the board
-and standing on food consumes it. A meal is `GameSetup.foodEnergy` (default
-100), **added** to the eater's energy and clamped to its current kind's max
-(`maxEnergyPerUnit`, default 100).
+and standing on food consumes it. A meal is the eater's kind's `foodEnergy`
+(default 100), **added** to its energy and clamped to that kind's `maxEnergy`
+(default 100).
+
+### The per-unit-type configuration group
+
+Three numbers are configured per unit KIND, in one group per kind under
+`GameSetup.unitConfig`:
+
+| Field | Default | Read where the rule lives |
+|---|---|---|
+| `foodEnergy` | 100 | the food phase (`engine/resolveTurn.ts`), and a held unit's ceiling in `engine/claims.ts` |
+| `maxEnergy` | 100 | the same food-phase clamp, the promotion clamp in `engine/settleTurn.ts`, and turn-0 energy |
+| `startingWeight` | 3 snake, 1 piece | where a unit is CREATED — `placement.ts`, not settlement |
+
+`engine/unitConfig.ts` holds the defaults and `unitTypeConfig(config, kind)`
+is the only way any of the three is read: indexed by kind, never branched on.
+An absent group, or an absent field of one, is the default, so a game that
+configures nothing plays exactly as it always did.
+
+**Migration, and the deploy hazard.** Documents written before the group
+existed state these settings as a per-type `maxEnergyPerUnit` map and one
+global `foodEnergy`. `unitConfigOf(setup)` folds them into the group ON READ —
+in the processor, in board placement, in the lobby and in the bot's board
+translation — and nothing writes them any more. A game that straddles the
+deploy therefore keeps playing with the numbers it was started with: the old
+fields are still read, the new code just reads them somewhere else. The one
+thing that does change under it is the LOBBY: opening a pre-deploy setup shows
+those numbers in the new per-type boxes, and the first edit rewrites the whole
+group as `unitConfig` (the legacy fields are left in the document, ignored
+from then on, and `firestore.rules` accepts both). A setup being edited in two
+tabs across the deploy is the only way to lose an edit, and it loses it the
+way any concurrent lobby edit does.
 
 **Growth is what a full tank costs.** A meal adds one weight/length ONLY when
 it brings the unit TO its max — energy at or above max before the clamp. A
@@ -236,7 +267,7 @@ meal it takes, because the clamp leaves it at max and max is what the rule
 asks. At the shipped defaults — a food worth 100, a tank of 100 — every meal
 fills and every meal grows, which is exactly the rule food used to play.
 
-Set `foodEnergy` below a kind's max and that kind must eat several times to
+Set a kind's `foodEnergy` below its max and that kind must eat several times to
 fill, growing on the meal that finishes the job. That is the knob: it decouples
 "stay alive" from "get heavy", so a unit can be kept running without being fed
 into promotion range.

@@ -14,8 +14,9 @@ import {
   legalActions,
   pawnTargetsOf,
 } from "./queries"
-import { DEFAULT_FOOD_ENERGY, ResolveUnit } from "./resolveTurn"
+import { ResolveUnit } from "./resolveTurn"
 import { SettleInput } from "./settleTurn"
+import { unitTypeConfig } from "./unitConfig"
 
 /**
  * What a unit whose move nobody knows could be doing.
@@ -718,9 +719,12 @@ const claimOf = (
   // is allowed. Energy never rises any other way, and a record carrying more
   // than that maximum already (a kind whose max was lowered under it) still
   // has what it has — hence the floor at `record.energy`.
-  const defaultMax = input.defaultMaxEnergy ?? 100
-  const kindMax = Math.max(...kinds.map((k) => input.maxEnergy?.[k] ?? defaultMax))
-  const foodEnergy = input.foodEnergy ?? DEFAULT_FOOD_ENERGY
+  // Both numbers are per KIND now, and a held unit may be any of several, so
+  // the ceiling takes the most generous of them on each — the bound stays an
+  // upper bound, which is all a claim promises.
+  const configs = kinds.map((k) => unitTypeConfig(input.unitConfig, k))
+  const kindMax = Math.max(...configs.map((c) => c.maxEnergy))
+  const foodEnergy = Math.max(...configs.map((c) => c.foodEnergy))
   const energyMax = Math.max(record.energy, Math.min(kindMax, record.energy + meals * foodEnergy))
 
   // Tier. Only two things move it: an effect of the schedule lapsing before

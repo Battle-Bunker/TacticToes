@@ -1,7 +1,8 @@
-import { Clash, UnitDeath, UnitMaxEnergy, UnitType } from "@shared/types/Game"
+import { Clash, UnitConfig, UnitDeath, UnitType } from "@shared/types/Game"
 import { Orientation, leavesTrail, traversesEdges } from "./moveGrammar"
 import { BoardShape, pawnTargetsOf, stagedAction } from "./queries"
 import { EngineUnit, ExhaustionEvent, REASON, runTurnEngine } from "./turnEngine"
+import { ResolvedUnitTypeConfig, unitTypeConfig } from "./unitConfig"
 
 /**
  * The whole of turn resolution, as one pure function.
@@ -57,18 +58,16 @@ export interface ResolveTurnInput {
   /** Energy lost per hazard cell entered. */
   hazardDamage: number
   food: number[]
-  /** Per-kind max energy; kinds absent here use `defaultMaxEnergy`. */
-  maxEnergy?: UnitMaxEnergy
-  /** Default max energy for kinds `maxEnergy` does not name. Defaults to 100. */
-  defaultMaxEnergy?: number
   /**
-   * Energy one food replenishes. Absent means `DEFAULT_FOOD_ENERGY`, which is
-   * the default max energy, so at the shipped defaults one food is a full tank
-   * and every meal grows the eater — the rule food has always played by. Set
-   * it below a kind's max and that kind needs several meals to fill, and grows
-   * on the one that fills it. See the food phase for what growth now costs.
+   * The per-unit-type configuration groups: what a meal is worth to a kind,
+   * how much energy it can hold, the weight it is created with. Read through
+   * `unitTypeConfig`, indexed by the kind in hand — every absent group and
+   * every absent field takes the shipped default, so an unconfigured game
+   * plays exactly as it always did. Creation weight is not settlement's to
+   * apply (placement is the caller's, see VENDOR.md); the other two are read
+   * here, in the food phase, and in the promotion clamp of `settleTurn`.
    */
-  foodEnergy?: number
+  unitConfig?: UnitConfig
   /**
    * Teams that play under regicide — those configured with at least one king,
    * whether or not a king is still standing. A team here loses every remaining
@@ -137,12 +136,6 @@ export interface TurnResolution {
   subStepCount: number
 }
 
-/**
- * The energy one food replenishes when a setup names no amount — the same
- * number as the default max energy, so an unconfigured game plays the rule
- * food has always played: one meal, a full tank, one weight.
- */
-export const DEFAULT_FOOD_ENERGY = 100
 
 /**
  * The id the `presence` cells are handed to the grammar under. Nothing reads
@@ -153,10 +146,8 @@ const PRESENCE = "@presence"
 
 export const resolveTurn = (input: ResolveTurnInput): TurnResolution => {
   const { units, boardWidth, boardHeight } = input
-  const defaultMaxEnergy = input.defaultMaxEnergy ?? 100
-  const maxEnergyFor = (type: UnitType): number =>
-    input.maxEnergy?.[type] ?? defaultMaxEnergy
-  const foodEnergy = input.foodEnergy ?? DEFAULT_FOOD_ENERGY
+  const configFor = (type: UnitType): ResolvedUnitTypeConfig =>
+    unitTypeConfig(input.unitConfig, type)
 
   // 1. Movement grammar: every staged cell becomes the path the unit walks,
   // one cell per sub-step. An illegal or missing destination falls back to the
@@ -268,13 +259,13 @@ export const resolveTurn = (input: ResolveTurnInput): TurnResolution => {
   // each food is a separate meal settled in turn: add, clamp, grow if full.
   const food = [...input.food]
   Object.entries(board).forEach(([id, unit]) => {
-    const max = maxEnergyFor(typeOf.get(id) as UnitType)
+    const { maxEnergy, foodEnergy } = configFor(typeOf.get(id) as UnitType)
     for (;;) {
       const index = food.indexOf(unit.occupancy[0])
       if (index === -1) return
       food.splice(index, 1)
-      unit.energy = Math.min(max, unit.energy + foodEnergy)
-      if (unit.energy < max) continue
+      unit.energy = Math.min(maxEnergy, unit.energy + foodEnergy)
+      if (unit.energy < maxEnergy) continue
       unit.occupancy.push(unit.occupancy[unit.occupancy.length - 1])
     }
   })

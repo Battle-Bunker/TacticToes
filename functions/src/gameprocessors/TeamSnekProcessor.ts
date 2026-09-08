@@ -5,6 +5,7 @@ import {
   Move,
   StartedGameSetup,
   Turn,
+  UnitConfig,
   UnitDeath,
   UnitType,
   Winner,
@@ -25,7 +26,7 @@ import {
   Settlement,
   settleTurn,
 } from "./engine/settleTurn"
-import { DEFAULT_FOOD_ENERGY } from "./engine/resolveTurn"
+import { unitConfigOf, unitTypeConfig } from "./engine/unitConfig"
 import {
   Spawner,
   randomSpawner,
@@ -102,9 +103,17 @@ export class TeamSnekProcessor {
   // Whether this game fields any chess piece at all — fixed at game start,
   // like the roster it is read off.
   private readonly pieceGame: boolean
+  // The per-unit-type configuration this game plays with, legacy fields
+  // already folded in. Fixed at game start, like the roster.
+  private readonly unitConfig: UnitConfig
 
   constructor(gameState: GameState) {
     this.gameSetup = gameState.setup
+    // The per-unit-type configuration, read ONCE through the one reader: a
+    // game document written before the group existed states its settings as
+    // `maxEnergyPerUnit` and a global `foodEnergy`, and `unitConfigOf` folds
+    // those into the group here rather than anywhere the rules are applied.
+    this.unitConfig = unitConfigOf(gameState.setup)
     this.gameState = gameState
     this.maxTurns = resolveMaxTurns(gameState.setup.maxTurns)
     this.foodSpawnRate = resolveFoodSpawnRate(gameState.setup.foodSpawnRate)
@@ -178,7 +187,7 @@ export class TeamSnekProcessor {
     // Initialize player energy (per-type configurable max, default 100)
     const initialEnergy: { [playerID: string]: number } = {}
     gamePlayers.forEach((player) => {
-      initialEnergy[player.id] = this.maxEnergyFor(player.unitType)
+      initialEnergy[player.id] = this.unitConfigFor(player.unitType).maxEnergy
     })
 
     // Initialize scores: spawn weight, exactly as every later turn computes
@@ -332,8 +341,7 @@ export class TeamSnekProcessor {
       hazards,
       hazardDamage: this.hazardDamage(),
       food: gameState.newFood,
-      maxEnergy: this.gameSetup.maxEnergyPerUnit,
-      foodEnergy: this.foodEnergy(),
+      unitConfig: this.unitConfig,
       regicideTeamIDs: this.regicideTeams,
     }
   }
@@ -401,17 +409,10 @@ export class TeamSnekProcessor {
     })
   }
 
-  // Max energy for a unit type: per-type config with a universal default of
-  // 100. An absent type means "snake".
-  private maxEnergyFor(type: UnitType | undefined): number {
-    return this.gameSetup.maxEnergyPerUnit?.[type ?? "snake"] ?? 100
-  }
-
-  // Energy one food replenishes. Default 100 — the default max energy — so an
-  // unconfigured game keeps food's old meaning: one meal fills the tank, and
-  // filling the tank is what grows the eater.
-  private foodEnergy(): number {
-    return this.gameSetup.foodEnergy ?? DEFAULT_FOOD_ENERGY
+  // One kind's configuration group — food energy, max energy, starting weight
+  // — with every default applied. An absent type means "snake".
+  private unitConfigFor(type: UnitType | undefined) {
+    return unitTypeConfig(this.unitConfig, type ?? "snake")
   }
 
   // Energy lost per hazard square entered (and per turn spent sitting on

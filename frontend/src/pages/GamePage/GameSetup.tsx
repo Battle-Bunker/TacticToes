@@ -42,7 +42,14 @@ import {
   Theme,
   Typography,
 } from "@mui/material";
-import { Centaur, Team, UnitCounts, UnitMaxEnergy, UnitType, UserProfile } from "@shared/types/Game";
+import { Centaur, Team, UnitConfig, UnitCounts, UnitType, UnitTypeConfig, UserProfile } from "@shared/types/Game";
+import {
+  DEFAULT_FOOD_ENERGY,
+  DEFAULT_MAX_ENERGY,
+  DEFAULT_STARTING_WEIGHT,
+  unitConfigOf,
+  unitTypeConfig,
+} from "../../utils/unitConfig";
 import { PIECE_GLYPHS, SNAKE_GLYPH } from "../../utils/unitGlyphs";
 import { useGameStateContext } from "../../context/GameStateContext";
 
@@ -70,6 +77,9 @@ const DEFAULT_MAX_TURNS = 100;
 type BoardSize = keyof typeof BOARD_SIZE_MAPPING | "custom";
 
 const UNIT_COUNT_OPTIONS = [0, 1, 2, 3, 4, 5, 6, 7, 8];
+// A starting weight is a unit's opening occupancy, so it is bounded well below
+// the board rather than by the energy scale.
+const MAX_STARTING_WEIGHT = 20;
 const MAX_UNITS_PER_TEAM = 26;
 
 const UNIT_TYPES: { type: UnitType; label: string }[] = [
@@ -360,9 +370,6 @@ const GameSetup: React.FC = () => {
   const [foodSpawnRate, setFoodSpawnRate] = useState<number>(
     gameSetup?.foodSpawnRate ?? 0.5,
   );
-  const [foodEnergy, setFoodEnergy] = useState<number>(
-    gameSetup?.foodEnergy ?? 100,
-  );
   const [invulnerabilityPotionEnabled, setInvulnerabilityPotionEnabled] = useState<boolean>(
     gameSetup?.invulnerabilityPotionEnabled ?? false,
   );
@@ -373,8 +380,11 @@ const GameSetup: React.FC = () => {
   const [pawnPromotionWeight, setPawnPromotionWeight] = useState<number>(
     gameSetup?.pawnPromotionWeight ?? 10,
   );
-  const [maxEnergyPerUnit, setMaxEnergyPerUnit] = useState<UnitMaxEnergy>(
-    gameSetup?.maxEnergyPerUnit ?? {},
+  // The per-unit-type configuration groups, read through the one reader so a
+  // setup written before the group existed shows its old `maxEnergyPerUnit`
+  // and global `foodEnergy` in the right boxes.
+  const [unitConfig, setUnitConfig] = useState<UnitConfig>(
+    unitConfigOf(gameSetup ?? undefined),
   );
 
   const [tournamentMode, setTournamentMode] = useState<boolean>(
@@ -538,11 +548,10 @@ const GameSetup: React.FC = () => {
       setFertileGroundDensity(gameSetup.fertileGroundDensity ?? 30);
       setFertileGroundClustering(gameSetup.fertileGroundClustering ?? 10);
       setFoodSpawnRate(gameSetup.foodSpawnRate ?? 0.5);
-      setFoodEnergy(gameSetup.foodEnergy ?? 100);
       setInvulnerabilityPotionEnabled(gameSetup.invulnerabilityPotionEnabled ?? false);
       setInvulnerabilityPotionSpawnRate(gameSetup.invulnerabilityPotionSpawnRate ?? 0.15);
       setPawnPromotionWeight(gameSetup.pawnPromotionWeight ?? 10);
-      setMaxEnergyPerUnit(gameSetup.maxEnergyPerUnit ?? {});
+      setUnitConfig(unitConfigOf(gameSetup));
 
       setTournamentMode(gameSetup.tournamentMode ?? false);
       setRemainingRounds(gameSetup.remainingRounds ?? 1);
@@ -634,11 +643,11 @@ const GameSetup: React.FC = () => {
   const unitCount = (type: UnitType): number => unitCounts[type] ?? 0;
   const totalUnits = totalUnitCount(unitCounts);
 
-  // Whether a unit type's max energy is meaningful for this setup. Normally
-  // that means "some are fielded", but a pawn promotes to a queen, so queen
-  // max energy matters whenever pawns are in play even with zero queens
+  // Whether a unit type's configuration is meaningful for this setup. Normally
+  // that means "some are fielded", but a pawn promotes to a queen, so the
+  // queen's group matters whenever pawns are in play even with zero queens
   // configured. Queen is the only promotion-reachable type.
-  const maxEnergyApplies = (type: UnitType): boolean =>
+  const unitConfigApplies = (type: UnitType): boolean =>
     unitCount(type) > 0 || (type === "queen" && unitCount("pawn") > 0);
 
   const handleUnitCountChange = async (unitType: UnitType, value: number) => {
@@ -709,14 +718,30 @@ const GameSetup: React.FC = () => {
     setLocal: setPawnPromotionWeight,
   });
 
-  // Per-unit-type max energy. Same sanitize/mirror/write shape as
-  // setupNumberField, but the setting is one key of the maxEnergyPerUnit map
-  // rather than a whole scalar field.
-  const handleMaxEnergyChange = async (unitType: UnitType, raw: number) => {
-    const sanitizedValue = Math.max(1, Math.min(1000, Math.round(raw)));
-    const next: UnitMaxEnergy = { ...maxEnergyPerUnit, [unitType]: sanitizedValue };
-    setMaxEnergyPerUnit(next);
-    await updateDoc(gameDocRef, { maxEnergyPerUnit: next });
+  // One field of one unit type's configuration group. Same sanitize/mirror/
+  // write shape as setupNumberField, but the setting lives inside the group
+  // rather than being a scalar field of the setup.
+  //
+  // The edited group is written whole, with every default made explicit, and
+  // the one cross-field rule is enforced here: a meal can never be worth more
+  // energy than the kind can hold, so lowering a max lowers the food with it
+  // and food is capped by the max on the way in.
+  const handleUnitConfigChange = async (
+    unitType: UnitType,
+    field: keyof UnitTypeConfig,
+    raw: number,
+  ) => {
+    const limit = field === "startingWeight" ? MAX_STARTING_WEIGHT : 1000;
+    const value = Math.max(1, Math.min(limit, Math.round(raw)));
+    const group: UnitTypeConfig = { ...unitTypeConfig(unitConfig, unitType), [field]: value };
+    if (field === "maxEnergy") {
+      group.foodEnergy = Math.min(group.foodEnergy ?? DEFAULT_FOOD_ENERGY, value);
+    } else if (field === "foodEnergy") {
+      group.foodEnergy = Math.min(value, group.maxEnergy ?? DEFAULT_MAX_ENERGY);
+    }
+    const next: UnitConfig = { ...unitConfig, [unitType]: group };
+    setUnitConfig(next);
+    await updateDoc(gameDocRef, { unitConfig: next });
   };
 
   // Handle max turns configuration (writes only while the limit is enabled,
@@ -791,14 +816,6 @@ const GameSetup: React.FC = () => {
     max: 5,
     round: (v) => Math.round(v * 4) / 4,
     setLocal: setFoodSpawnRate,
-  });
-
-  // How much one food is worth. Only energy accounting: no preview regen.
-  const handleFoodEnergyChange = setupNumberField("foodEnergy", {
-    min: 1,
-    max: 1000,
-    round: Math.round,
-    setLocal: setFoodEnergy,
   });
 
   const handleTeamClustersToggle = setupToggleField("teamClustersEnabled", {
@@ -1285,33 +1302,80 @@ const GameSetup: React.FC = () => {
                   helperText="A promoted queen restarts at weight 1"
                 />
               )}
-              {/* Max energy, one small input per unit type in play. Queens
-                  count as "in play" whenever pawns are, because a pawn
-                  promotes into one. */}
+              {/* One configuration group per unit type in play: what a meal
+                  is worth to it, how much energy it holds, and the weight it
+                  spawns at. Queens count as "in play" whenever pawns are,
+                  because a pawn promotes into one. */}
               <Typography variant="body2" sx={{ mt: 1.5 }} gutterBottom>
-                Max energy (default 100)
+                Unit configuration
               </Typography>
-              <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
-                {UNIT_TYPES.filter(({ type }) => maxEnergyApplies(type)).map(
+              <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1.5 }}>
+                {UNIT_TYPES.filter(({ type }) => unitConfigApplies(type)).map(
                   ({ type, label }) => {
+                    const config = unitTypeConfig(unitConfig, type);
                     const promotedOnly = type === "queen" && unitCount("queen") === 0;
                     return (
-                      <NumericField
+                      <Box
                         key={type}
-                        label={label}
-                        size="small"
-                        value={maxEnergyPerUnit[type]}
-                        placeholder="100"
-                        onChange={(value) => handleMaxEnergyChange(type, value)}
-                        disabled={started || isConfigDisabled}
-                        sx={{ width: promotedOnly ? 150 : 110 }}
-                        min={1}
-                        max={1000}
-                        step={1}
-                        round={Math.round}
-                        emptyValue={100}
-                        helperText={promotedOnly ? "Promoted pawns" : undefined}
-                      />
+                        sx={{
+                          border: "2px solid black",
+                          padding: 1,
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 1,
+                          width: 190,
+                        }}
+                      >
+                        <Typography variant="body2">
+                          {label}
+                          {promotedOnly ? " (promoted pawns)" : ""}
+                        </Typography>
+                        <NumericField
+                          label="Food energy"
+                          size="small"
+                          value={config.foodEnergy}
+                          onChange={(value) =>
+                            handleUnitConfigChange(type, "foodEnergy", value)
+                          }
+                          disabled={started || isConfigDisabled}
+                          min={1}
+                          max={config.maxEnergy}
+                          step={1}
+                          round={Math.round}
+                          emptyValue={DEFAULT_FOOD_ENERGY}
+                          helperText={`Default ${DEFAULT_FOOD_ENERGY}; at most the max`}
+                        />
+                        <NumericField
+                          label="Max energy"
+                          size="small"
+                          value={config.maxEnergy}
+                          onChange={(value) =>
+                            handleUnitConfigChange(type, "maxEnergy", value)
+                          }
+                          disabled={started || isConfigDisabled}
+                          min={1}
+                          max={1000}
+                          step={1}
+                          round={Math.round}
+                          emptyValue={DEFAULT_MAX_ENERGY}
+                          helperText={`Default ${DEFAULT_MAX_ENERGY}; a full tank grows`}
+                        />
+                        <NumericField
+                          label="Starting weight"
+                          size="small"
+                          value={config.startingWeight}
+                          onChange={(value) =>
+                            handleUnitConfigChange(type, "startingWeight", value)
+                          }
+                          disabled={started || isConfigDisabled}
+                          min={1}
+                          max={MAX_STARTING_WEIGHT}
+                          step={1}
+                          round={Math.round}
+                          emptyValue={DEFAULT_STARTING_WEIGHT[type]}
+                          helperText={`Default ${DEFAULT_STARTING_WEIGHT[type]}`}
+                        />
+                      </Box>
                     );
                   },
                 )}
@@ -1334,8 +1398,6 @@ const GameSetup: React.FC = () => {
               onFertileGroundClusteringChange={handleFertileGroundClusteringChange}
               foodSpawnRate={foodSpawnRate}
               onFoodSpawnRateChange={handleFoodSpawnRateChange}
-              foodEnergy={foodEnergy}
-              onFoodEnergyChange={handleFoodEnergyChange}
               boardWidth={gameSetup.boardWidth}
               boardHeight={gameSetup.boardHeight}
               usePreviewBoard={usePreviewBoard}
