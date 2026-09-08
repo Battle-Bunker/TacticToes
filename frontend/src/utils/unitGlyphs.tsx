@@ -1,5 +1,6 @@
 import React from "react"
 import { UnitType } from "@shared/types/Game"
+import { isPieceType } from "./unitTypes"
 
 // Filled chess glyphs per piece unit type.
 export const PIECE_GLYPHS: { [T in Exclude<UnitType, "snake">]: string } = {
@@ -19,7 +20,7 @@ export const PIECE_GLYPHS: { [T in Exclude<UnitType, "snake">]: string } = {
 export const SNAKE_GLYPH = "🐍"
 
 export const pieceGlyph = (unitType: UnitType | undefined): string | null =>
-  unitType && unitType !== "snake" ? PIECE_GLYPHS[unitType] : null
+  isPieceType(unitType) ? PIECE_GLYPHS[unitType] : null
 
 // Coiled-body path (a spiral wound outward from the centre, plus a short
 // neck leading up to the head) and the head/eye/tongue paths below are the

@@ -329,14 +329,9 @@ export async function processTurn(
       currentTurn.endTime
     )
 
-    if (!currentTurn) {
-      logger.info("No current turn found for the game.", { gameID })
-      return { newTurnCreated: false }
-    }
-
     const processor = new TeamSnekProcessor(gameState)
 
-    const nextTurn = await processor.applyMoves(currentTurn, latestMoves)
+    const nextTurn = processor.applyMoves(currentTurn, latestMoves)
     const now = Date.now()
     const turnDurationMillis = gameState.setup.maxTurnTime * 1000
     const endTime = new Date(now + turnDurationMillis)

@@ -2,6 +2,9 @@ import React from "react"
 import {
   ANVIL_COLORS,
   ANVIL_ICON,
+  BOLT_DEFAULT_FILL,
+  BOLT_ICON,
+  BOLT_LINE,
   HAZARD_COLORS,
   HAZARD_ICON,
   ICON_COLORS,
@@ -10,7 +13,7 @@ import {
 } from "./renderer"
 
 // The board's marks, as SVG, for the parts of the page that are not the board:
-// one unit icon, one anvil, one hazard triangle, drawn from THE SAME path data
+// one unit icon, one anvil, one bolt, one hazard triangle, drawn from THE SAME path data
 // the canvas renderer draws them from. Sharing the data rather than redrawing it
 // is what keeps a scoreboard row and the cell it describes showing the same
 // mark — a second copy of a rook would drift the first time either was touched.
@@ -79,6 +82,32 @@ export const AnvilIcon: React.FC<{ height?: number }> = ({ height = 12 }) => (
       fill={ANVIL_COLORS.fill}
       stroke={ANVIL_COLORS.line}
       strokeWidth={1.8}
+      strokeLinejoin="round"
+    />
+  </svg>
+)
+
+/**
+ * The ENERGY mark: a lightning bolt, sized to a line of text and filled with
+ * the same red/orange/green reading the board tints it with — so a scoreboard
+ * row and the unit's own cell can never disagree about how charged it is.
+ */
+export const BoltIcon: React.FC<{ height?: number; color?: string }> = ({
+  height = 12,
+  color,
+}) => (
+  <svg
+    viewBox={`0 0 ${BOLT_ICON.w} ${BOLT_ICON.h}`}
+    height={height}
+    width={(height * BOLT_ICON.w) / BOLT_ICON.h}
+    style={{ display: "block", flexShrink: 0 }}
+    aria-hidden="true"
+  >
+    <path
+      d={BOLT_ICON.d}
+      fill={color || BOLT_DEFAULT_FILL}
+      stroke={BOLT_LINE}
+      strokeWidth={1.6}
       strokeLinejoin="round"
     />
   </svg>

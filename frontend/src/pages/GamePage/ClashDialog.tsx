@@ -283,7 +283,7 @@ const ClashDialog: React.FC<ClashDialogProps> = ({
                 <Swatch color={recovery.color} />
                 <Typography sx={{ fontSize: 14, flex: 1, minWidth: 0 }}>
                   {`${recovery.teamName} ${recovery.letter}`.trim()} ran out of
-                  health{recovery.cause === "hazard" ? " on hazard damage" : ""}{" "}
+                  energy{recovery.cause === "hazard" ? " on hazard damage" : ""}{" "}
                   and halted here — recovered by eating, and finished the turn
                   alive.
                 </Typography>

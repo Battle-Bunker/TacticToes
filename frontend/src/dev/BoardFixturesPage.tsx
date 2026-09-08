@@ -71,8 +71,8 @@ const LIVING_UNIT = {
   unitType: "snake" as const,
   body: [ORIGIN],
   weight: 3,
-  health: 80,
-  maxHealth: 100,
+  energy: 80,
+  maxEnergy: 100,
   invulnerabilityLevel: 0,
 }
 

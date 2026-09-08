@@ -1,14 +1,13 @@
 import { Box, Typography } from "@mui/material"
 import React, { useEffect, useRef, useState } from "react"
-import { AnvilIcon, HazardIcon, UnitIcon } from "../../board/BoardIcons"
+import { AnvilIcon, BoltIcon, HazardIcon, UnitIcon } from "../../board/BoardIcons"
 import {
   BoardModel,
   BoardTeam,
   BoardUnit,
   RosterUnit,
-  STAT_ICON,
-  healthBarColor,
-  healthFraction,
+  energyBarColor,
+  energyFraction,
   invulnerabilityMark,
   invulnerabilityTurnsRemaining,
 } from "../../board/renderer"
@@ -16,7 +15,7 @@ import {
 // ── The scoreboard ──────────────────────────────────────────────────────────
 //
 // One team group per team, each headed by that team's NAME and its SCORE, and
-// listing every unit the team has ever had: letter, type, weight, health and
+// listing every unit the team has ever had: letter, type, weight, energy and
 // any invulnerability, with the dead kept in place — struck through, greyed,
 // scoring nothing.
 //
@@ -39,7 +38,7 @@ const byLetter = (a: Row, b: Row): number =>
 
 /**
  * A team's SCORE, computed exactly as the game engine computes it
- * (TeamSnekProcessor.getTeamScore): the summed weight of its LIVING units — a
+ * (engine/adjudicate.ts::weighTeams): the summed weight of its LIVING units — a
  * snake's body length, a piece's stack weight. A dead unit contributes nothing,
  * which is why only the units still on the board are summed.
  */
@@ -141,7 +140,7 @@ const UnitRow: React.FC<{ row: Row; turn: number }> = ({ row, turn }) => {
     !dead && invulnLevel !== 0
       ? invulnerabilityTurnsRemaining(unit, turn)
       : null
-  const frac = dead ? 0 : healthFraction(unit)
+  const frac = dead ? 0 : energyFraction(unit)
 
   return (
     <Box
@@ -205,10 +204,8 @@ const UnitRow: React.FC<{ row: Row; turn: number }> = ({ row, turn }) => {
             {unit.weight}
           </Stat>
           {!dead && (
-            <Stat title="Health">
-              <Box component="span" sx={{ color: healthBarColor(frac) }}>
-                {STAT_ICON.health}
-              </Box>
+            <Stat title="Energy">
+              <BoltIcon height={12} color={energyBarColor(frac)} />
               <Box
                 sx={{
                   width: 48,
@@ -223,11 +220,11 @@ const UnitRow: React.FC<{ row: Row; turn: number }> = ({ row, turn }) => {
                   sx={{
                     width: `${frac * 100}%`,
                     height: "100%",
-                    backgroundColor: healthBarColor(frac),
+                    backgroundColor: energyBarColor(frac),
                   }}
                 />
               </Box>
-              {unit.health}
+              {unit.energy}
             </Stat>
           )}
           {invulnTurns != null && (

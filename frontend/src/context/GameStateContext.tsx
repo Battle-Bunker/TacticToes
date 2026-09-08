@@ -10,10 +10,13 @@ import {
 import {
   collection,
   doc,
+  DocumentData,
+  DocumentReference,
   limit,
   or,
   orderBy,
   query,
+  Query,
   Timestamp,
   where,
 } from "firebase/firestore"
@@ -26,7 +29,10 @@ import React, {
 } from "react"
 import { CenteredLoader } from "../components/CenteredLoader"
 import { db } from "../firebaseConfig"
-import { useFirestoreSubscription } from "../hooks/useFirestoreSubscription"
+import {
+  FirestoreSubscriptionOptions,
+  useFirestoreSubscription,
+} from "../hooks/useFirestoreSubscription"
 import { useUser } from "./UserContext"
 
 interface GameStateContextType {
@@ -71,19 +77,41 @@ export const GameStateProvider: React.FC<{
   const intervalIdRef = useRef<NodeJS.Timeout | null>(null)
   const initialGameIDRef = useRef(gameID)
 
+  // Every subscription below asks for the same three things: its errors and its
+  // query timeouts reported into this provider's state, and a timeout/error
+  // message pair that is nothing but the subscription's SUBJECT wrapped in
+  // fixed text. So the subject is stated once, as the label, and both messages
+  // come off it — five labels rather than five labels and ten sentences that
+  // can quietly stop agreeing with them.
+  //
+  // A hook, not a plain helper: it calls useFirestoreSubscription, so the five
+  // calls below are five hook calls in a fixed order, exactly as before.
+  const useSubscription = <
+    T extends DocumentReference<DocumentData> | Query<DocumentData>,
+  >(
+    label: string,
+    options: Omit<
+      FirestoreSubscriptionOptions<T>,
+      "logLabel" | "timeoutMessage" | "errorMessage" | "onError" | "onQueryTimeoutChange"
+    >,
+  ): void =>
+    useFirestoreSubscription<T>({
+      ...options,
+      logLabel: label,
+      timeoutMessage: `Loading ${label} is taking longer than usual.`,
+      errorMessage: `An error occurred while fetching ${label}.`,
+      onError: setError,
+      onQueryTimeoutChange: setQueryTimedOut,
+    })
+
   // Subscribe to game document. This is the one subscription that drives the
   // connectivity banner: it is the realtime feed the player is actually
   // playing off, so its cache/server state is what "connected" means here.
   // (Previously all five subscriptions raced last-writer-wins over the same
   // connectivity flag.)
-  useFirestoreSubscription({
+  useSubscription("game data", {
     buildTarget: () => doc(db, `sessions/${sessionName}/games`, gameID),
     deps: [gameID, sessionName],
-    logLabel: "game",
-    timeoutMessage: "Loading game data is taking longer than usual.",
-    errorMessage: "An error occurred while fetching game updates.",
-    onError: setError,
-    onQueryTimeoutChange: setQueryTimedOut,
     onConnectivityChange: (connected) =>
       setConnectivityStatus(connected ? 'connected' : 'disconnected'),
     onSnapshot: (docSnapshot) => {
@@ -102,14 +130,9 @@ export const GameStateProvider: React.FC<{
   })
 
   // Subscribe to session document
-  useFirestoreSubscription({
+  useSubscription("session data", {
     buildTarget: () => doc(db, `sessions/${sessionName}`),
     deps: [sessionName],
-    logLabel: "session",
-    timeoutMessage: "Loading session data is taking longer than usual.",
-    errorMessage: "An error occurred while fetching session updates.",
-    onError: setError,
-    onQueryTimeoutChange: setQueryTimedOut,
     onSnapshot: (docSnapshot) => {
       if (!docSnapshot.exists()) {
         setError("Session not found.")
@@ -121,15 +144,10 @@ export const GameStateProvider: React.FC<{
   })
 
   // Subscribe to game setup
-  useFirestoreSubscription({
+  useSubscription("game setup", {
     buildTarget: () =>
       gameID ? doc(db, `sessions/${sessionName}/setups`, gameID) : null,
     deps: [gameID, sessionName],
-    logLabel: "game setup",
-    timeoutMessage: "Loading game setup is taking longer than usual.",
-    errorMessage: "An error occurred while fetching game setup.",
-    onError: setError,
-    onQueryTimeoutChange: setQueryTimedOut,
     onSnapshot: (docSnapshot) => {
       if (!docSnapshot.exists()) {
         setError("Game setup not found.")
@@ -142,7 +160,7 @@ export const GameStateProvider: React.FC<{
 
   // Subscribe to the "centaurs" collection: everything public plus the
   // current user's own private centaurs.
-  useFirestoreSubscription({
+  useSubscription("centaurs data", {
     buildTarget: () =>
       userID === ""
         ? null
@@ -154,18 +172,13 @@ export const GameStateProvider: React.FC<{
             )
           ),
     deps: [userID],
-    logLabel: "centaurs",
-    timeoutMessage: "Loading centaurs data is taking longer than usual.",
-    errorMessage: "An error occurred while fetching centaurs data.",
-    onError: setError,
-    onQueryTimeoutChange: setQueryTimedOut,
     onSnapshot: (snapshot) => {
       setCentaurs(snapshot.docs.map((doc) => doc.data() as Centaur))
     },
   })
 
   // Subscribe to moveStatuses collection
-  useFirestoreSubscription({
+  useSubscription("move status data", {
     buildTarget: () =>
       gameID
         ? query(
@@ -175,11 +188,6 @@ export const GameStateProvider: React.FC<{
           )
         : null,
     deps: [gameID, sessionName],
-    logLabel: "move status",
-    timeoutMessage: "Loading move status data is taking longer than usual.",
-    errorMessage: "An error occurred while fetching move updates.",
-    onError: setError,
-    onQueryTimeoutChange: setQueryTimedOut,
     onSnapshot: (querySnapshot) => {
       if (!querySnapshot.empty) {
         setLatestMoveStatus(querySnapshot.docs[0].data() as MoveStatus)

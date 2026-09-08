@@ -72,7 +72,7 @@
         "dy": 0
       }
     },
-    "playerHealth": {
+    "playerEnergy": {
       "t1": 99,
       "t1#2": 99,
       "t2": 99,
@@ -195,7 +195,7 @@
         "dy": 0
       }
     },
-    "playerHealth": {
+    "playerEnergy": {
       "t1#2": 98,
       "t2": 98,
       "t2#2": 98
@@ -291,7 +291,7 @@
         "dy": 0
       }
     },
-    "playerHealth": {
+    "playerEnergy": {
       "t1#2": 97,
       "t2": 97,
       "t2#2": 97
@@ -387,7 +387,7 @@
         "dy": 1
       }
     },
-    "playerHealth": {
+    "playerEnergy": {
       "t1#2": 96,
       "t2": 96,
       "t2#2": 96
@@ -483,7 +483,7 @@
         "dy": 1
       }
     },
-    "playerHealth": {
+    "playerEnergy": {
       "t1#2": 95,
       "t2": 95,
       "t2#2": 95
@@ -572,7 +572,7 @@
         "dy": 1
       }
     },
-    "playerHealth": {
+    "playerEnergy": {
       "t1#2": 94,
       "t2": 94,
       "t2#2": 94
@@ -661,7 +661,7 @@
         "dy": 0
       }
     },
-    "playerHealth": {
+    "playerEnergy": {
       "t1#2": 93,
       "t2": 93,
       "t2#2": 93
@@ -749,7 +749,7 @@
         "dy": 0
       }
     },
-    "playerHealth": {
+    "playerEnergy": {
       "t1#2": 92,
       "t2": 92,
       "t2#2": 92
@@ -849,7 +849,7 @@
         "dy": 0
       }
     },
-    "playerHealth": {
+    "playerEnergy": {
       "t1#2": 91,
       "t2": 91,
       "t2#2": 91
@@ -949,7 +949,7 @@
         "dy": -1
       }
     },
-    "playerHealth": {
+    "playerEnergy": {
       "t1#2": 90,
       "t2": 90,
       "t2#2": 90
